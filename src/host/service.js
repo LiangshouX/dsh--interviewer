@@ -26,7 +26,7 @@ import { join, resolve } from 'node:path'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { ensureDataRoot, resolveConfig } from './paths.js'
 import {
-  appendJsonl, isDirectory, listDirIfExists, readJsonIfExists, readJsonl,
+  appendJsonl, isDirectory, isFile, listDirIfExists, readJsonIfExists, readJsonl,
   readTextIfExists, resolveWithin, writeJsonAtomic, writeTextAtomic,
 } from './fsx.js'
 import { fetchJobDescription } from './jd.js'
@@ -58,6 +58,15 @@ const PROFILE_ID_PATTERN = /^[A-Za-z0-9一-鿿][A-Za-z0-9_一-鿿-]{0,80}$/
 
 /** Maximum accepted resume / JD size (characters). */
 const MAX_DOC_CHARS = 200000
+
+/**
+ * How many transcript rows the panel gets in one poll.
+ *
+ * The panel polls every 1.5 s during an interview; the transcript grows with
+ * every turn. This caps the payload so a long interview cannot turn the
+ * poll into a steady stream of deserialization work in the renderer.
+ */
+const DEFAULT_TRANSCRIPT_LIMIT = 200
 
 /**
  * One interview session, with every operation the callers need.
@@ -136,11 +145,13 @@ export class InterviewService {
         status: meta.status ?? SESSION_STATUS.DRAFT,
         createdAt: meta.createdAt ?? 0,
         updatedAt: meta.updatedAt ?? 0,
-        hasResume: (await readTextIfExists(join(dir, 'resume.txt'))) !== undefined,
-        hasJd: (await readTextIfExists(join(dir, 'jd.txt'))) !== undefined,
+        // **只判断存不存在，不要读内容。** 简历/报告可能有几十 KB，
+        // 一次列表读二十场就是白读几 MB——而列表每 6 秒轮询一次。
+        hasResume: await isFile(join(dir, 'resume.txt')),
+        hasJd: await isFile(join(dir, 'jd.txt')),
         checklistCount: checklist.items.length,
         probedCount: checklist.items.filter(item => item.probed === true).length,
-        hasReport: (await readTextIfExists(join(dir, 'report.md'))) !== undefined,
+        hasReport: await isFile(join(dir, 'report.md')),
         dir,
       })
     }
@@ -528,9 +539,15 @@ export class InterviewService {
   /**
    * Everything the UI (and the agent) needs about one session in one call.
    *
+   * **转录有上限。** 面板在面试中每 1.5 秒轮询一次，而转录会随面试线性
+   * 变长——不封顶的话，一场两小时的面试会让每次轮询传几百 KB，
+   * 在 Electron 里变成持续的反序列化开销。所以这里只回传最近
+   * `transcriptLimit` 轮，并如实报出总数与是否被截断。
+   *
    * @param {string} sessionId
+   * @param {{transcriptLimit?: number}} options
    */
-  async getState(sessionId) {
+  async getState(sessionId, options = {}) {
     const [meta, checklist, transcript, documents, recordings, report] = await Promise.all([
       this.getSession(sessionId),
       this.getChecklist(sessionId),
@@ -539,6 +556,11 @@ export class InterviewService {
       this.listRecordings(sessionId),
       this.getReport(sessionId),
     ])
+    const limit = Number.isFinite(options.transcriptLimit) && options.transcriptLimit > 0
+      ? Math.trunc(options.transcriptLimit)
+      : DEFAULT_TRANSCRIPT_LIMIT
+    const revision = await this.revisionOf(meta.dir)
+    const visible = transcript.length > limit ? transcript.slice(-limit) : transcript
     const turns = transcript.filter(row => row.role !== 'system')
     const asked = turns.filter(row => row.role === 'interviewer').length
     const answered = turns.filter(row => row.role === 'candidate').length
@@ -552,10 +574,18 @@ export class InterviewService {
         startedAt: meta.startedAt ?? 0,
         endedAt: meta.endedAt ?? 0,
         updatedAt: meta.updatedAt,
+        profileId: meta.profileId ?? '',
         dir: meta.dir,
       },
+      // revision：内容没变就**不要重新渲染**。
+      // 面板在面试中每 1.5 秒轮询一次；没有这个字段，每一次轮询都会让
+      // 整个面板（包含几百行转录）重建一次——那正是「插件让 DSH 卡顿」
+      // 最常见的来源。有了它，客户端比对相同就跳过 setState。
+      revision,
       checklist,
-      transcript,
+      transcript: visible,
+      transcriptTotal: transcript.length,
+      transcriptTruncated: transcript.length > visible.length,
       documents: {
         resumeChars: documents.resume.length,
         jdChars: documents.jd.length,
@@ -760,6 +790,29 @@ export class InterviewService {
   }
 
   // ── internals ────────────────────────────────────────────────────────────
+
+  /**
+   * A content fingerprint of one session.
+   *
+   * Derived from file **mtime + size**, not from timestamps inside the
+   * content — so "nothing changed" really means "nothing changed", and the
+   * same value survives a restart.
+   *
+   * @param {string} dir
+   */
+  async revisionOf(dir) {
+    const files = ['session.json', 'checklist.json', 'transcript.jsonl', 'report.md']
+    const parts = []
+    for (const name of files) {
+      try {
+        const info = await stat(join(dir, name))
+        parts.push(`${name}:${Math.trunc(info.mtimeMs)}:${info.size}`)
+      } catch {
+        parts.push(`${name}:-`)
+      }
+    }
+    return parts.join('|')
+  }
 
   /**
    * Bump the session's `updatedAt`.

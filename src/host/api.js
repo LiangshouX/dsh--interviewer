@@ -174,7 +174,10 @@ async function readResource(service, segments, query) {
   }
   if (head === 'sessions') {
     if (rest.length === 0) return { sessions: await service.listSessions() }
-    const state = await service.getState(rest[0])
+    const limit = Number(query.transcriptLimit)
+    const state = await service.getState(rest[0], {
+      transcriptLimit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+    })
     return state
   }
   if (head === 'profiles') {

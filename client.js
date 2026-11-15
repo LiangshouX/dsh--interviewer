@@ -627,7 +627,7 @@ window.__ModuleLoader__.load({
       return h('div', { style: S.card }, [
         h('div', { key: 'k1', style: S.cardHead }, [
           h('div', { key: 'k2', style: S.cardTitle }, props.title),
-          props.extra !== undefined ? h('div', { key: 'k1', style: { marginLeft: 'auto' } }, props.extra) : null,
+          props.extra !== undefined ? h('div', { key: 'dup-1', style: { marginLeft: 'auto' } }, props.extra) : null,
         ]),
         props.children,
       ])
@@ -673,7 +673,7 @@ window.__ModuleLoader__.load({
         h('div', { key: 'k8', style: { flex: '1 1 auto', minWidth: 0 } }, [
           h('div', { key: 'k9', style: { fontSize: 13, color: item.probed === true ? C.faint : C.text, textDecoration: item.probed === true ? 'line-through' : 'none' } }, item.topic),
           item.why !== undefined && item.why !== ''
-            ? h('div', { key: 'k2', style: { fontSize: 11.5, color: C.faint, marginTop: 3, lineHeight: 1.5 } }, item.why)
+            ? h('div', { key: 'dup-2', style: { fontSize: 11.5, color: C.faint, marginTop: 3, lineHeight: 1.5 } }, item.why)
             : null,
         ]),
         h('span', { key: 'k10', style: { fontSize: 11, color: C.faint, whiteSpace: 'nowrap' } }, item.probed === true ? '已问' : '待问'),
@@ -888,8 +888,8 @@ window.__ModuleLoader__.load({
       return h('div', null, [
         h(Section, { key: 'k11', title: '岗位档案', extra: h('span', { style: S.hint }, '同一个岗位第二次面试，直接继承上次的考点基线') }, [
           profiles.length === 0
-            ? h('div', { key: 'k3', style: S.hint }, '还没有岗位档案。面试完一场后，在 DSH 对话里让助手用 interview_save_profile 把它归档下来；或者用 interview_sync_profile 回写。')
-            : h('div', null, profiles.map(profile => h('div', {
+            ? h('div', { key: 'dup-3', style: S.hint }, '还没有岗位档案。面试完一场后，在 DSH 对话里让助手用 interview_save_profile 把它归档下来；或者用 interview_sync_profile 回写。')
+            : h('div', { key: 'k97' }, profiles.map(profile => h('div', {
               key: profile.id,
               style: { display: 'flex', gap: 10, alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.lineSoft}` },
             }, [
@@ -901,7 +901,7 @@ window.__ModuleLoader__.load({
               h('button', { key: 'k15', style: S.btn(false, busy), onClick: () => applyProfile(profile.id) }, '继承这份'),
             ]))),
           session?.session?.profileId !== undefined && session?.session?.profileId !== ''
-            ? h('div', { key: 'k4', style: { ...S.row, marginTop: 10 } }, [
+            ? h('div', { key: 'dup-4', style: { ...S.row, marginTop: 10 } }, [
               h('span', { key: 'k16', style: S.hint }, `本场已关联档案 ${session.session.profileId}`),
               h('button', { key: 'k17', style: S.btn(false, busy), onClick: () => syncProfile(session.session.profileId) }, '把本场回写进档案'),
             ])
@@ -925,7 +925,7 @@ window.__ModuleLoader__.load({
           h('div', { key: 'k24', style: S.row }, [
             h('button', { key: 'k25', style: S.btn(true, busy || resumeText.trim() === ''), onClick: saveResume }, '保存简历'),
             session?.documents?.resumeChars > 0
-              ? h('span', { key: 'k5', style: S.hint }, `盘上已有 ${session.documents.resumeChars} 字，粘贴后保存会覆盖它`)
+              ? h('span', { key: 'dup-5', style: S.hint }, `盘上已有 ${session.documents.resumeChars} 字，粘贴后保存会覆盖它`)
               : null,
           ]),
         ]),
@@ -947,7 +947,7 @@ window.__ModuleLoader__.load({
             ]),
           ]),
           jdNote !== undefined
-            ? h('div', { key: 'k6',
+            ? h('div', { key: 'dup-6',
               style: {
                 padding: '8px 11px', borderRadius: 8, marginBottom: 12, fontSize: 12, lineHeight: 1.6,
                 border: `1px solid ${jdNote.ok ? C.green : C.amber}44`,
@@ -969,10 +969,10 @@ window.__ModuleLoader__.load({
 
         h(Section, { key: 'k36', title: '考点清单', extra: h('span', { style: S.hint }, `${session?.stats?.checklistProbed ?? 0}/${session?.stats?.checklistTotal ?? 0} 已问`)}, [
           checklist.length === 0
-            ? h('div', { key: 'k7', style: S.hint }, '清单还是空的。在 DSH 对话里让助手用 interview-prep 技能基于简历与 JD 做调研，产出后用 interview_save_checklist 落盘——这里就会显示出来。')
-            : h('div', null, checklist.map(item => h(ChecklistRow, { key: item.id, item }))),
+            ? h('div', { key: 'dup-7', style: S.hint }, '清单还是空的。在 DSH 对话里让助手用 interview-prep 技能基于简历与 JD 做调研，产出后用 interview_save_checklist 落盘——这里就会显示出来。')
+            : h('div', { key: 'k98' }, checklist.map(item => h(ChecklistRow, { key: item.id, item }))),
           session?.stats?.adjustments > 0
-            ? h('div', { key: 'k8', style: { ...S.hint, marginTop: 10 } }, `面试中调整过 ${session.stats.adjustments} 次——每一次调整都记了理由，事后复盘会用到。`)
+            ? h('div', { key: 'dup-8', style: { ...S.hint, marginTop: 10 } }, `面试中调整过 ${session.stats.adjustments} 次——每一次调整都记了理由，事后复盘会用到。`)
             : null,
         ]),
       ])
@@ -1147,10 +1147,10 @@ window.__ModuleLoader__.load({
                 style: { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', display: media.stream === undefined ? 'none' : 'block' },
               }),
               media.stream === undefined
-                ? h('div', { key: 'k9', style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.faint, fontSize: 12 } }, '摄像头未开')
+                ? h('div', { key: 'dup-9', style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.faint, fontSize: 12 } }, '摄像头未开')
                 : null,
               recorder.recording
-                ? h('div', { key: 'k10',
+                ? h('div', { key: 'dup-10',
                   style: {
                     position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 6,
                     padding: '3px 9px', borderRadius: 999, background: '#00000088', fontSize: 11, color: '#fff',
@@ -1196,7 +1196,7 @@ window.__ModuleLoader__.load({
               // 输入电平
               h('div', { key: 'k48', style: { marginBottom: 12 } }, [
                 h('div', { key: 'k49', style: { ...S.label, display: 'flex', justifyContent: 'space-between' } }, [
-                  h('span', null, asr.active ? '正在聆听…' : '输入电平'),
+                  h('span', { key: 'k99' }, asr.active ? '正在聆听…' : '输入电平'),
                   h('span', { key: 'k50', style: { color: asr.active ? C.green : C.faint } }, asr.active ? '识别中' : '待命'),
                 ]),
                 h('div', { key: 'k51', style: { height: 8, borderRadius: 999, background: C.bg, border: `1px solid ${C.line}`, overflow: 'hidden' } }, [
@@ -1205,13 +1205,13 @@ window.__ModuleLoader__.load({
               ]),
 
               media.error !== undefined
-                ? h('div', { key: 'k11', style: { ...S.hint, color: C.amber, marginBottom: 10, lineHeight: 1.6 } }, media.error)
+                ? h('div', { key: 'dup-11', style: { ...S.hint, color: C.amber, marginBottom: 10, lineHeight: 1.6 } }, media.error)
                 : null,
               asr.error !== undefined
-                ? h('div', { key: 'k12', style: { ...S.hint, color: C.amber, marginBottom: 10, lineHeight: 1.6 } }, asr.error)
+                ? h('div', { key: 'dup-12', style: { ...S.hint, color: C.amber, marginBottom: 10, lineHeight: 1.6 } }, asr.error)
                 : null,
               asr.interim !== ''
-                ? h('div', { key: 'k13', style: { ...S.hint, color: C.dim, marginBottom: 10, fontStyle: 'italic' } }, asr.interim)
+                ? h('div', { key: 'dup-13', style: { ...S.hint, color: C.dim, marginBottom: 10, fontStyle: 'italic' } }, asr.interim)
                 : null,
             ]),
           ]),
@@ -1219,8 +1219,8 @@ window.__ModuleLoader__.load({
 
         h(Section, { key: 'k53', title: '当前问题', extra: h('span', { style: S.hint }, '助手提问会出现在这里（由助手写入转录）') }, [
           lastQuestion === undefined
-            ? h('div', { key: 'k14', style: S.hint }, '还没有问题。在 DSH 对话里让助手开始提问——助手用 interview_record_turn 记录每一轮，这里会实时显示。')
-            : h('div', { style: { fontSize: 14, lineHeight: 1.7 } }, lastQuestion.text),
+            ? h('div', { key: 'dup-14', style: S.hint }, '还没有问题。在 DSH 对话里让助手开始提问——助手用 interview_record_turn 记录每一轮，这里会实时显示。')
+            : h('div', { key: 'dup-1x', style: { fontSize: 14, lineHeight: 1.7 } }, lastQuestion.text),
         ]),
 
         h(Section, { key: 'k54', title: '我的回答', extra: h('span', { style: S.hint }, '识别结果只是草稿，可以改') }, [
@@ -1256,16 +1256,16 @@ window.__ModuleLoader__.load({
             h('button', { key: 'k64', style: S.btn(false, answer.trim() === ''), onClick: copyAnswer }, '复制（粘到对话框）'),
             h('div', { key: 'k65', style: { marginLeft: 'auto', display: 'flex', gap: 8 } }, [
               running
-                ? h('button', { key: 'k15', style: S.btn(false, false), onClick: finishInterview }, '结束面试')
-                : h('button', { style: S.btn(true, false), onClick: startInterview }, '开始面试'),
+                ? h('button', { key: 'dup-15', style: S.btn(false, false), onClick: finishInterview }, '结束面试')
+                : h('button', { key: 'dup-2x', style: S.btn(true, false), onClick: startInterview }, '开始面试'),
             ]),
           ]),
         ]),
 
         h(Section, { key: 'k66', title: '转录' }, [
           transcript.length === 0
-            ? h('div', { key: 'k16', style: S.hint }, '还没有转录。')
-            : h('div', { style: { maxHeight: 320, overflowY: 'auto' } }, transcript.map((row, index) => h('div', {
+            ? h('div', { key: 'dup-16', style: S.hint }, '还没有转录。')
+            : h('div', { key: 'dup-3x', style: { maxHeight: 320, overflowY: 'auto' } }, transcript.map((row, index) => h('div', {
               key: `${row.ts}-${index}`,
               style: { display: 'flex', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.lineSoft}` },
             }, [
@@ -1276,13 +1276,13 @@ window.__ModuleLoader__.load({
             ]))),
         ]),
 
-        h(Section, { key: 'k70', title: '录像与录音', extra: recorder.clip !== undefined ? h('button', { key: 'k17', style: S.btn(true, false), onClick: saveClip }, '保存到本机') : undefined }, [
+        h(Section, { key: 'k70', title: '录像与录音', extra: recorder.clip !== undefined ? h('button', { key: 'dup-17', style: S.btn(true, false), onClick: saveClip }, '保存到本机') : undefined }, [
           h('div', { key: 'k71', style: { ...S.row, marginBottom: 10 } }, [
             h('span', { key: 'k72', style: S.hint }, recorder.recording ? '正在录…' : recorder.clip !== undefined ? '有一段待保存的片段' : '没在录'),
           ]),
           (session?.recordings ?? []).length === 0
-            ? h('div', { key: 'k18', style: S.hint }, '还没有保存过片段。录像只是氛围功能，不开也能面试。')
-            : h('div', null, (session.recordings ?? []).map(item => h('div', {
+            ? h('div', { key: 'dup-18', style: S.hint }, '还没有保存过片段。录像只是氛围功能，不开也能面试。')
+            : h('div', { key: 'k100' }, (session.recordings ?? []).map(item => h('div', {
               key: item.name,
               style: { display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${C.lineSoft}`, fontSize: 12 },
             }, [
@@ -1304,8 +1304,8 @@ window.__ModuleLoader__.load({
       return h('div', null, [
         h(Section, { key: 'k76', title: '面试后分析', extra: h('span', { style: S.hint }, report !== '' ? `已生成 ${report.length} 字` : '还没生成') }, [
           report !== ''
-            ? h(Markdown, { key: 'k19', text: report })
-            : h('div', { style: S.hint }, '还没有报告。在 DSH 对话里让助手用 interview-conduct 技能收尾，它会调 interview_finish 把分析写进来。'),
+            ? h(Markdown, { key: 'dup-19', text: report })
+            : h('div', { key: 'dup-4x', style: S.hint }, '还没有报告。在 DSH 对话里让助手用 interview-conduct 技能收尾，它会调 interview_finish 把分析写进来。'),
         ]),
         h(Section, { key: 'k77', title: '统计' }, [
           h('div', { key: 'k78', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 } }, [
@@ -1386,7 +1386,7 @@ window.__ModuleLoader__.load({
             h('div', { key: 'k83', style: S.title }, '模拟面试间'),
             h('div', { key: 'k84', style: S.sub }, '简历 + JD → 一场有准备的面试'),
             config?.workspaceRoot !== undefined
-              ? h('div', { key: 'k20',
+              ? h('div', { key: 'dup-20',
                 style: { ...S.mono, fontSize: 10.5, color: C.faint, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 420 },
                 title: `${config.workspaceRoot.path}\n${config.workspaceRoot.reason ?? ''}`,
               }, `工作区：${config.workspaceRoot.path}`)
@@ -1401,7 +1401,7 @@ window.__ModuleLoader__.load({
         ]),
 
         notice !== undefined
-          ? h('div', { key: 'k21',
+          ? h('div', { key: 'dup-21',
             style: {
               padding: '8px 18px', fontSize: 12, display: 'flex', gap: 10, alignItems: 'center',
               background: notice.kind === 'error' ? `${C.red}14` : notice.kind === 'ok' ? `${C.green}12` : C.panel,
@@ -1409,7 +1409,7 @@ window.__ModuleLoader__.load({
             },
           }, [
             h('span', { key: 'k90', style: { fontWeight: 600 } }, notice.title),
-            notice.detail !== undefined ? h('span', { key: 'k22', style: { color: C.dim } }, notice.detail) : null,
+            notice.detail !== undefined ? h('span', { key: 'dup-22', style: { color: C.dim } }, notice.detail) : null,
             h('span', { key: 'k91', style: { marginLeft: 'auto', cursor: 'pointer', color: C.faint }, onClick: () => setNotice(undefined) }, '×'),
           ])
           : null,
@@ -1423,7 +1423,7 @@ window.__ModuleLoader__.load({
             },
           }, [
             rows.length === 0
-              ? h('div', { key: 'k23', style: S.hint }, '还没有面试会话。')
+              ? h('div', { key: 'dup-23', style: S.hint }, '还没有面试会话。')
               : rows.map(row => h('div', {
                 key: row.id,
                 style: {
@@ -1442,14 +1442,14 @@ window.__ModuleLoader__.load({
           // 主区
           h('div', { key: 'k96', style: { flex: '1 1 auto', minWidth: 0, overflowY: 'auto', padding: 18 } }, [
             session === undefined
-              ? h('div', { key: 'k24', style: { ...S.hint, padding: 40, textAlign: 'center' } }, '还没有面试。先新建一场，或者从左边选一场。')
+              ? h('div', { key: 'dup-24', style: { ...S.hint, padding: 40, textAlign: 'center' } }, '还没有面试。先新建一场，或者从左边选一场。')
               : tab === 'prepare'
-                ? h(PrepareView, { key: 'k25', session, config, onChanged: refreshAll, notify })
+                ? h(PrepareView, { key: 'dup-25', session, config, onChanged: refreshAll, notify })
                 : tab === 'live'
-                  ? h(LiveView, { key: 'k26', session, config, onChanged: refreshAll, notify })
-                  : h(ReportView, { session, config, onChanged: refreshAll, notify }),
+                  ? h(LiveView, { key: 'dup-26', session, config, onChanged: refreshAll, notify })
+                  : h(ReportView, { key: 'dup-5x', session, config, onChanged: refreshAll, notify }),
             sessionPoll.error !== undefined
-              ? h('div', { key: 'k27', style: { ...S.hint, color: C.amber, marginTop: 12 } }, `读不到会话状态：${sessionPoll.error}`)
+              ? h('div', { key: 'dup-27', style: { ...S.hint, color: C.amber, marginTop: 12 } }, `读不到会话状态：${sessionPoll.error}`)
               : null,
           ]),
         ]),

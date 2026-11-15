@@ -254,9 +254,46 @@ async function checkClient() {
   console.log(output.trim())
 }
 
+/**
+ * 性能闸门。
+ *
+ * 插件嵌在别人的主应用里——它慢一点，用户就会说「DSH 卡了」。
+ * 所以性能不是"有空再优化"，是**红线**：要有能测、能卡住回归的闸门。
+ *
+ *   node scripts/perf.mjs --check        # Host/HTTP 侧耗时与体积
+ *   node scripts/render-probe.mjs --check # 客户端渲染开销与「空闲轮询不重渲染」
+ *
+ * 两者都跑不动时（缺 react 等）跳过而不是失败。
+ */
+async function checkPerformance() {
+  for (const [script, label] of [['perf.mjs', '性能'], ['render-probe.mjs', '渲染开销']]) {
+    const path = join(ROOT, 'scripts', script)
+    if (!existsSync(path)) {
+      note(`scripts/${script} 不存在：${label}闸门无法运行`)
+      continue
+    }
+    const result = spawnSync(process.execPath, [path, '--check'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 300000,
+    })
+    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
+    if (/跳过：/.test(output) && result.status === 0) {
+      console.log(`· ${label}闸门跳过`)
+      continue
+    }
+    if (result.status !== 0) {
+      note(`${label}闸门未通过：\n${output.split('\n').filter(line => line.trim() !== '').slice(-10).join('\n')}`)
+      continue
+    }
+    console.log(output.trim())
+  }
+}
+
 await checkPluginHalf()
 await checkSyntax()
 await checkClient()
+await checkPerformance()
 
 // ── 5. 构建或校验 ──────────────────────────────────────────────────────────
 if (!onlyCheck) {

@@ -190,8 +190,30 @@ fetch(url, {redirect: follow, UA: 桌面 Chrome, Accept-Language: zh-CN})
 | 面试中 | 1.5 秒 |
 | 其他 | 6 秒 |
 | 会话列表 | 6 秒 |
+| 岗位档案 | 10 秒 |
 
 「面试中」刷得勤，是因为当前问题面板必须跟得上助手的提问。
+
+### revision：内容没变就不重渲染
+
+服务端每次返回 `revision`（由 `session.json` / `checklist.json` /
+`transcript.jsonl` / `report.md` 的 **mtime + size** 派生）。
+客户端比对相同就**跳过 setState**。
+
+这不是微优化，是红线：没有它，面板每 1.5 秒会重建一次（面试中视图有
+800+ 个 DOM 节点），在 Electron 里就是持续的主线程占用。
+
+对应的服务端逻辑在 `revisionOf()`，客户端逻辑在 `client.js` 的 `usePoll()`。
+
+### 转录封顶
+
+`GET /sessions/<id>?transcriptLimit=200`（默认 200）。响应里同时给出
+`transcriptTotal` 与 `transcriptTruncated`，界面据此说明「只显示最近 200 轮」。
+
+### 实测基线
+
+见 `AGENTS.md` §11 与 `scripts/perf.mjs`、`scripts/render-probe.mjs`。
+两条闸门都接在 `node scripts/build.mjs` 上。
 
 ## 9. 面板的三个页签
 
