@@ -1,0 +1,36 @@
+# dsh-interviewer bundle patch
+#
+# One Host row. The row id is the plugin id the Plugin Manager shows;
+# `name` must equal the package name so the client-modules scan resolves this
+# package's ./client bundle and serves it at /plugins/dsh-interviewer/client.js.
+#
+# `config` is replaced wholesale by any later patch layer, so every field the
+# plugin needs is restated here. The user edits their own layer
+# (`~/.dsh/profiles/<profile>/cordis.patch.yml`) to change these values; that
+# layer survives plugin upgrades.
+#
+#   dataRoot        面试记录落点。留空 = 自动（用户主目录下的 DSH-INTERVIEWER/）。
+#                   每个会话一个目录：sessions/<session-id>/。
+#   jdFetchTimeoutMs  JD 链接抓取超时（毫秒）。超时即视为失败，交给手动兜底。
+#   jdMaxChars      JD 抓取后保留的最大字符数（正文裁剪）。
+#   asrProvider     语音识别来源：auto | browser | none
+#                   auto = 运行时探测（浏览器 Web Speech 优先，失败则回落手输）。
+#   ttsProvider     语音播报来源：auto | browser | none
+#                   auto = 运行时探测（浏览器 SpeechSynthesis 优先）。
+#   ttsRate         语速（0.5 ~ 2）。
+#   ttsVoice        音色名（留空 = 用系统默认中文音色）。
+#   recordVideo     是否默认开启摄像头录像（true/false）。
+#   recordAudio     是否默认开启录音（true/false）。
+- insert:
+    - id: interviewer
+      name: 'dsh-interviewer'
+      config:
+        dataRoot: ''
+        jdFetchTimeoutMs: 15000
+        jdMaxChars: 20000
+        asrProvider: 'auto'
+        ttsProvider: 'auto'
+        ttsRate: 1.0
+        ttsVoice: ''
+        recordVideo: true
+        recordAudio: true

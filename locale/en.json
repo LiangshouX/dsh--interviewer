@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Mock interview room",
+    "description": "Turns a resume and a target job description into a prepared interview: checklist, follow-up questions, camera and recording, and an after-action report.",
+    "detail": "docs/DETAIL.md"
+  }
+}

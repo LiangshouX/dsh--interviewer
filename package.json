@@ -1,0 +1,61 @@
+{
+  "name": "dsh-interviewer",
+  "version": "0.1.0",
+  "description": "DSH 模拟面试插件：简历/JD 入场 → 考点清单调研 → 逐轮提问 → 录像录音 → 面试后分析报告",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
+    "docs",
+    "AGENTS.md",
+    "README.md",
+    "src/host",
+    "src/skills",
+    "build/skills",
+    "scripts"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/build.mjs --check",
+    "pack": "node scripts/pack.mjs",
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "interview",
+    "mock-interview",
+    "career"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-modules"
+      ]
+    }
+  }
+}

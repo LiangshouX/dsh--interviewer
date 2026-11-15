@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Mock interview room">
+  <title>Mock interview room</title>
+  <desc>Two facing chairs with a recording lamp between them: an interview booth.</desc>
+  <rect x="4" y="10" width="56" height="44" rx="8" fill="#14171d" stroke="#39404c" stroke-width="2"/>
+  <circle cx="32" cy="14" r="3.2" fill="#e5484d"/>
+  <g fill="#7c8494">
+    <rect x="12" y="24" width="14" height="10" rx="3" opacity="0.55"/>
+    <rect x="38" y="24" width="14" height="10" rx="3" opacity="0.55"/>
+  </g>
+  <g fill="#4c8dff" opacity="0.8">
+    <circle cx="19" cy="41" r="5"/>
+    <circle cx="45" cy="41" r="5"/>
+  </g>
+  <rect x="26" y="38" width="12" height="9" rx="2.5" fill="#30a46c" opacity="0.85"/>
+</svg>
