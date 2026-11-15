@@ -39,6 +39,7 @@
     "src/host",
     "src/skills",
     "build/skills",
+    "tests",
     "scripts"
   ],
   "scripts": {

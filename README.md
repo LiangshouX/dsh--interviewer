@@ -165,18 +165,32 @@ config:
 
 **全部留在本机，不上传。**
 
-## 发到 npm
+## 发到 npm / 安装
 
 包名 `dsh-interviewer`（仓库名是 `dsh--interviewer`，npm 上不能用连续连字符）。
 
+发布（需要 npm 账号）：
+
 ```bash
-npm login          # 需要你的 npm 账号
+npm login
 node scripts/pack.mjs
 npm publish --access public
 ```
 
-发布后别人可以 `dsh plugin install dsh-interviewer`，或下载 tarball 用
-`plugin_manager install_bundle` 安装。
+安装（三种方式）：
+
+```bash
+# 从 npm 公共市场
+dsh plugin --profile web add dsh-interviewer
+
+# 从 GitHub 仓库
+dsh plugin --profile web add github:LiangshouX/dsh--interviewer
+
+# 本地 tarball（开发时最常用）
+plugin_manager install_bundle  target: <仓库绝对路径>/release/dsh-interviewer-<version>.tgz
+```
+
+装完**重启 DSH**（Host 半边不热重载），然后在侧边栏点「模拟面试间」。
 
 ## 架构
 
