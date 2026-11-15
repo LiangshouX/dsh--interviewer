@@ -852,9 +852,10 @@ window.__ModuleLoader__.load({
       // 新问题自动朗读（可关）。
       useEffect(() => {
         if (lastQuestion === undefined) return
+        if (!speaking) return
         if (lastQuestion.text === lastQuestionRef.current) return
         lastQuestionRef.current = lastQuestion.text
-        if (speaking && config?.ttsProvider !== 'none') tts.speak(lastQuestion.text, { rate: config?.ttsRate ?? 1 })
+        if (config?.ttsProvider !== 'none') tts.speak(lastQuestion.text, { rate: config?.ttsRate ?? 1 })
       }, [lastQuestion, speaking, tts, config])
 
       const submitAnswer = useCallback(async () => {
@@ -975,7 +976,19 @@ window.__ModuleLoader__.load({
                 }, asr.active ? '停止识别' : '开始识别'),
                 h('button', {
                   style: S.btn(false, !tts.supported),
-                  onClick: () => (speaking ? tts.cancel() : setSpeaking(true)),
+                  onClick: () => {
+                    if (speaking) {
+                      tts.cancel()
+                      setSpeaking(false)
+                      return
+                    }
+                    setSpeaking(true)
+                    // 立刻读一遍当前问题——不然「打开朗读」看起来什么都没发生。
+                    if (lastQuestion !== undefined) {
+                      tts.speak(lastQuestion.text, { rate: config?.ttsRate ?? 1 })
+                      lastQuestionRef.current = lastQuestion.text
+                    }
+                  },
                 }, speaking ? '关闭朗读' : '朗读问题'),
               ]),
 
