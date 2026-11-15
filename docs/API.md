@@ -151,6 +151,48 @@ POST /interviewer/api/resume/extract  { "filename": "cv.pdf", "mimeType": "appli
 
 `ok: false` 时 `warnings` 必须说清**为什么**以及**怎么办**。
 
+### 2.4 语音识别
+
+```
+GET  /interviewer/api/asr          → 当前识别链路状态
+POST /interviewer/api/asr/transcribe  { "dataBase64": "…", "mimeType": "audio/webm", "language": "zh" }
+```
+
+状态：
+
+```jsonc
+{
+  "mode": "server | browser | none",
+  "source": "config | host | none",
+  "provider": "minimax",
+  "model": "whisper-1",
+  "endpoint": "https://…/audio/transcriptions",
+  "reason": "继承 DSH 宿主的 minimax 配置。",
+  "language": "zh"
+}
+```
+
+识别结果：
+
+```jsonc
+{ "ok": true, "mode": "server", "text": "…", "provider": "minimax", "model": "whisper-1", "warnings": [] }
+```
+
+`ok: false` 时 `reason` 说明原因（配置缺失 / 宿主读不到凭据 / HTTP 错误 / 超时）。
+
+### 2.5 岗位档案
+
+| 动作 | 请求体 | 说明 |
+|---|---|---|
+| `profiles` | `{title, company?, jdUrl?, jdText?, checklist?}` | 新建或更新档案 |
+| `profiles/<id>` | `{title?, company?, jdUrl?, jdText?, checklist?}` | 更新指定档案 |
+| `profiles/<id>/apply` | `{sessionId}` | 把档案的 JD 与清单灌进会话（清单标记 `inherited`） |
+| `profiles/<id>/sync` | `{sessionId, profileId?}` | 把会话成果回写档案 |
+| `profiles/<id>/delete` | `{}` | 删除档案 |
+
+读取：`GET /interviewer/api/profiles` → `{profiles: [...]}`；
+`GET /interviewer/api/profiles/<id>` → `{profile: {...}}`。
+
 ---
 
 ## 3. Agent 工具
@@ -164,6 +206,11 @@ POST /interviewer/api/resume/extract  { "filename": "cv.pdf", "mimeType": "appli
 | `interview_get_context` | `sessionId?` | 读全部上下文（简历/JD/清单/转录/统计） |
 | `interview_finish` | `sessionId? report` | 写报告并结束 |
 | `interview_list_sessions` | — | 列出会话 |
+| `interview_list_profiles` | — | 列出岗位档案 |
+| `interview_save_profile` | `id? title company? jdUrl? jdText? checklist?` | 归档一个岗位 |
+| `interview_apply_profile` | `sessionId? profileId` | 继承档案的 JD 与考点基线 |
+| `interview_sync_profile` | `sessionId? profileId?` | 把会话成果回写档案 |
+| `interview_asr_status` | — | 读识别链路状态与原因 |
 
 **每个工具都是 `src/host/service.js` 的一个方法**，不重新实现业务逻辑。
 

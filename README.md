@@ -32,8 +32,9 @@
 | **动态调整** | 面试中 `add` / `update` / `remove` / `probe` 四种调整，每次都留理由 |
 | **摄像头** | 现场画面 + 录像指示灯，权限被拒就降级，不阻断流程 |
 | **录音** | MediaRecorder 录制，停止后一键保存到本机会话目录 |
+| **语音识别** | 三级链路：插件配置 → 继承 DSH 宿主 → 浏览器原生 + 键盘兜底 |
 | **语音播报** | 助手的新问题自动朗读（Web Speech Synthesis），可关 |
-| **语音识别** | Web Speech API 转写候选人的回答；识别不可用时**键盘输入始终可用** |
+| **岗位档案** | 同一个岗位第二次面试，直接继承上次的考点基线；面试结束可回写更新 |
 | **分析报告** | 面试结束基于**转录原话**写报告，不是通用套话 |
 
 ## 安装
@@ -83,6 +84,45 @@ target: <仓库绝对路径>/release/dsh-interviewer-<version>.tgz
 
 助手调 `interview_finish` 写报告，面板「报告」页显示。
 
+## 语音识别怎么配
+
+插件的识别链路是**三级继承**，逐级向下：
+
+```
+① 插件配置     asrApiKey + asrBaseUrl 都有  → 服务端识别
+② 继承宿主     读 DSH 当前 provider 的端点与凭据 → 服务端识别
+③ 都没配       → 浏览器原生识别 + 键盘输入兜底（零配置，永远可用）
+```
+
+在 `cordis.patch.yml`（或你自己的 patch 层）里配：
+
+```yaml
+config:
+  asrProvider: 'auto'      # auto | browser | none
+  asrBaseUrl: 'https://api.example.com/v1'
+  asrApiKey: 'sk-...'
+  asrModel: 'whisper-1'
+  asrEndpoint: '/audio/transcriptions'   # OpenAI 兼容 multipart
+  asrLanguage: 'zh'
+```
+
+**继承不到就明说**：宿主有模型 ≠ 插件拿得到 ASR 凭据。拿不到时插件会
+回落浏览器识别，并在面板上写明原因——不会偷偷失败，也不会假装在用服务端。
+
+浏览器原生识别依赖 Chromium 的识别后端，在不少网络环境里连不上。
+**键盘输入永远可用**，识别失败不阻断面试。
+
+## 岗位档案（历史复用）
+
+一个岗位档案 = **一个岗位的考点基线**。
+
+- 面试前：`interview_apply_profile` 把档案的 JD 与清单灌进本场会话
+  （继承来的考点会标记为 `inherited`，不是伪装成本场的成果）
+- 面试后：`interview_sync_profile` 把当前 JD、最终清单、这场面试的记录回写档案
+- 准备阶段：基于继承的清单做**增量**调研——保留有效的、删掉过时的、加上新出现的
+
+数据在 `<dataRoot>/profiles/<profile-id>/profile.json`，与会话目录平级。
+
 ## 数据在哪
 
 默认落在 `~/DSH-INTERVIEWER/sessions/<session-id>/`：
@@ -97,7 +137,24 @@ report.md         分析报告
 recordings/       录像与录音
 ```
 
+```
+profiles/<profile-id>/profile.json   岗位档案：JD + 考点基线 + 历场记录
+```
+
 **全部留在本机，不上传。** 改位置：在 `cordis.patch.yml` 里设 `dataRoot`。
+
+## 发到 npm
+
+包名 `dsh-interviewer`（仓库名是 `dsh--interviewer`，npm 上不能用连续连字符）。
+
+```bash
+npm login          # 需要你的 npm 账号
+node scripts/pack.mjs
+npm publish --access public
+```
+
+发布后别人可以 `dsh plugin install dsh-interviewer`，或下载 tarball 用
+`plugin_manager install_bundle` 安装。
 
 ## 架构
 

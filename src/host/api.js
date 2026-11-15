@@ -16,6 +16,7 @@
  * and a JD are personal data; the door stays narrow.
  */
 import { API_PREFIX } from './paths.js'
+import { resolveAsrConfig, transcribe } from './asr.js'
 
 /** Largest JSON body the plugin accepts (resume + JD + a few fields). */
 const MAX_BODY_BYTES = 8 * 1024 * 1024
@@ -175,6 +176,13 @@ async function readResource(service, segments, query) {
     const state = await service.getState(rest[0])
     return state
   }
+  if (head === 'profiles') {
+    if (rest.length === 0) return { profiles: await service.listProfiles() }
+    return { profile: await service.getProfile(rest[0]) }
+  }
+  if (head === 'asr') {
+    return resolveAsrConfig(service)
+  }
   if (head === 'transcript') {
     return { transcript: await service.getTranscript(query.session ?? '') }
   }
@@ -237,6 +245,35 @@ async function runAction(service, segments, body) {
         })
       }
       throw new Error(`未知的简历操作：${rest.join('/')}`)
+    case 'asr': {
+      if (rest[0] === 'status') {
+        return resolveAsrConfig(service)
+      }
+      if (rest[0] === 'transcribe') {
+        return transcribe(service, body)
+      }
+      throw new Error(`未知的识别操作：${rest.join('/')}`)
+    }
+    case 'profiles': {
+      if (rest.length === 0) {
+        return { profile: await service.saveProfile(body) }
+      }
+      const profileId = rest[0]
+      const action = rest[1]
+      if (action === undefined) {
+        return { profile: await service.saveProfile({ ...body, id: profileId }) }
+      }
+      if (action === 'apply') {
+        return await service.applyProfile(body.sessionId ?? '', profileId)
+      }
+      if (action === 'sync') {
+        return await service.syncProfile(body.sessionId ?? '', body.profileId)
+      }
+      if (action === 'delete') {
+        return await service.deleteProfile(profileId)
+      }
+      throw new Error(`未知的档案操作：${action}`)
+    }
     default:
       throw new Error(`未知的操作：${segments.join('/')}`)
   }

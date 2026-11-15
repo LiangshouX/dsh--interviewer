@@ -60,6 +60,12 @@ export function resolveConfig(raw) {
     jdMaxChars: number(config.jdMaxChars, 500, 200000, 20000),
     asrProvider: oneOf(config.asrProvider, ['auto', 'browser', 'none'], 'auto'),
     ttsProvider: oneOf(config.ttsProvider, ['auto', 'browser', 'none'], 'auto'),
+    // 服务端语音识别（可选）：填了 key 与 baseUrl 就用服务端，否则继承宿主，再否则回落浏览器。
+    asrBaseUrl: text(config.asrBaseUrl) ?? '',
+    asrApiKey: text(config.asrApiKey) ?? '',
+    asrModel: text(config.asrModel) ?? '',
+    asrEndpoint: text(config.asrEndpoint) ?? '/audio/transcriptions',
+    asrLanguage: text(config.asrLanguage) ?? 'zh',
     ttsRate: number(config.ttsRate, 0.5, 2, 1),
     ttsVoice: text(config.ttsVoice) ?? '',
     recordVideo: flag(config.recordVideo, true),

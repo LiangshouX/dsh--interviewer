@@ -15,6 +15,7 @@
  *   - 模型负责**内容与判断**。
  */
 import { SESSION_STATUS } from './service.js'
+import { resolveAsrConfig } from './asr.js'
 
 /** Remove `undefined` members so the value is lossless JSON. */
 function clean(value) {
@@ -249,6 +250,66 @@ export function registerTools(ctx, service) {
       '列出所有面试会话（最新在前），含状态、是否有简历/JD、考点数量与是否已有报告。',
       {},
       async () => ({ sessions: await service.listSessions() }),
+    ),
+    tool(
+      'interview_list_profiles',
+      '列出所有岗位档案（考点基线）。同一个岗位第二次面试时，先看看这里有没有现成的清单可以继承。',
+      {},
+      async () => ({ profiles: await service.listProfiles() }),
+    ),
+    tool(
+      'interview_save_profile',
+      '把一个岗位归档成「岗位档案」：岗位名、公司、JD 正文、以及沉淀下来的考点清单。下次面同一个岗位可以直接继承。',
+      {
+        id: { type: 'string', description: '档案 id；省略则新建。' },
+        title: { type: 'string', description: '岗位名，例如「字节 · 高级后端工程师」。', required: true },
+        company: { type: 'string', description: '公司名（可选）。' },
+        jdUrl: { type: 'string', description: '岗位链接（可选）。' },
+        jdText: { type: 'string', description: 'JD 正文（可选）。' },
+        checklist: {
+          type: 'object',
+          description: '沉淀下来的考点清单，形如 { version, items: [...] }。省略则保留原有清单。',
+          additionalProperties: true,
+        },
+      },
+      async args => {
+        const profile = await service.saveProfile(args)
+        return {
+          id: profile.id,
+          title: profile.title,
+          items: Array.isArray(profile.checklist?.items) ? profile.checklist.items.length : 0,
+        }
+      },
+    ),
+    tool(
+      'interview_apply_profile',
+      '把岗位档案灌进一场面试：JD 与考点清单基线一并继承（继承来的考点会被标记出来）。',
+      {
+        sessionId: sessionProperty,
+        profileId: { type: 'string', description: '岗位档案 id。', required: true },
+      },
+      async args => {
+        const sessionId = await resolveSession(service, args.sessionId)
+        return await service.applyProfile(sessionId, args.profileId)
+      },
+    ),
+    tool(
+      'interview_sync_profile',
+      '把一场面试的成果回写进岗位档案：当前 JD、最终考点清单、以及这场面试的记录。下次面同一个岗位就有基线了。',
+      {
+        sessionId: sessionProperty,
+        profileId: { type: 'string', description: '回写到哪个档案；省略则回写这场面试自己关联的档案。' },
+      },
+      async args => {
+        const sessionId = await resolveSession(service, args.sessionId)
+        return await service.syncProfile(sessionId, args.profileId)
+      },
+    ),
+    tool(
+      'interview_asr_status',
+      '读当前语音识别链路的状态：服务端识别（继承宿主或插件配置）还是浏览器原生识别，以及为什么这么选。',
+      {},
+      async () => await resolveAsrConfig(service),
     ),
   ]
 

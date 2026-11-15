@@ -14,7 +14,13 @@
 #   jdFetchTimeoutMs  JD 链接抓取超时（毫秒）。超时即视为失败，交给手动兜底。
 #   jdMaxChars      JD 抓取后保留的最大字符数（正文裁剪）。
 #   asrProvider     语音识别来源：auto | browser | none
-#                   auto = 运行时探测（浏览器 Web Speech 优先，失败则回落手输）。
+#                   auto = 有 asrApiKey+asrBaseUrl 就走服务端；否则继承 DSH 宿主
+#                          的模型配置（读得到端点与凭据就用）；再否则回落浏览器原生。
+#   asrBaseUrl      服务端识别服务的基址，例如 https://api.example.com/v1
+#   asrApiKey       服务端识别服务的 API key（留空则尝试继承宿主）
+#   asrModel        识别模型，例如 whisper-1
+#   asrEndpoint     转写路径，默认 /audio/transcriptions（OpenAI 兼容 multipart）
+#   asrLanguage     识别语言提示，默认 zh
 #   ttsProvider     语音播报来源：auto | browser | none
 #                   auto = 运行时探测（浏览器 SpeechSynthesis 优先）。
 #   ttsRate         语速（0.5 ~ 2）。
@@ -29,6 +35,11 @@
         jdFetchTimeoutMs: 15000
         jdMaxChars: 20000
         asrProvider: 'auto'
+        asrBaseUrl: ''
+        asrApiKey: ''
+        asrModel: ''
+        asrEndpoint: '/audio/transcriptions'
+        asrLanguage: 'zh'
         ttsProvider: 'auto'
         ttsRate: 1.0
         ttsVoice: ''

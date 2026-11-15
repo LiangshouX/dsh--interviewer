@@ -189,6 +189,20 @@ window.__ModuleLoader__.load({
       })
     }
 
+    /** Read a blob as base64 (without the data-url prefix). */
+    function blobToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onerror = () => reject(new Error('读不出来'))
+        reader.onload = () => {
+          const result = String(reader.result ?? '')
+          const comma = result.indexOf(',')
+          resolve(comma >= 0 ? result.slice(comma + 1) : result)
+        }
+        reader.readAsDataURL(blob)
+      })
+    }
+
     /** Format a duration in milliseconds as `mm:ss`. */
     function formatClock(ms) {
       const total = Math.max(0, Math.floor(ms / 1000))
@@ -633,7 +647,7 @@ window.__ModuleLoader__.load({
 
     // ── views ─────────────────────────────────────────────────────────────
 
-    /** The preparation view: resume, JD, checklist. */
+    /** The preparation view: resume, JD, checklist, job profiles. */
     function PrepareView(props) {
       const { session, config, onChanged, notify } = props
       const [resumeText, setResumeText] = useState('')
@@ -641,6 +655,35 @@ window.__ModuleLoader__.load({
       const [jdUrl, setJdUrl] = useState('')
       const [busy, setBusy] = useState(false)
       const [jdNote, setJdNote] = useState(undefined)
+      const profilesPoll = usePoll(() => apiGet('profiles'), 10000, [])
+
+      const profiles = profilesPoll.data?.profiles ?? []
+
+      const applyProfile = useCallback(async profileId => {
+        setBusy(true)
+        try {
+          const result = await apiPost(`profiles/${profileId}/apply`, { sessionId: session.session.id })
+          notify(`已继承档案「${result.title}」的 ${result.items} 个考点`, '继承来的考点会被标记出来。', 'ok')
+          onChanged()
+        } catch (failure) {
+          notify('继承失败', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setBusy(false)
+        }
+      }, [session?.session?.id, onChanged, notify])
+
+      const syncProfile = useCallback(async profileId => {
+        setBusy(true)
+        try {
+          const result = await apiPost(`profiles/${profileId}/sync`, { sessionId: session.session.id })
+          notify(`已回写档案（${result.items} 个考点）`, '下次面同一个岗位就有基线了。', 'ok')
+          onChanged()
+        } catch (failure) {
+          notify('回写失败', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setBusy(false)
+        }
+      }, [session?.session?.id, onChanged, notify])
 
       useEffect(() => {
         setResumeText('')
@@ -749,6 +792,28 @@ window.__ModuleLoader__.load({
       const checklist = session?.checklist?.items ?? []
 
       return h('div', null, [
+        h(Section, { title: '岗位档案', extra: h('span', { style: S.hint }, '同一个岗位第二次面试，直接继承上次的考点基线') }, [
+          profiles.length === 0
+            ? h('div', { style: S.hint }, '还没有岗位档案。面试完一场后，在 DSH 对话里让助手用 interview_save_profile 把它归档下来；或者用 interview_sync_profile 回写。')
+            : h('div', null, profiles.map(profile => h('div', {
+              key: profile.id,
+              style: { display: 'flex', gap: 10, alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.lineSoft}` },
+            }, [
+              h('div', { style: { flex: '1 1 auto', minWidth: 0 } }, [
+                h('div', { style: { fontSize: 12.5 } }, profile.title),
+                h('div', { style: { fontSize: 11, color: C.faint, marginTop: 2 } },
+                  `${profile.checklistCount} 个考点 · ${profile.sessions.length} 场面试${profile.jdChars > 0 ? ` · JD ${profile.jdChars} 字` : ''}`),
+              ]),
+              h('button', { style: S.btn(false, busy), onClick: () => applyProfile(profile.id) }, '继承这份'),
+            ]))),
+          session?.session?.profileId !== undefined && session?.session?.profileId !== ''
+            ? h('div', { style: { ...S.row, marginTop: 10 } }, [
+              h('span', { style: S.hint }, `本场已关联档案 ${session.session.profileId}`),
+              h('button', { style: S.btn(false, busy), onClick: () => syncProfile(session.session.profileId) }, '把本场回写进档案'),
+            ])
+            : null,
+        ]),
+
         h(Section, { title: '简历', extra: h('span', { style: S.hint }, session?.documents?.resumeChars > 0 ? `已保存 ${session.documents.resumeChars} 字` : '还没存') }, [
           h('div', { style: { ...S.row, marginBottom: 12 } }, [
             h('label', { style: { ...S.btn(false, busy) } }, [
@@ -824,6 +889,14 @@ window.__ModuleLoader__.load({
       const { session, config, onChanged, notify } = props
       const media = useMedia()
       const recorder = useRecorder(media.stream)
+      // 服务端识别要**纯音频**：从音视频合流里单独取音轨。
+      const audioOnly = useMemo(() => {
+        if (media.stream === undefined) return undefined
+        const tracks = media.stream.getAudioTracks()
+        return tracks.length > 0 ? new MediaStream(tracks) : undefined
+      }, [media.stream])
+      const audioRecorder = useRecorder(audioOnly)
+      const asrStatus = usePoll(() => apiGet('asr'), undefined, [])
       const tts = useTts()
       const videoRef = useRef(null)
       const [answer, setAnswer] = useState('')
@@ -907,6 +980,24 @@ window.__ModuleLoader__.load({
           notify('保存失败', failure instanceof Error ? failure.message : String(failure), 'error')
         }
       }, [recorder, session?.session?.id, media.stream, onChanged, notify])
+
+      /** Send the recorded clip to the server-side recognizer. */
+      const transcribeClip = useCallback(async () => {
+        if (audioRecorder.clip === undefined) return
+        try {
+          const dataBase64 = await blobToBase64(audioRecorder.clip.blob)
+          const result = await apiPost('asr/transcribe', { dataBase64, mimeType: audioRecorder.clip.mimeType })
+          if (result.ok === true) {
+            setAnswer(previous => `${previous}${previous.trim() === '' ? '' : ' '}${result.text}`)
+            audioRecorder.reset()
+            notify('识别完成', '文本已追加到回答草稿，可以改。', 'ok')
+          } else {
+            notify('识别没成功', (result.warnings ?? []).join(' ') || result.reason || '', 'error')
+          }
+        } catch (failure) {
+          notify('识别失败', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [audioRecorder, notify])
 
       const startInterview = useCallback(async () => {
         try {
@@ -1023,6 +1114,27 @@ window.__ModuleLoader__.load({
         ]),
 
         h(Section, { title: '我的回答', extra: h('span', { style: S.hint }, '识别结果只是草稿，可以改') }, [
+          // 服务端识别：比浏览器原生稳，但**必须可配置、可回落**。
+          h('div', { style: { marginBottom: 10 } }, [
+            h('div', { style: { ...S.row, marginBottom: 6 } }, [
+              h('span', { style: { fontSize: 11.5, color: C.dim } },
+                asrStatus.data?.mode === 'server'
+                  ? `服务端识别：${asrStatus.data.provider ?? ''}${asrStatus.data.model ? ` / ${asrStatus.data.model}` : ''}（${asrStatus.data.source === 'host' ? '继承宿主' : '插件配置'}）`
+                  : '服务端识别未启用'),
+              h('button', {
+                style: S.btn(false, media.stream === undefined || asrStatus.data?.mode !== 'server'),
+                onClick: () => (audioRecorder.recording ? audioRecorder.stop() : audioRecorder.start()),
+                disabled: media.stream === undefined || asrStatus.data?.mode !== 'server',
+              }, audioRecorder.recording ? '停止录音' : '录一段'),
+              h('button', {
+                style: S.btn(true, audioRecorder.clip === undefined),
+                onClick: transcribeClip,
+              }, '识别这段'),
+            ]),
+            h('div', { style: { ...S.hint, lineHeight: 1.6 } },
+              asrStatus.data?.reason
+                ?? (asrStatus.error !== undefined ? `识别链路状态读不到：${asrStatus.error}` : '正在读识别链路状态…')),
+          ]),
           h('textarea', {
             style: S.textarea,
             value: answer,

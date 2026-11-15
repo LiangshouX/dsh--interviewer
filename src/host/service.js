@@ -50,6 +50,12 @@ export const CHECKLIST_LEVEL = {
 /** A session id is a path segment, so it is restricted on purpose. */
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 
+/**
+ * A profile id may contain Chinese (it is often derived from a job title),
+ * but never a path separator or a dot — so it cannot escape its root.
+ */
+const PROFILE_ID_PATTERN = /^[A-Za-z0-9一-鿿][A-Za-z0-9_一-鿿-]{0,80}$/
+
 /** Maximum accepted resume / JD size (characters). */
 const MAX_DOC_CHARS = 200000
 
@@ -74,6 +80,13 @@ export class InterviewService {
     const root = await ensureDataRoot(this.config.dataRoot)
     if (root.error !== undefined) throw new Error(root.error)
     return join(root.path, 'sessions')
+  }
+
+  /** The directory holding every job profile (岗位档案). */
+  async profilesDir() {
+    const root = await ensureDataRoot(this.config.dataRoot)
+    if (root.error !== undefined) throw new Error(root.error)
+    return join(root.path, 'profiles')
   }
 
   /**
@@ -147,6 +160,7 @@ export class InterviewService {
       createdAt: now,
       updatedAt: now,
       jdUrl: typeof input.jdUrl === 'string' ? input.jdUrl : '',
+      profileId: typeof input.profileId === 'string' ? input.profileId : '',
     }
     await writeJsonAtomic(join(dir, 'session.json'), meta)
     await writeJsonAtomic(join(dir, 'checklist.json'), { version: 1, items: [], adjustments: [] })
@@ -574,6 +588,168 @@ export class InterviewService {
     }
   }
 
+  // ── 岗位档案（历史复用） ───────────────────────────────────────────────
+
+  /**
+   * List every job profile.
+   *
+   * 一个岗位档案 = **一个岗位的考点基线**。同一个岗位第二次面试时，
+   * 直接继承上次的清单，而不是从零调研——这才是「准备」的复利。
+   *
+   * @returns {Promise<Array<object>>}
+   */
+  async listProfiles() {
+    const root = await this.profilesDir()
+    const names = await listDirIfExists(root)
+    const rows = []
+    for (const name of names) {
+      if (!SESSION_ID_PATTERN.test(name)) continue
+      const doc = await readJsonIfExists(join(root, name, 'profile.json'))
+      if (doc === undefined) continue
+      rows.push({
+        id: name,
+        title: doc.title ?? name,
+        company: doc.company ?? '',
+        jdUrl: doc.jdUrl ?? '',
+        jdChars: typeof doc.jdText === 'string' ? doc.jdText.length : 0,
+        checklistCount: Array.isArray(doc.checklist?.items) ? doc.checklist.items.length : 0,
+        sessions: Array.isArray(doc.sessions) ? doc.sessions : [],
+        createdAt: doc.createdAt ?? 0,
+        updatedAt: doc.updatedAt ?? 0,
+      })
+    }
+    rows.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    return rows
+  }
+
+  /**
+   * Read one job profile.
+   *
+   * @param {string} profileId
+   */
+  async getProfile(profileId) {
+    const dir = await this.profileDir(profileId)
+    const doc = await readJsonIfExists(join(dir, 'profile.json'))
+    if (doc === undefined) throw new Error(`岗位档案不存在：${profileId}`)
+    return { ...doc, dir }
+  }
+
+  /**
+   * Create or update a job profile.
+   *
+   * @param {{id?: string, title?: string, company?: string, jdUrl?: string, jdText?: string, checklist?: any}} input
+   */
+  async saveProfile(input = {}) {
+    const id = typeof input.id === 'string' && input.id.trim() !== '' ? input.id.trim() : makeProfileId(input.title)
+    const dir = await this.profileDir(id)
+    const existing = await readJsonIfExists(join(dir, 'profile.json'))
+    const now = Date.now()
+    const doc = {
+      id,
+      title: typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : existing?.title ?? id,
+      company: typeof input.company === 'string' ? input.company : existing?.company ?? '',
+      jdUrl: typeof input.jdUrl === 'string' ? input.jdUrl : existing?.jdUrl ?? '',
+      jdText: typeof input.jdText === 'string' ? input.jdText : existing?.jdText ?? '',
+      checklist: input.checklist !== undefined ? input.checklist : existing?.checklist ?? { version: 2, items: [] },
+      sessions: existing?.sessions ?? [],
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    }
+    await writeJsonAtomic(join(dir, 'profile.json'), doc)
+    return doc
+  }
+
+  /**
+   * Delete a job profile.
+   *
+   * @param {string} profileId
+   */
+  async deleteProfile(profileId) {
+    const dir = await this.profileDir(profileId)
+    const { rm } = await import('node:fs/promises')
+    await rm(dir, { recursive: true, force: true })
+    return { id: profileId, deleted: true }
+  }
+
+  /**
+   * Pour a profile into a session: the JD and the checklist baseline.
+   *
+   * The inherited items are **marked**, so the panel can show「这份清单是从
+   * 档案继承的」——继承不是伪装成本场面试的成果。
+   *
+   * @param {string} sessionId
+   * @param {string} profileId
+   */
+  async applyProfile(sessionId, profileId) {
+    const dir = await this.sessionDir(sessionId)
+    const profile = await this.getProfile(profileId)
+    const items = (profile.checklist?.items ?? []).map(item => ({
+      ...item,
+      inherited: true,
+      inheritedFrom: profile.id,
+      probed: false,
+    }))
+
+    if (typeof profile.jdText === 'string' && profile.jdText !== '') {
+      await this.setJd(sessionId, { text: profile.jdText, url: profile.jdUrl })
+    }
+    await writeJsonAtomic(join(dir, 'checklist.json'), {
+      version: 2,
+      updatedAt: Date.now(),
+      items,
+      adjustments: [{ at: Date.now(), op: 'inherit', reason: `继承岗位档案「${profile.title}」`, id: profile.id }],
+    })
+    const meta = await readJsonIfExists(join(dir, 'session.json'))
+    if (meta !== undefined) {
+      meta.profileId = profile.id
+      meta.updatedAt = Date.now()
+      await writeJsonAtomic(join(dir, 'session.json'), meta)
+    }
+    await this.touch(sessionId)
+    return { sessionId, profileId: profile.id, title: profile.title, items: items.length }
+  }
+
+  /**
+   * Write a session back into its profile: the JD as it stands, the checklist
+   * as it ended up, and the session id in the history.
+   *
+   * @param {string} sessionId
+   * @param {string|undefined} profileId defaults to the session's own profile
+   */
+  async syncProfile(sessionId, profileId) {
+    const session = await this.getSession(sessionId)
+    const target = typeof profileId === 'string' && profileId !== '' ? profileId : session.profileId
+    if (typeof target !== 'string' || target === '') {
+      throw new Error('这场面试没有关联岗位档案。请先指定要回写到哪个档案。')
+    }
+    const documents = await this.getDocuments(sessionId)
+    const checklist = await this.getChecklist(sessionId)
+    const saved = await this.saveProfile({
+      id: target,
+      title: session.title,
+      jdUrl: documents.jdMeta.url ?? '',
+      jdText: documents.jd,
+      checklist: { version: 2, items: checklist.items.map(item => ({ ...item, inherited: undefined })) },
+    })
+    const profile = await this.getProfile(target)
+    const sessions = [...new Set([...(profile.sessions ?? []), sessionId])]
+    await writeJsonAtomic(join(profile.dir, 'profile.json'), { ...profile, sessions, updatedAt: Date.now() })
+    return { sessionId, profileId: target, items: saved.checklist.items.length }
+  }
+
+  /**
+   * Resolve one profile directory, refusing anything that escapes the root.
+   *
+   * @param {string} profileId
+   */
+  async profileDir(profileId) {
+    if (typeof profileId !== 'string' || !PROFILE_ID_PATTERN.test(profileId)) {
+      throw new Error(`非法的档案 id：${String(profileId)}`)
+    }
+    const root = await this.profilesDir()
+    return resolveWithin(root, profileId)
+  }
+
   // ── internals ────────────────────────────────────────────────────────────
 
   /**
@@ -617,7 +793,24 @@ function normalizeChecklistItem(raw, index, existing = []) {
     probed: item.probed === true,
     note: typeof item.note === 'string' ? item.note : '',
     evidence: Array.isArray(item.evidence) ? item.evidence : [],
+    // 继承来的考点要**留痕**：这份清单是档案里的基线，不是本场面试的成果。
+    ...(item.inherited === true ? { inherited: true } : {}),
+    ...(typeof item.inheritedFrom === 'string' && item.inheritedFrom !== '' ? { inheritedFrom: item.inheritedFrom } : {}),
   }
+}
+
+/**
+ * Make a short, sortable profile id.
+ *
+ * The id stays **ASCII**: it is a directory name, and directory names travel
+ * between machines. The readable name lives in `title` instead.
+ *
+ * @param {string|undefined} title
+ */
+function makeProfileId(title) {
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 10)
+  const suffix = Math.random().toString(36).slice(2, 6)
+  return `pf-${stamp}-${suffix}`
 }
 
 /** Make a short, sortable session id. */

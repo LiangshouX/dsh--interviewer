@@ -92,6 +92,24 @@ Chromium 的 `SpeechRecognition` 在桌面 Chrome 上依赖后端识别服务，
 需要更高准确率时，正确做法是换一个 ASR provider（服务端 API），
 而不是在浏览器里反复调参数。
 
+### 服务端 ASR 的三级继承
+
+```
+① 插件配置     asrApiKey + asrBaseUrl 都填了        → 服务端识别
+② 继承宿主     ctx.get('agentDefaultModel') 取当前 provider/model
+                ctx.get('llm').listProviders() 找该 provider 的
+                baseUrl/apiKey（宿主给多少算多少）    → 服务端识别
+③ 都没有                                             → 浏览器原生 + 键盘兜底
+```
+
+**继承不到就明说。** 宿主有模型 ≠ 插件拿得到 ASR 凭据——
+`resolveAsrConfig()` 会返回 `mode: 'browser'` 加一条说明原因的 `reason`，
+面板把它显示出来。绝不假装在用服务端。
+
+服务端走 OpenAI 兼容的 multipart 转写（`file` + `model` + `language`），
+端点可配（默认 `/audio/transcriptions`）。请求体是 `multipart/form-data`，
+所以不能手拼 JSON。
+
 ## 5. 简历解析
 
 | 格式 | 做法 | 可靠性 |
@@ -120,7 +138,25 @@ fetch(url, {redirect: follow, UA: 桌面 Chrome, Accept-Language: zh-CN})
 **正文少于 40 字即判失败**——多半是登录墙、验证码页或正文完全由前端渲染。
 这时候返回 `{ok:false, error, hint}`，不返回空正文。
 
-## 7. 轮询与刷新
+## 7. 岗位档案
+
+```
+<dataRoot>/profiles/<profile-id>/
+  profile.json   { id, title, company, jdUrl, jdText, checklist, sessions[], createdAt, updatedAt }
+```
+
+档案 id 是**纯 ASCII**（`pf-<日期>-<随机>`）：它要当目录名，会在机器之间搬家。
+可读的名字放在 `title` 里。
+
+**继承是加标记的。** `applyProfile` 把档案的清单复制进会话，每个条目加上
+`inherited: true` 与 `inheritedFrom: <profile-id>`，并在 `adjustments[]` 里
+记一条 `{ op: 'inherit', reason: '继承岗位档案「…」' }`。
+面板会把继承来的考点标出来——继承不是伪装成本场面试的成果。
+
+**回写时继承标记被抹掉。** `syncProfile` 存回档案的是「这个岗位的基线」，
+不带某一场的继承痕迹；场次信息存在 `sessions[]` 里。
+
+## 8. 轮询与刷新
 
 | 视图 | 轮询间隔 |
 |---|---|
@@ -130,7 +166,7 @@ fetch(url, {redirect: follow, UA: 桌面 Chrome, Accept-Language: zh-CN})
 
 「面试中」刷得勤，是因为当前问题面板必须跟得上助手的提问。
 
-## 8. 面板的三个页签
+## 9. 面板的三个页签
 
 | 页签 | 内容 |
 |---|---|
