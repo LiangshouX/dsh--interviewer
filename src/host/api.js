@@ -167,7 +167,8 @@ async function readResource(service, segments, query) {
       ttsVoice: service.config.ttsVoice,
       recordVideo: service.config.recordVideo,
       recordAudio: service.config.recordAudio,
-      dataRoot: service.config.dataRoot,
+      // 工作区根：界面要能回答「数据存到哪儿了、为什么是这个目录」。
+      workspaceRoot: await service.location(),
       jdFetchTimeoutMs: service.config.jdFetchTimeoutMs,
     }
   }

@@ -9,8 +9,12 @@
 # (`~/.dsh/profiles/<profile>/cordis.patch.yml`) to change these values; that
 # layer survives plugin upgrades.
 #
-#   dataRoot        面试记录落点。留空 = 自动（用户主目录下的 DSH-INTERVIEWER/）。
-#                   每个会话一个目录：sessions/<session-id>/。
+#   workspaceRoot   工作区根——**所有数据都集中在这里**，一场面试一个子目录：
+#                     <root>/workspaces/<session-id>/   一场面试
+#                     <root>/profiles/<profile-id>/     岗位档案
+#                   留空 = 自动（用户主目录下的 DSH-INTERVIEWER/）。
+#                   想指到 D 盘这类大盘，就写绝对路径，例如 D:\DSH-INTERVIEW-ROOT。
+#                   （dataRoot 是旧名，仍然认，但请换用 workspaceRoot。）
 #   jdFetchTimeoutMs  JD 链接抓取超时（毫秒）。超时即视为失败，交给手动兜底。
 #   jdMaxChars      JD 抓取后保留的最大字符数（正文裁剪）。
 #   asrProvider     语音识别来源：auto | browser | none
@@ -31,7 +35,7 @@
     - id: interviewer
       name: 'dsh-interviewer'
       config:
-        dataRoot: ''
+        workspaceRoot: ''
         jdFetchTimeoutMs: 15000
         jdMaxChars: 20000
         asrProvider: 'auto'

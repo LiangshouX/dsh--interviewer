@@ -98,16 +98,28 @@ target: <仓库绝对路径>/release/dsh-interviewer-<version>.tgz
 
 ```yaml
 config:
-  asrProvider: 'auto'      # auto | browser | none
-  asrBaseUrl: 'https://api.example.com/v1'
-  asrApiKey: 'sk-...'
-  asrModel: 'whisper-1'
-  asrEndpoint: '/audio/transcriptions'   # OpenAI 兼容 multipart
+  asrProvider: 'auto'      # auto | minimax | openai | browser | none
+  asrBaseUrl: ''           # 留空 = 从宿主继承
+  asrApiKeyEnv: 'MINIMAX_API_KEY'   # 凭据引用（推荐）：走 DSH 的 credentials seam
+  asrApiKey: ''            # 明文 key（不推荐；密钥别进配置文件）
+  asrModel: ''             # 留空 = 按协议取默认
   asrLanguage: 'zh'
 ```
 
+**两套协议，不能混**（选错就是 404/400）：
+
+| 协议 | 端点 | 默认模型 | language 放哪 |
+|---|---|---|---|
+| `minimax` | `{base}/v1/speech_to_text` | `asr-1.0` | **HTTP 头** |
+| `openai` | `{base}/audio/transcriptions` | `whisper-1` | **表单字段** |
+
+协议按 provider / baseUrl 自动判定，也可以用 `asrProvider` 强制。
+
 **继承不到就明说**：宿主有模型 ≠ 插件拿得到 ASR 凭据。拿不到时插件会
 回落浏览器识别，并在面板上写明原因——不会偷偷失败，也不会假装在用服务端。
+
+**音频要转码**：浏览器只会录 webm/opus，而识别服务不收 webm。
+插件在上传前用 WebAudio 解码并重编码成 **16 kHz 单声道 WAV**。
 
 浏览器原生识别依赖 Chromium 的识别后端，在不少网络环境里连不上。
 **键盘输入永远可用**，识别失败不阻断面试。
@@ -125,23 +137,33 @@ config:
 
 ## 数据在哪
 
-默认落在 `~/DSH-INTERVIEWER/sessions/<session-id>/`：
+**一个总根，一场面试一个子目录。** 所有数据集中在同一个工作区根下，
+不散落在各处：
 
 ```
-session.json      元信息
-resume.txt        简历正文
-jd.txt / jd.json  JD 正文与来源
-checklist.json    考点清单（含调整留痕）
-transcript.jsonl  逐轮转录
-report.md         分析报告
-recordings/       录像与录音
+<workspaceRoot>/                        ← 一个总根，例如 D:\DSH-INTERVIEW-ROOT
+  workspaces/<session-id>/              ← 一场面试 = 一个子目录
+    session.json        元信息
+    resume.txt          简历正文
+    jd.txt / jd.json    JD 正文与来源
+    checklist.json      考点清单（含调整留痕）
+    transcript.jsonl    逐轮转录
+    report.md           分析报告
+    recordings/         录像与录音
+  profiles/<profile-id>/profile.json    ← 岗位档案：JD + 考点基线 + 历场记录
 ```
 
-```
-profiles/<profile-id>/profile.json   岗位档案：JD + 考点基线 + 历场记录
+指定总根：在 `cordis.patch.yml`（或你自己的 patch 层）里设
+
+```yaml
+config:
+  workspaceRoot: 'D:\DSH-INTERVIEW-ROOT'
 ```
 
-**全部留在本机，不上传。** 改位置：在 `cordis.patch.yml` 里设 `dataRoot`。
+留空则自动用用户主目录下的 `DSH-INTERVIEWER/`。
+面板顶部会显示当前总根路径，悬停可看**为什么是这个目录**。
+
+**全部留在本机，不上传。**
 
 ## 发到 npm
 

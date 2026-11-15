@@ -3,18 +3,23 @@
 ## 1. 会话目录
 
 ```
-<dataRoot>/sessions/<session-id>/
-  session.json       元信息：标题、角色、状态、时间戳
-  resume.txt         简历正文（纯文本）
-  jd.txt             JD 正文（纯文本）
-  jd.json            JD 来源：链接、抓取时间、分段、告警
-  checklist.json     考点清单（活文档）+ 调整留痕
-  transcript.jsonl   逐轮转录，一行一个 JSON
-  report.md          事后分析报告
-  recordings/        录像与录音
+<workspaceRoot>/                        ← 一个总根，例如 D:\DSH-INTERVIEW-ROOT
+  workspaces/<session-id>/              ← 一场面试 = 一个子目录
+    session.json       元信息：标题、角色、状态、时间戳
+    resume.txt         简历正文（纯文本）
+    jd.txt             JD 正文（纯文本）
+    jd.json            JD 来源：链接、抓取时间、分段、告警
+    checklist.json     考点清单（活文档）+ 调整留痕
+    transcript.jsonl   逐轮转录，一行一个 JSON
+    report.md          事后分析报告
+    recordings/        录像与录音
+  profiles/<profile-id>/profile.json    ← 岗位档案
 ```
 
-`dataRoot` 默认 `~/DSH-INTERVIEWER/`，可在 `cordis.patch.yml` 里改。
+**一个总根，不要散落。** `workspaceRoot` 留空则自动（用户主目录下的
+`DSH-INTERVIEWER/`），也可以指到 D 盘这类大盘。面板顶部显示当前根路径，
+悬停能看到**为什么是这个目录**（`describeWorkspaceRoot()` 返回来源与理由）。
+
 会话 id 形如 `iv-20261116053012-a3f1`，只允许 `[A-Za-z0-9_-]`——
 它是路径片段，必须挡住路径穿越。
 
@@ -91,6 +96,28 @@ Chromium 的 `SpeechRecognition` 在桌面 Chrome 上依赖后端识别服务，
 
 需要更高准确率时，正确做法是换一个 ASR provider（服务端 API），
 而不是在浏览器里反复调参数。
+
+### 两套协议
+
+| 协议 | 端点 | model | language |
+|---|---|---|---|
+| minimax | `{base}/v1/speech_to_text` | `asr-1.0` | **HTTP 头** `language:` |
+| openai | `{base}/audio/transcriptions` | `whisper-1` | **表单字段** `language` |
+
+协议按 provider / baseUrl 自动判定（`pickProtocol()`），可用 `asrProvider` 强制。
+聊天用的 baseUrl 通常带 `/v1`，所以拼端点前要 `stripVersionSegment()` 去掉，
+否则会拼出 `/v1/v1/speech_to_text`。
+
+**音频格式**：浏览器只录 webm/opus，而识别服务不收 webm。
+客户端上传前用 WebAudio 解码 → 重采样 16 kHz → 编码成 16-bit PCM WAV。
+
+### 凭据走 credentials seam
+
+宿主服务 `ctx.get('credentials')` 的 `resolve(ref)` 接受环境变量名作为引用，
+返回 `{ value, source }`。插件用它取密钥，**密钥不进配置文件**。
+
+解析顺序：插件配置里的明文 `asrApiKey` → `credentials.resolve(asrApiKeyEnv)` →
+`process.env[asrApiKeyEnv]` → 宿主 provider 列表里的凭据字段。
 
 ### 服务端 ASR 的三级继承
 

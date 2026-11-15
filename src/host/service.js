@@ -3,7 +3,7 @@
  *
  * **The shape of one session on disk**
  *
- *   <dataRoot>/sessions/<session-id>/
+ *   <workspaceRoot>/workspaces/<session-id>/
  *     session.json      元信息（标题、角色、状态、时间）
  *     resume.txt        简历正文（纯文本）
  *     jd.txt            JD 正文（纯文本）
@@ -75,16 +75,25 @@ export class InterviewService {
 
   // ── paths ────────────────────────────────────────────────────────────────
 
-  /** The directory holding every session. */
+  /**
+   * The workspace root — the one place all interview data lives.
+   *
+   * @returns {Promise<{path: string, source: string, reason: string, exists: boolean, error?: string}>}
+   */
+  async location() {
+    return describeWorkspaceRoot(this.config.workspaceRoot)
+  }
+
+  /** The directory holding every session — one interview, one subdirectory. */
   async sessionsDir() {
-    const root = await ensureDataRoot(this.config.dataRoot)
+    const root = await ensureDataRoot(this.config.workspaceRoot)
     if (root.error !== undefined) throw new Error(root.error)
-    return join(root.path, 'sessions')
+    return join(root.path, 'workspaces')
   }
 
   /** The directory holding every job profile (岗位档案). */
   async profilesDir() {
-    const root = await ensureDataRoot(this.config.dataRoot)
+    const root = await ensureDataRoot(this.config.workspaceRoot)
     if (root.error !== undefined) throw new Error(root.error)
     return join(root.path, 'profiles')
   }
@@ -855,12 +864,12 @@ function extensionFor(mimeType, filename, kind) {
 function sanitizeName(name) {
   if (typeof name !== 'string') return ''
   return name
-    .replace(/[/\\?%*:|"<> -]/g, '_')
+    .replace(/[/\\?%*:|"<>\u0000-\u001f]/g, '_')
     .replace(/\s+/g, '_')
     .slice(0, 120)
 }
 
-/** The absolute data root, for display. */
-export function dataRootOf(service) {
-  return resolve(service.config.dataRoot)
+/** The absolute workspace root, for display. */
+export function workspaceRootOf(service) {
+  return resolve(service.config.workspaceRoot)
 }

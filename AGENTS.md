@@ -70,7 +70,24 @@ release/   ← npm bundle tarball（gitignore）
 
 ---
 
-## 3. 单一真源
+## 3. 一个总根
+
+所有数据集中在**一个工作区根**下：
+
+```
+<workspaceRoot>/
+  workspaces/<session-id>/    一场面试 = 一个子目录
+  profiles/<profile-id>/      岗位档案
+```
+
+- `workspaceRoot` 留空 = 自动（用户主目录下的 `DSH-INTERVIEWER/`），
+  也可以指到 D 盘这类大盘。
+- **不要散落。** 会话散在各处是治理灾难：谁也说不清哪份是最新的、
+  哪场面试属于哪个岗位。
+- 界面必须能回答「数据存到哪儿了、为什么是这个目录」——
+  `describeWorkspaceRoot()` 返回路径、来源与理由，面板顶部要显示它。
+
+## 4. 单一真源
 
 | 内容 | 真源 | 谁读它 |
 |---|---|---|
@@ -85,7 +102,7 @@ release/   ← npm bundle tarball（gitignore）
 
 ---
 
-## 4. 硬边界（违反就是设计错误）
+## 5. 硬边界（违反就是设计错误）
 
 | 边界 | 原因 |
 |---|---|
@@ -98,7 +115,7 @@ release/   ← npm bundle tarball（gitignore）
 
 ---
 
-## 5. 一个操作，两个调用者
+## 6. 一个操作，两个调用者
 
 界面上点一下「抓取 JD」和 agent 调 `interview_prepare`，必须走**同一个 service 方法**、
 **同一套错误语义**。否则人和 agent 对「这份 JD 到底存进去没有」的理解会分叉，
@@ -109,7 +126,7 @@ release/   ← npm bundle tarball（gitignore）
 
 ---
 
-## 6. 失败必须给出路
+## 7. 失败必须给出路
 
 这是本插件最重要的产品纪律，比任何技术细节都重要。
 
@@ -152,7 +169,7 @@ Web Speech API 在很多网络环境里不可达（Chromium 的识别后端要�
 
 ---
 
-## 7. 目录约定
+## 8. 目录约定
 
 | 路径 | 放什么 |
 |---|---|
@@ -168,7 +185,7 @@ Web Speech API 在很多网络环境里不可达（Chromium 的识别后端要�
 
 ---
 
-## 8. 提交前自检
+## 9. 提交前自检
 
 ```bash
 node scripts/build.mjs     # 语法 + 插件半边 + 运行时冒烟测试
@@ -182,7 +199,7 @@ manifest 字段缺失、`client.js` 没走 `window.__ModuleLoader__.load`、
 
 ---
 
-## 9. 客户端纪律
+## 10. 客户端纪律
 
 `client.js` 是单文件、无构建的浏览器 bundle。三条规矩：
 
@@ -194,7 +211,7 @@ manifest 字段缺失、`client.js` 没走 `window.__ModuleLoader__.load`、
 
 ---
 
-## 10. 渲染层的几条教训
+## 11. 渲染层的几条教训
 
 来自同类插件的实测，写在这里免得重犯：
 
@@ -206,9 +223,9 @@ manifest 字段缺失、`client.js` 没走 `window.__ModuleLoader__.load`、
 
 ---
 
-## 11. 数据与隐私
+## 12. 数据与隐私
 
-- 简历、JD、转录、录像**全部留在本机**（默认 `~/DSH-INTERVIEWER/`）。
+- 简历、JD、转录、录像**全部留在本机**（默认 `~/DSH-INTERVIEWER/`，可配 `workspaceRoot`）。
 - 插件**不上传**任何东西。唯一的对外请求是用户自己给的 JD 链接。
 - 录像是**可选**功能，默认可关；它制造氛围，不承担举证责任。
 - 不要在代码或日志里打印简历/JD 的正文片段（`api.js` 的错误信息尤其注意）。

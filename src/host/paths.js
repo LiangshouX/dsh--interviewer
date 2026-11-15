@@ -9,9 +9,17 @@
  * `scripts/build.mjs` generates `build/`; when it is missing the runtime says so
  * out loud instead of silently serving nothing.
  *
- * **Where interview data lives.** 简历与 JD 是**个人数据**，不进任何项目目录，
- * 也不上传。默认落在用户主目录下的 `DSH-INTERVIEWER/`，用户可以在
- * `cordis.patch.yml` 里改 `dataRoot`。
+ * **一个总根，一场面试一个子目录。**
+ *
+ * 插件的所有数据集中在一个**工作区根**下（用户通常会指到 D 盘这类大盘），
+ * 根下面是：
+ *
+ *   <root>/workspaces/<session-id>/   一场面试 = 一个子目录
+ *   <root>/profiles/<profile-id>/     岗位档案
+ *
+ * **不要散落。** 散落的会话目录是治理灾难：谁也说不清哪份是最新的、
+ * 哪场面试属于哪个岗位。根目录由 `workspaceRoot` 决定，留空则自动
+ * （用户主目录下的 `DSH-INTERVIEWER`）。
  */
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
@@ -28,8 +36,8 @@ export const SKILL_DIR = join(PACKAGE_DIR, 'build', 'skills')
 /** The route prefix the plugin owns. */
 export const API_PREFIX = '/interviewer'
 
-/** The default data root: a stable, named folder in the user's home. */
-export function defaultDataRoot() {
+/** The default workspace root: a stable, named folder in the user's home. */
+export function defaultWorkspaceRoot() {
   return join(homedir(), 'DSH-INTERVIEWER')
 }
 
@@ -55,7 +63,8 @@ export function resolveConfig(raw) {
   const flag = (value, fallback) => (typeof value === 'boolean' ? value : fallback)
 
   return {
-    dataRoot: text(config.dataRoot) ?? defaultDataRoot(),
+    // 工作区根：所有数据集中在这里（一场面试 = 一个子目录）。
+    workspaceRoot: text(config.workspaceRoot) ?? text(config.dataRoot) ?? defaultWorkspaceRoot(),
     jdFetchTimeoutMs: number(config.jdFetchTimeoutMs, 1000, 120000, 15000),
     jdMaxChars: number(config.jdMaxChars, 500, 200000, 20000),
     asrProvider: oneOf(config.asrProvider, ['auto', 'browser', 'none'], 'auto'),
@@ -63,8 +72,10 @@ export function resolveConfig(raw) {
     // 服务端语音识别（可选）：填了 key 与 baseUrl 就用服务端，否则继承宿主，再否则回落浏览器。
     asrBaseUrl: text(config.asrBaseUrl) ?? '',
     asrApiKey: text(config.asrApiKey) ?? '',
+    // 凭据引用（推荐）：走 DSH 的 credentials seam，密钥不进配置文件。
+    asrApiKeyEnv: text(config.asrApiKeyEnv) ?? 'MINIMAX_API_KEY',
     asrModel: text(config.asrModel) ?? '',
-    asrEndpoint: text(config.asrEndpoint) ?? '/audio/transcriptions',
+    asrEndpoint: text(config.asrEndpoint) ?? '',
     asrLanguage: text(config.asrLanguage) ?? 'zh',
     ttsRate: number(config.ttsRate, 0.5, 2, 1),
     ttsVoice: text(config.ttsVoice) ?? '',
@@ -74,7 +85,7 @@ export function resolveConfig(raw) {
 }
 
 /**
- * Ensure the data root exists and return it.
+ * Ensure the workspace root exists and return it.
  *
  * The root is created on first use, not at mount time: a plugin that fails to
  * mount because a directory could not be created is worse than a plugin that
@@ -87,13 +98,46 @@ export async function ensureDataRoot(root) {
   const path = resolve(root)
   const existed = existsSync(path)
   try {
-    await mkdir(join(path, 'sessions'), { recursive: true })
+    await mkdir(join(path, 'workspaces'), { recursive: true })
+    await mkdir(join(path, 'profiles'), { recursive: true })
     return { path, created: !existed }
   } catch (error) {
     return {
       path,
       created: false,
-      error: `数据目录建不出来：${error && error.message ? error.message : String(error)}`,
+      error: `工作区根建不出来：${error && error.message ? error.message : String(error)}`,
     }
+  }
+}
+
+/**
+ * Describe the workspace root: where it is, why, and whether it works.
+ *
+ * **界面必须能回答「为什么是这个目录」。** 一个说不清来源的数据目录，
+ * 用户迟早会怀疑数据存到了别处。
+ *
+ * @param {string} configured the user's explicit value, if any
+ * @returns {Promise<{path: string, source: string, reason: string, exists: boolean, error?: string}>}
+ */
+export async function describeWorkspaceRoot(configured) {
+  if (typeof configured === 'string' && configured.trim() !== '') {
+    const path = resolve(configured.trim())
+    const ensured = await ensureDataRoot(path)
+    return {
+      path,
+      source: 'config',
+      reason: '配置里指定的工作区根',
+      exists: existsSync(path),
+      ...(ensured.error !== undefined ? { error: ensured.error } : {}),
+    }
+  }
+  const path = defaultWorkspaceRoot()
+  const ensured = await ensureDataRoot(path)
+  return {
+    path,
+    source: 'default',
+    reason: '默认工作区根（用户主目录下的 DSH-INTERVIEWER）。改 `workspaceRoot` 可以指到 D 盘这类大盘。',
+    exists: existsSync(path),
+    ...(ensured.error !== undefined ? { error: ensured.error } : {}),
   }
 }

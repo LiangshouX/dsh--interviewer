@@ -34,7 +34,7 @@
 
 | 资源 | 返回 | 说明 |
 |---|---|---|
-| `config` | `{asrProvider, ttsProvider, ttsRate, ttsVoice, recordVideo, recordAudio, dataRoot, jdFetchTimeoutMs}` | 插件配置 |
+| `config` | `{asrProvider, ttsProvider, ttsRate, ttsVoice, recordVideo, recordAudio, workspaceRoot, jdFetchTimeoutMs}` | 插件配置；`workspaceRoot` 含 `path` / `source` / `reason` |
 | `sessions` | `{sessions: SessionSummary[]}` | 会话列表，最新在前 |
 | `sessions/<id>` | `SessionState` | 单场面试的全量状态 |
 
@@ -163,14 +163,18 @@ POST /interviewer/api/asr/transcribe  { "dataBase64": "…", "mimeType": "audio/
 ```jsonc
 {
   "mode": "server | browser | none",
-  "source": "config | host | none",
+  "source": "config | host | env | none",
   "provider": "minimax",
-  "model": "whisper-1",
-  "endpoint": "https://…/audio/transcriptions",
-  "reason": "继承 DSH 宿主的 minimax 配置。",
+  "model": "asr-1.0",
+  "protocol": "minimax | openai",
+  "endpoint": "https://api.minimaxi.com/v1/speech_to_text",
+  "reason": "继承 DSH 宿主的 minimax 配置（凭据来自宿主的 credentials）。",
   "language": "zh"
 }
 ```
+
+**两套协议**：`minimax` 用 `{base}/v1/speech_to_text`，`language` 走 **HTTP 头**；
+`openai` 用 `{base}/audio/transcriptions`，`language` 走 **表单字段**。
 
 识别结果：
 

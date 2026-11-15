@@ -8,13 +8,13 @@ const ROOT = new URL('..', import.meta.url).pathname
 
 /** A service rooted in a throwaway directory. */
 async function makeService() {
-  const dataRoot = join(ROOT, '.tmp-test', `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`)
-  const service = new InterviewService({ config: { dataRoot } })
-  return { service, dataRoot }
+  const workspaceRoot = join(ROOT, '.tmp-test', `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`)
+  const service = new InterviewService({ config: { workspaceRoot } })
+  return { service, workspaceRoot }
 }
 
 test('会话、清单、转录、报告走完一轮', async () => {
-  const { service, dataRoot } = await makeService()
+  const { service, workspaceRoot } = await makeService()
   try {
     const session = await service.createSession({ title: '测试场', resumeText: '简历', jdText: 'JD' })
     await service.saveChecklist(session.id, [{ topic: '限流', why: 'JD 要求', level: 'core' }])
@@ -38,12 +38,12 @@ test('会话、清单、转录、报告走完一轮', async () => {
     const done = await service.getSession(session.id)
     assert.equal(done.status, 'done')
   } finally {
-    await rm(join(dataRoot), { recursive: true, force: true })
+    await rm(join(workspaceRoot), { recursive: true, force: true })
   }
 })
 
 test('岗位档案：保存 → 继承 → 回写', async () => {
-  const { service, dataRoot } = await makeService()
+  const { service, workspaceRoot } = await makeService()
   try {
     const profile = await service.saveProfile({
       title: '字节 · 高级后端',
@@ -72,16 +72,16 @@ test('岗位档案：保存 → 继承 → 回写', async () => {
     assert.equal(updated.checklist.items.length, 2)
     assert.ok(updated.sessions.includes(session.id))
   } finally {
-    await rm(join(dataRoot), { recursive: true, force: true })
+    await rm(join(workspaceRoot), { recursive: true, force: true })
   }
 })
 
 test('档案 id 不合法时被挡住', async () => {
-  const { service, dataRoot } = await makeService()
+  const { service, workspaceRoot } = await makeService()
   try {
     await assert.rejects(() => service.getProfile('../escape'))
     await assert.rejects(() => service.getSession('../escape'))
   } finally {
-    await rm(join(dataRoot), { recursive: true, force: true })
+    await rm(join(workspaceRoot), { recursive: true, force: true })
   }
 })

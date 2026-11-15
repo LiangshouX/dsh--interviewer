@@ -203,6 +203,100 @@ window.__ModuleLoader__.load({
       })
     }
 
+    /** Read raw bytes as base64 (no data-url wrapper). */
+    function bufferToBase64(buffer) {
+      const bytes = new Uint8Array(buffer)
+      let binary = ''
+      const step = 0x8000
+      for (let index = 0; index < bytes.length; index += step) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(index, index + step))
+      }
+      return btoa(binary)
+    }
+
+    /**
+     * Decode a recording into 16 kHz mono float samples.
+     *
+     * **为什么必须转码。** 浏览器只会录 webm/opus，而主流识别服务
+     * （MiniMax、Whisper 兼容接口）要 wav/aiff/flac/m4a/mp3/aac/opus/ogg——
+     * **webm 不在其中**。不解码就上传，服务端会直接 400。
+     *
+     * @param {ArrayBuffer} arrayBuffer
+     * @returns {Promise<{samples: Float32Array, sampleRate: number}>}
+     */
+    function decodeToMono16k(arrayBuffer) {
+      const Ctor = window.AudioContext ?? window.webkitAudioContext
+      if (Ctor === undefined) {
+        return Promise.reject(new Error('这个环境没有 AudioContext，无法转码'))
+      }
+      return new Promise((resolve, reject) => {
+        let context
+        try {
+          context = new Ctor({ sampleRate: 16000 })
+        } catch {
+          context = new Ctor()
+        }
+        context.decodeAudioData(arrayBuffer, buffer => {
+          try {
+            const channels = buffer.numberOfChannels
+            const ratio = buffer.sampleRate / 16000
+            const length = Math.max(1, Math.floor(buffer.length / ratio))
+            const mono = new Float32Array(length)
+            for (let index = 0; index < length; index += 1) {
+              const source = Math.min(buffer.length - 1, Math.floor(index * ratio))
+              let sum = 0
+              for (let channel = 0; channel < channels; channel += 1) {
+                sum += buffer.getChannelData(channel)[source]
+              }
+              mono[index] = sum / channels
+            }
+            context.close().catch(() => {})
+            resolve({ samples: mono, sampleRate: 16000 })
+          } catch (error) {
+            context.close().catch(() => {})
+            reject(error instanceof Error ? error : new Error(String(error)))
+          }
+        }, error => {
+          context.close().catch(() => {})
+          reject(new Error(`音频解码失败：${error && error.message ? error.message : String(error)}`))
+        })
+      })
+    }
+
+    /**
+     * Encode mono float samples as 16-bit PCM WAV.
+     *
+     * @param {Float32Array} samples
+     * @param {number} sampleRate
+     * @returns {ArrayBuffer}
+     */
+    function encodeWav(samples, sampleRate) {
+      const buffer = new ArrayBuffer(44 + samples.length * 2)
+      const view = new DataView(buffer)
+      const writeString = (offset, text) => {
+        for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index))
+      }
+      writeString(0, 'RIFF')
+      view.setUint32(4, 36 + samples.length * 2, true)
+      writeString(8, 'WAVE')
+      writeString(12, 'fmt ')
+      view.setUint32(16, 16, true)
+      view.setUint16(20, 1, true)
+      view.setUint16(22, 1, true)
+      view.setUint32(24, sampleRate, true)
+      view.setUint32(28, sampleRate * 2, true)
+      view.setUint16(32, 2, true)
+      view.setUint16(34, 16, true)
+      writeString(36, 'data')
+      view.setUint32(40, samples.length * 2, true)
+      let offset = 44
+      for (let index = 0; index < samples.length; index += 1, offset += 2) {
+        const sample = Math.max(-1, Math.min(1, samples[index]))
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+      }
+      return buffer
+    }
+
     /** Format a duration in milliseconds as `mm:ss`. */
     function formatClock(ms) {
       const total = Math.max(0, Math.floor(ms / 1000))
@@ -985,8 +1079,24 @@ window.__ModuleLoader__.load({
       const transcribeClip = useCallback(async () => {
         if (audioRecorder.clip === undefined) return
         try {
-          const dataBase64 = await blobToBase64(audioRecorder.clip.blob)
-          const result = await apiPost('asr/transcribe', { dataBase64, mimeType: audioRecorder.clip.mimeType })
+          // 浏览器只会录 webm/opus，而识别服务要 wav/aiff/flac/m4a/mp3/aac/opus。
+          // **先转成 16 kHz 单声道 WAV 再上传**，否则服务端直接 400。
+          let dataBase64
+          let mimeType = 'audio/wav'
+          let filename = 'clip.wav'
+          try {
+            const arrayBuffer = await audioRecorder.clip.blob.arrayBuffer()
+            const decoded = await decodeToMono16k(arrayBuffer)
+            dataBase64 = bufferToBase64(encodeWav(decoded.samples, decoded.sampleRate))
+          } catch (failure) {
+            // 转码失败就退回原始格式——OpenAI 兼容接口接受 webm，
+            // 但如果服务端不收，用户会看到明确的报错而不是静默失败。
+            dataBase64 = await blobToBase64(audioRecorder.clip.blob)
+            mimeType = audioRecorder.clip.mimeType
+            filename = 'clip.webm'
+            notify('没转成 WAV，按原始格式上传', failure instanceof Error ? failure.message : String(failure))
+          }
+          const result = await apiPost('asr/transcribe', { dataBase64, mimeType, filename })
           if (result.ok === true) {
             setAnswer(previous => `${previous}${previous.trim() === '' ? '' : ' '}${result.text}`)
             audioRecorder.reset()
@@ -1272,9 +1382,15 @@ window.__ModuleLoader__.load({
 
       return h('div', { style: S.page }, [
         h('div', { style: S.head }, [
-          h('div', null, [
+          h('div', { style: { minWidth: 0 } }, [
             h('div', { style: S.title }, '模拟面试间'),
             h('div', { style: S.sub }, '简历 + JD → 一场有准备的面试'),
+            config?.workspaceRoot !== undefined
+              ? h('div', {
+                style: { ...S.mono, fontSize: 10.5, color: C.faint, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 420 },
+                title: `${config.workspaceRoot.path}\n${config.workspaceRoot.reason ?? ''}`,
+              }, `工作区：${config.workspaceRoot.path}`)
+              : null,
           ]),
           h('div', { style: S.tabs }, [
             h('div', { style: S.tab(tab === 'prepare'), onClick: () => setTab('prepare') }, '准备'),
