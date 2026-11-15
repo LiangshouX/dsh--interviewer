@@ -188,8 +188,14 @@ Web Speech API 在很多网络环境里不可达（Chromium 的识别后端要�
 ## 9. 提交前自检
 
 ```bash
-node scripts/build.mjs     # 语法 + 插件半边 + 运行时冒烟测试
+node scripts/build.mjs     # 语法 + 插件半边 + 运行时冒烟 + 客户端 SSR 渲染
+node --test tests/*.test.js
 ```
+
+`build.mjs` 会额外用**真的 React + SSR** 把 `client.js` 渲染一遍
+（`scripts/client-smoke.mjs`）——`client.js` 只在浏览器里跑，
+`node --check` 只能查语法，查不出「变量名写错」和「hook 用错」。
+没装 react 时这一步会跳过而不是失败。
 
 `build.mjs` 会拦住的：frontmatter 不合法、引用了不存在的包内路径、
 manifest 字段缺失、`client.js` 没走 `window.__ModuleLoader__.load`、
@@ -208,6 +214,10 @@ manifest 字段缺失、`client.js` 没走 `window.__ModuleLoader__.load`、
    （画面、录音、识别、当前问题、转录、报告），不要在面板里造一个聊天框
    去和助手重复对话。
 3. **不要让面板成为唯一入口**。每个功能都要有键盘/文本兜底。
+4. **数组 children 的每个元素都要有 `key`。** React 的 `createElement` 只对
+   *单个* child 打「已验证」标记，数组 children 会逐个检查 key——手写的
+   `h(...)` 没有 JSX 编译器的静态标记，缺 key 会刷警告并让列表重排时状态串位。
+   新增数组 children 时跑 `node scripts/fix-keys.mjs` 补齐。
 
 ---
 

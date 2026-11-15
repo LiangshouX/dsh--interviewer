@@ -226,8 +226,37 @@ function pathToFileUrl(path) {
   return new URL(`file:///${path.replace(/\\/g, '/').replace(/^\/+/, '')}`).href
 }
 
+// ── 5. 客户端冒烟测试（可选：需要 react） ─────────────────────────────────
+/**
+ * `client.js` 是一千多行的浏览器 bundle，它**只在 DSH 的浏览器里跑**。
+ * 在那之前它一行都没被执行过——而它恰恰是最容易出错的一半
+ * （变量名写错、hook 用错、JSX 结构写错，`node --check` 全都查不出来）。
+ *
+ * 所以这里用真的 React + SSR 渲染跑一遍。装不上 react 就跳过，
+ * 不阻塞构建（发布机上不一定装了）。
+ */
+async function checkClient() {
+  const script = join(ROOT, 'scripts', 'client-smoke.mjs')
+  if (!existsSync(script)) {
+    note('scripts/client-smoke.mjs 不存在：客户端冒烟测试无法运行')
+    return
+  }
+  const result = spawnSync(process.execPath, [script], { cwd: ROOT, encoding: 'utf8', timeout: 120000 })
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
+  if (/跳过：没装 react/.test(output)) {
+    console.log('· 客户端冒烟测试跳过（没装 react）')
+    return
+  }
+  if (result.status !== 0) {
+    note(`客户端冒烟测试失败：\n${output.split('\n').filter(line => line.trim() !== '').slice(0, 8).join('\n')}`)
+    return
+  }
+  console.log(output.trim())
+}
+
 await checkPluginHalf()
 await checkSyntax()
+await checkClient()
 
 // ── 5. 构建或校验 ──────────────────────────────────────────────────────────
 if (!onlyCheck) {

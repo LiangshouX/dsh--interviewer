@@ -625,9 +625,9 @@ window.__ModuleLoader__.load({
     /** A labeled section with a title and a right-hand slot. */
     function Section(props) {
       return h('div', { style: S.card }, [
-        h('div', { style: S.cardHead }, [
-          h('div', { style: S.cardTitle }, props.title),
-          props.extra !== undefined ? h('div', { style: { marginLeft: 'auto' } }, props.extra) : null,
+        h('div', { key: 'k1', style: S.cardHead }, [
+          h('div', { key: 'k2', style: S.cardTitle }, props.title),
+          props.extra !== undefined ? h('div', { key: 'k1', style: { marginLeft: 'auto' } }, props.extra) : null,
         ]),
         props.children,
       ])
@@ -636,8 +636,8 @@ window.__ModuleLoader__.load({
     /** A text field. */
     function Field(props) {
       return h('div', { style: { marginBottom: 12 } }, [
-        h('label', { style: S.label }, props.label),
-        h('input', {
+        h('label', { key: 'k3', style: S.label }, props.label),
+        h('input', { key: 'k4',
           style: S.input,
           value: props.value ?? '',
           placeholder: props.placeholder,
@@ -649,8 +649,8 @@ window.__ModuleLoader__.load({
     /** A textarea. */
     function Area(props) {
       return h('div', { style: { marginBottom: 12 } }, [
-        h('label', { style: S.label }, props.label),
-        h('textarea', {
+        h('label', { key: 'k5', style: S.label }, props.label),
+        h('textarea', { key: 'k6',
           style: S.textarea,
           value: props.value ?? '',
           placeholder: props.placeholder,
@@ -669,14 +669,14 @@ window.__ModuleLoader__.load({
           padding: '9px 0', borderBottom: `1px solid ${C.lineSoft}`,
         },
       }, [
-        h('span', { style: S.pill(levelColor) }, item.level ?? 'core'),
-        h('div', { style: { flex: '1 1 auto', minWidth: 0 } }, [
-          h('div', { style: { fontSize: 13, color: item.probed === true ? C.faint : C.text, textDecoration: item.probed === true ? 'line-through' : 'none' } }, item.topic),
+        h('span', { key: 'k7', style: S.pill(levelColor) }, item.level ?? 'core'),
+        h('div', { key: 'k8', style: { flex: '1 1 auto', minWidth: 0 } }, [
+          h('div', { key: 'k9', style: { fontSize: 13, color: item.probed === true ? C.faint : C.text, textDecoration: item.probed === true ? 'line-through' : 'none' } }, item.topic),
           item.why !== undefined && item.why !== ''
-            ? h('div', { style: { fontSize: 11.5, color: C.faint, marginTop: 3, lineHeight: 1.5 } }, item.why)
+            ? h('div', { key: 'k2', style: { fontSize: 11.5, color: C.faint, marginTop: 3, lineHeight: 1.5 } }, item.why)
             : null,
         ]),
-        h('span', { style: { fontSize: 11, color: C.faint, whiteSpace: 'nowrap' } }, item.probed === true ? '已问' : '待问'),
+        h('span', { key: 'k10', style: { fontSize: 11, color: C.faint, whiteSpace: 'nowrap' } }, item.probed === true ? '已问' : '待问'),
       ])
     }
 
@@ -886,68 +886,68 @@ window.__ModuleLoader__.load({
       const checklist = session?.checklist?.items ?? []
 
       return h('div', null, [
-        h(Section, { title: '岗位档案', extra: h('span', { style: S.hint }, '同一个岗位第二次面试，直接继承上次的考点基线') }, [
+        h(Section, { key: 'k11', title: '岗位档案', extra: h('span', { style: S.hint }, '同一个岗位第二次面试，直接继承上次的考点基线') }, [
           profiles.length === 0
-            ? h('div', { style: S.hint }, '还没有岗位档案。面试完一场后，在 DSH 对话里让助手用 interview_save_profile 把它归档下来；或者用 interview_sync_profile 回写。')
+            ? h('div', { key: 'k3', style: S.hint }, '还没有岗位档案。面试完一场后，在 DSH 对话里让助手用 interview_save_profile 把它归档下来；或者用 interview_sync_profile 回写。')
             : h('div', null, profiles.map(profile => h('div', {
               key: profile.id,
               style: { display: 'flex', gap: 10, alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.lineSoft}` },
             }, [
-              h('div', { style: { flex: '1 1 auto', minWidth: 0 } }, [
-                h('div', { style: { fontSize: 12.5 } }, profile.title),
-                h('div', { style: { fontSize: 11, color: C.faint, marginTop: 2 } },
+              h('div', { key: 'k12', style: { flex: '1 1 auto', minWidth: 0 } }, [
+                h('div', { key: 'k13', style: { fontSize: 12.5 } }, profile.title),
+                h('div', { key: 'k14', style: { fontSize: 11, color: C.faint, marginTop: 2 } },
                   `${profile.checklistCount} 个考点 · ${profile.sessions.length} 场面试${profile.jdChars > 0 ? ` · JD ${profile.jdChars} 字` : ''}`),
               ]),
-              h('button', { style: S.btn(false, busy), onClick: () => applyProfile(profile.id) }, '继承这份'),
+              h('button', { key: 'k15', style: S.btn(false, busy), onClick: () => applyProfile(profile.id) }, '继承这份'),
             ]))),
           session?.session?.profileId !== undefined && session?.session?.profileId !== ''
-            ? h('div', { style: { ...S.row, marginTop: 10 } }, [
-              h('span', { style: S.hint }, `本场已关联档案 ${session.session.profileId}`),
-              h('button', { style: S.btn(false, busy), onClick: () => syncProfile(session.session.profileId) }, '把本场回写进档案'),
+            ? h('div', { key: 'k4', style: { ...S.row, marginTop: 10 } }, [
+              h('span', { key: 'k16', style: S.hint }, `本场已关联档案 ${session.session.profileId}`),
+              h('button', { key: 'k17', style: S.btn(false, busy), onClick: () => syncProfile(session.session.profileId) }, '把本场回写进档案'),
             ])
             : null,
         ]),
 
-        h(Section, { title: '简历', extra: h('span', { style: S.hint }, session?.documents?.resumeChars > 0 ? `已保存 ${session.documents.resumeChars} 字` : '还没存') }, [
-          h('div', { style: { ...S.row, marginBottom: 12 } }, [
-            h('label', { style: { ...S.btn(false, busy) } }, [
+        h(Section, { key: 'k18', title: '简历', extra: h('span', { style: S.hint }, session?.documents?.resumeChars > 0 ? `已保存 ${session.documents.resumeChars} 字` : '还没存') }, [
+          h('div', { key: 'k19', style: { ...S.row, marginBottom: 12 } }, [
+            h('label', { key: 'k20', style: { ...S.btn(false, busy) } }, [
               '上传文件（.txt/.md/.docx/.pdf）',
-              h('input', { type: 'file', accept: '.txt,.md,.json,.docx,.pdf,text/plain,text/markdown', style: { display: 'none' }, onChange: uploadResume }),
+              h('input', { key: 'k21', type: 'file', accept: '.txt,.md,.json,.docx,.pdf,text/plain,text/markdown', style: { display: 'none' }, onChange: uploadResume }),
             ]),
-            h('span', { style: S.hint }, '读不出文字的文件会明确告诉你，不会假装成功'),
+            h('span', { key: 'k22', style: S.hint }, '读不出文字的文件会明确告诉你，不会假装成功'),
           ]),
-          h(Area, {
+          h(Area, { key: 'k23',
             label: '或直接粘贴简历正文',
             value: resumeText,
             placeholder: '把简历正文粘到这里……',
             onChange: setResumeText,
           }),
-          h('div', { style: S.row }, [
-            h('button', { style: S.btn(true, busy || resumeText.trim() === ''), onClick: saveResume }, '保存简历'),
+          h('div', { key: 'k24', style: S.row }, [
+            h('button', { key: 'k25', style: S.btn(true, busy || resumeText.trim() === ''), onClick: saveResume }, '保存简历'),
             session?.documents?.resumeChars > 0
-              ? h('span', { style: S.hint }, `盘上已有 ${session.documents.resumeChars} 字，粘贴后保存会覆盖它`)
+              ? h('span', { key: 'k5', style: S.hint }, `盘上已有 ${session.documents.resumeChars} 字，粘贴后保存会覆盖它`)
               : null,
           ]),
         ]),
 
-        h(Section, { title: '目标岗位 JD', extra: h('span', { style: S.hint }, session?.documents?.jdChars > 0 ? `已保存 ${session.documents.jdChars} 字` : '还没存') }, [
-          h('div', { style: { ...S.row, marginBottom: 12, alignItems: 'flex-end' } }, [
-            h('div', { style: { flex: '1 1 320px' } }, [
-              h(Field, {
+        h(Section, { key: 'k26', title: '目标岗位 JD', extra: h('span', { style: S.hint }, session?.documents?.jdChars > 0 ? `已保存 ${session.documents.jdChars} 字` : '还没存') }, [
+          h('div', { key: 'k27', style: { ...S.row, marginBottom: 12, alignItems: 'flex-end' } }, [
+            h('div', { key: 'k28', style: { flex: '1 1 320px' } }, [
+              h(Field, { key: 'k29',
                 label: '岗位链接（抓取失败会自动给手动兜底）',
                 value: jdUrl,
                 placeholder: 'https://…',
                 onChange: setJdUrl,
               }),
             ]),
-            h('button', { style: S.btn(false, busy || jdUrl.trim() === ''), onClick: fetchJd }, '抓取 JD'),
-            h('label', { style: { ...S.btn(false, busy) } }, [
+            h('button', { key: 'k30', style: S.btn(false, busy || jdUrl.trim() === ''), onClick: fetchJd }, '抓取 JD'),
+            h('label', { key: 'k31', style: { ...S.btn(false, busy) } }, [
               '上传 JD 文件',
-              h('input', { type: 'file', accept: '.txt,.md,.json,.docx,.pdf', style: { display: 'none' }, onChange: uploadJd }),
+              h('input', { key: 'k32', type: 'file', accept: '.txt,.md,.json,.docx,.pdf', style: { display: 'none' }, onChange: uploadJd }),
             ]),
           ]),
           jdNote !== undefined
-            ? h('div', {
+            ? h('div', { key: 'k6',
               style: {
                 padding: '8px 11px', borderRadius: 8, marginBottom: 12, fontSize: 12, lineHeight: 1.6,
                 border: `1px solid ${jdNote.ok ? C.green : C.amber}44`,
@@ -956,23 +956,23 @@ window.__ModuleLoader__.load({
               },
             }, jdNote.text)
             : null,
-          h(Area, {
+          h(Area, { key: 'k33',
             label: '或直接粘贴 JD 正文',
             value: jdText,
             placeholder: '把岗位描述粘到这里……',
             onChange: setJdText,
           }),
-          h('div', { style: S.row }, [
-            h('button', { style: S.btn(true, busy || jdText.trim() === ''), onClick: saveJd }, '保存 JD'),
+          h('div', { key: 'k34', style: S.row }, [
+            h('button', { key: 'k35', style: S.btn(true, busy || jdText.trim() === ''), onClick: saveJd }, '保存 JD'),
           ]),
         ]),
 
-        h(Section, { title: '考点清单', extra: h('span', { style: S.hint }, `${session?.stats?.checklistProbed ?? 0}/${session?.stats?.checklistTotal ?? 0} 已问`)}, [
+        h(Section, { key: 'k36', title: '考点清单', extra: h('span', { style: S.hint }, `${session?.stats?.checklistProbed ?? 0}/${session?.stats?.checklistTotal ?? 0} 已问`)}, [
           checklist.length === 0
-            ? h('div', { style: S.hint }, '清单还是空的。在 DSH 对话里让助手用 interview-prep 技能基于简历与 JD 做调研，产出后用 interview_save_checklist 落盘——这里就会显示出来。')
+            ? h('div', { key: 'k7', style: S.hint }, '清单还是空的。在 DSH 对话里让助手用 interview-prep 技能基于简历与 JD 做调研，产出后用 interview_save_checklist 落盘——这里就会显示出来。')
             : h('div', null, checklist.map(item => h(ChecklistRow, { key: item.id, item }))),
           session?.stats?.adjustments > 0
-            ? h('div', { style: { ...S.hint, marginTop: 10 } }, `面试中调整过 ${session.stats.adjustments} 次——每一次调整都记了理由，事后复盘会用到。`)
+            ? h('div', { key: 'k8', style: { ...S.hint, marginTop: 10 } }, `面试中调整过 ${session.stats.adjustments} 次——每一次调整都记了理由，事后复盘会用到。`)
             : null,
         ]),
       ])
@@ -1131,15 +1131,15 @@ window.__ModuleLoader__.load({
       const running = session?.session?.status === 'running'
 
       return h('div', null, [
-        h(Section, { title: '现场', extra: h('span', { style: { ...S.mono, color: C.amber } }, formatClock(session?.stats?.durationMs ?? 0)) }, [
-          h('div', { style: { display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap' } }, [
-            h('div', {
+        h(Section, { key: 'k37', title: '现场', extra: h('span', { style: { ...S.mono, color: C.amber } }, formatClock(session?.stats?.durationMs ?? 0)) }, [
+          h('div', { key: 'k38', style: { display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap' } }, [
+            h('div', { key: 'k39',
               style: {
                 position: 'relative', width: 260, height: 176, borderRadius: 10, overflow: 'hidden',
                 background: '#0d0f13', border: `1px solid ${C.line}`, flex: '0 0 auto',
               },
             }, [
-              h('video', {
+              h('video', { key: 'k40',
                 ref: videoRef,
                 autoPlay: true,
                 muted: true,
@@ -1147,35 +1147,35 @@ window.__ModuleLoader__.load({
                 style: { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', display: media.stream === undefined ? 'none' : 'block' },
               }),
               media.stream === undefined
-                ? h('div', { style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.faint, fontSize: 12 } }, '摄像头未开')
+                ? h('div', { key: 'k9', style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.faint, fontSize: 12 } }, '摄像头未开')
                 : null,
               recorder.recording
-                ? h('div', {
+                ? h('div', { key: 'k10',
                   style: {
                     position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 6,
                     padding: '3px 9px', borderRadius: 999, background: '#00000088', fontSize: 11, color: '#fff',
                   },
                 }, [
-                  h('span', { style: { width: 7, height: 7, borderRadius: 999, background: C.red, display: 'block' } }),
+                  h('span', { key: 'k41', style: { width: 7, height: 7, borderRadius: 999, background: C.red, display: 'block' } }),
                   'REC',
                 ])
                 : null,
             ]),
 
-            h('div', { style: { flex: '1 1 280px', minWidth: 260 } }, [
-              h('div', { style: { ...S.row, marginBottom: 12 } }, [
-                h('button', { style: S.btn(false, false), onClick: () => (media.stream === undefined ? void media.start() : media.stop()) },
+            h('div', { key: 'k42', style: { flex: '1 1 280px', minWidth: 260 } }, [
+              h('div', { key: 'k43', style: { ...S.row, marginBottom: 12 } }, [
+                h('button', { key: 'k44', style: S.btn(false, false), onClick: () => (media.stream === undefined ? void media.start() : media.stop()) },
                   media.stream === undefined ? '开摄像头' : '关摄像头'),
-                h('button', {
+                h('button', { key: 'k45',
                   style: S.btn(recorder.recording, media.stream === undefined),
                   onClick: () => (recorder.recording ? recorder.stop() : recorder.start()),
                 }, recorder.recording ? '停止录音' : '开始录音'),
-                h('button', {
+                h('button', { key: 'k46',
                   style: S.btn(asr.active, !asr.supported),
                   onClick: () => (asr.active ? asr.stop() : asr.start()),
                   disabled: !asr.supported,
                 }, asr.active ? '停止识别' : '开始识别'),
-                h('button', {
+                h('button', { key: 'k47',
                   style: S.btn(false, !tts.supported),
                   onClick: () => {
                     if (speaking) {
@@ -1194,101 +1194,101 @@ window.__ModuleLoader__.load({
               ]),
 
               // 输入电平
-              h('div', { style: { marginBottom: 12 } }, [
-                h('div', { style: { ...S.label, display: 'flex', justifyContent: 'space-between' } }, [
+              h('div', { key: 'k48', style: { marginBottom: 12 } }, [
+                h('div', { key: 'k49', style: { ...S.label, display: 'flex', justifyContent: 'space-between' } }, [
                   h('span', null, asr.active ? '正在聆听…' : '输入电平'),
-                  h('span', { style: { color: asr.active ? C.green : C.faint } }, asr.active ? '识别中' : '待命'),
+                  h('span', { key: 'k50', style: { color: asr.active ? C.green : C.faint } }, asr.active ? '识别中' : '待命'),
                 ]),
-                h('div', { style: { height: 8, borderRadius: 999, background: C.bg, border: `1px solid ${C.line}`, overflow: 'hidden' } }, [
-                  h('div', { style: { height: '100%', width: `${Math.round(media.level * 100)}%`, background: media.level > 0.7 ? C.red : C.green, transition: 'width 80ms linear' } }),
+                h('div', { key: 'k51', style: { height: 8, borderRadius: 999, background: C.bg, border: `1px solid ${C.line}`, overflow: 'hidden' } }, [
+                  h('div', { key: 'k52', style: { height: '100%', width: `${Math.round(media.level * 100)}%`, background: media.level > 0.7 ? C.red : C.green, transition: 'width 80ms linear' } }),
                 ]),
               ]),
 
               media.error !== undefined
-                ? h('div', { style: { ...S.hint, color: C.amber, marginBottom: 10, lineHeight: 1.6 } }, media.error)
+                ? h('div', { key: 'k11', style: { ...S.hint, color: C.amber, marginBottom: 10, lineHeight: 1.6 } }, media.error)
                 : null,
               asr.error !== undefined
-                ? h('div', { style: { ...S.hint, color: C.amber, marginBottom: 10, lineHeight: 1.6 } }, asr.error)
+                ? h('div', { key: 'k12', style: { ...S.hint, color: C.amber, marginBottom: 10, lineHeight: 1.6 } }, asr.error)
                 : null,
               asr.interim !== ''
-                ? h('div', { style: { ...S.hint, color: C.dim, marginBottom: 10, fontStyle: 'italic' } }, asr.interim)
+                ? h('div', { key: 'k13', style: { ...S.hint, color: C.dim, marginBottom: 10, fontStyle: 'italic' } }, asr.interim)
                 : null,
             ]),
           ]),
         ]),
 
-        h(Section, { title: '当前问题', extra: h('span', { style: S.hint }, '助手提问会出现在这里（由助手写入转录）') }, [
+        h(Section, { key: 'k53', title: '当前问题', extra: h('span', { style: S.hint }, '助手提问会出现在这里（由助手写入转录）') }, [
           lastQuestion === undefined
-            ? h('div', { style: S.hint }, '还没有问题。在 DSH 对话里让助手开始提问——助手用 interview_record_turn 记录每一轮，这里会实时显示。')
+            ? h('div', { key: 'k14', style: S.hint }, '还没有问题。在 DSH 对话里让助手开始提问——助手用 interview_record_turn 记录每一轮，这里会实时显示。')
             : h('div', { style: { fontSize: 14, lineHeight: 1.7 } }, lastQuestion.text),
         ]),
 
-        h(Section, { title: '我的回答', extra: h('span', { style: S.hint }, '识别结果只是草稿，可以改') }, [
+        h(Section, { key: 'k54', title: '我的回答', extra: h('span', { style: S.hint }, '识别结果只是草稿，可以改') }, [
           // 服务端识别：比浏览器原生稳，但**必须可配置、可回落**。
-          h('div', { style: { marginBottom: 10 } }, [
-            h('div', { style: { ...S.row, marginBottom: 6 } }, [
-              h('span', { style: { fontSize: 11.5, color: C.dim } },
+          h('div', { key: 'k55', style: { marginBottom: 10 } }, [
+            h('div', { key: 'k56', style: { ...S.row, marginBottom: 6 } }, [
+              h('span', { key: 'k57', style: { fontSize: 11.5, color: C.dim } },
                 asrStatus.data?.mode === 'server'
                   ? `服务端识别：${asrStatus.data.provider ?? ''}${asrStatus.data.model ? ` / ${asrStatus.data.model}` : ''}（${asrStatus.data.source === 'host' ? '继承宿主' : '插件配置'}）`
                   : '服务端识别未启用'),
-              h('button', {
+              h('button', { key: 'k58',
                 style: S.btn(false, media.stream === undefined || asrStatus.data?.mode !== 'server'),
                 onClick: () => (audioRecorder.recording ? audioRecorder.stop() : audioRecorder.start()),
                 disabled: media.stream === undefined || asrStatus.data?.mode !== 'server',
               }, audioRecorder.recording ? '停止录音' : '录一段'),
-              h('button', {
+              h('button', { key: 'k59',
                 style: S.btn(true, audioRecorder.clip === undefined),
                 onClick: transcribeClip,
               }, '识别这段'),
             ]),
-            h('div', { style: { ...S.hint, lineHeight: 1.6 } },
+            h('div', { key: 'k60', style: { ...S.hint, lineHeight: 1.6 } },
               asrStatus.data?.reason
                 ?? (asrStatus.error !== undefined ? `识别链路状态读不到：${asrStatus.error}` : '正在读识别链路状态…')),
           ]),
-          h('textarea', {
+          h('textarea', { key: 'k61',
             style: S.textarea,
             value: answer,
             placeholder: '说话或打字。提交后进入转录，成为事后分析的事实来源。',
             onChange: event => setAnswer(event.target.value),
           }),
-          h('div', { style: { ...S.row, marginTop: 10 } }, [
-            h('button', { style: S.btn(true, answer.trim() === ''), onClick: submitAnswer }, '提交回答'),
-            h('button', { style: S.btn(false, answer.trim() === ''), onClick: copyAnswer }, '复制（粘到对话框）'),
-            h('div', { style: { marginLeft: 'auto', display: 'flex', gap: 8 } }, [
+          h('div', { key: 'k62', style: { ...S.row, marginTop: 10 } }, [
+            h('button', { key: 'k63', style: S.btn(true, answer.trim() === ''), onClick: submitAnswer }, '提交回答'),
+            h('button', { key: 'k64', style: S.btn(false, answer.trim() === ''), onClick: copyAnswer }, '复制（粘到对话框）'),
+            h('div', { key: 'k65', style: { marginLeft: 'auto', display: 'flex', gap: 8 } }, [
               running
-                ? h('button', { style: S.btn(false, false), onClick: finishInterview }, '结束面试')
+                ? h('button', { key: 'k15', style: S.btn(false, false), onClick: finishInterview }, '结束面试')
                 : h('button', { style: S.btn(true, false), onClick: startInterview }, '开始面试'),
             ]),
           ]),
         ]),
 
-        h(Section, { title: '转录' }, [
+        h(Section, { key: 'k66', title: '转录' }, [
           transcript.length === 0
-            ? h('div', { style: S.hint }, '还没有转录。')
+            ? h('div', { key: 'k16', style: S.hint }, '还没有转录。')
             : h('div', { style: { maxHeight: 320, overflowY: 'auto' } }, transcript.map((row, index) => h('div', {
               key: `${row.ts}-${index}`,
               style: { display: 'flex', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.lineSoft}` },
             }, [
-              h('span', { style: { ...S.mono, fontSize: 11, color: C.faint, flex: '0 0 auto', paddingTop: 2 } }, formatTime(row.ts)),
-              h('span', { style: S.pill(row.role === 'interviewer' ? C.blue : row.role === 'candidate' ? C.green : C.faint) },
+              h('span', { key: 'k67', style: { ...S.mono, fontSize: 11, color: C.faint, flex: '0 0 auto', paddingTop: 2 } }, formatTime(row.ts)),
+              h('span', { key: 'k68', style: S.pill(row.role === 'interviewer' ? C.blue : row.role === 'candidate' ? C.green : C.faint) },
                 row.role === 'interviewer' ? '问' : row.role === 'candidate' ? '答' : '系统'),
-              h('span', { style: { fontSize: 12.5, color: C.dim, lineHeight: 1.6 } }, row.text),
+              h('span', { key: 'k69', style: { fontSize: 12.5, color: C.dim, lineHeight: 1.6 } }, row.text),
             ]))),
         ]),
 
-        h(Section, { title: '录像与录音', extra: recorder.clip !== undefined ? h('button', { style: S.btn(true, false), onClick: saveClip }, '保存到本机') : undefined }, [
-          h('div', { style: { ...S.row, marginBottom: 10 } }, [
-            h('span', { style: S.hint }, recorder.recording ? '正在录…' : recorder.clip !== undefined ? '有一段待保存的片段' : '没在录'),
+        h(Section, { key: 'k70', title: '录像与录音', extra: recorder.clip !== undefined ? h('button', { key: 'k17', style: S.btn(true, false), onClick: saveClip }, '保存到本机') : undefined }, [
+          h('div', { key: 'k71', style: { ...S.row, marginBottom: 10 } }, [
+            h('span', { key: 'k72', style: S.hint }, recorder.recording ? '正在录…' : recorder.clip !== undefined ? '有一段待保存的片段' : '没在录'),
           ]),
           (session?.recordings ?? []).length === 0
-            ? h('div', { style: S.hint }, '还没有保存过片段。录像只是氛围功能，不开也能面试。')
+            ? h('div', { key: 'k18', style: S.hint }, '还没有保存过片段。录像只是氛围功能，不开也能面试。')
             : h('div', null, (session.recordings ?? []).map(item => h('div', {
               key: item.name,
               style: { display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${C.lineSoft}`, fontSize: 12 },
             }, [
-              h('span', { style: S.pill(item.kind === 'video' ? C.blue : C.green) }, item.kind === 'video' ? '录像' : '录音'),
-              h('span', { style: { flex: '1 1 auto', color: C.dim } }, item.name),
-              h('span', { style: { ...S.mono, color: C.faint } }, `${(item.bytes / 1024).toFixed(0)} KiB`),
+              h('span', { key: 'k73', style: S.pill(item.kind === 'video' ? C.blue : C.green) }, item.kind === 'video' ? '录像' : '录音'),
+              h('span', { key: 'k74', style: { flex: '1 1 auto', color: C.dim } }, item.name),
+              h('span', { key: 'k75', style: { ...S.mono, color: C.faint } }, `${(item.bytes / 1024).toFixed(0)} KiB`),
             ]))),
         ]),
       ])
@@ -1302,13 +1302,13 @@ window.__ModuleLoader__.load({
       const report = session?.report ?? ''
 
       return h('div', null, [
-        h(Section, { title: '面试后分析', extra: h('span', { style: S.hint }, report !== '' ? `已生成 ${report.length} 字` : '还没生成') }, [
+        h(Section, { key: 'k76', title: '面试后分析', extra: h('span', { style: S.hint }, report !== '' ? `已生成 ${report.length} 字` : '还没生成') }, [
           report !== ''
-            ? h(Markdown, { text: report })
+            ? h(Markdown, { key: 'k19', text: report })
             : h('div', { style: S.hint }, '还没有报告。在 DSH 对话里让助手用 interview-conduct 技能收尾，它会调 interview_finish 把分析写进来。'),
         ]),
-        h(Section, { title: '统计' }, [
-          h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 } }, [
+        h(Section, { key: 'k77', title: '统计' }, [
+          h('div', { key: 'k78', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 } }, [
             statTile('提问', session?.stats?.asked ?? 0),
             statTile('回答', session?.stats?.answered ?? 0),
             statTile('考点', `${session?.stats?.checklistProbed ?? 0}/${session?.stats?.checklistTotal ?? 0}`),
@@ -1322,8 +1322,8 @@ window.__ModuleLoader__.load({
     /** One statistic tile. */
     function statTile(label, value) {
       return h('div', { style: { background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 9, padding: '10px 12px' } }, [
-        h('div', { style: { ...S.mono, fontSize: 18, color: C.text } }, String(value)),
-        h('div', { style: { fontSize: 11.5, color: C.faint, marginTop: 2 } }, label),
+        h('div', { key: 'k79', style: { ...S.mono, fontSize: 18, color: C.text } }, String(value)),
+        h('div', { key: 'k80', style: { fontSize: 11.5, color: C.faint, marginTop: 2 } }, label),
       ])
     }
 
@@ -1381,49 +1381,49 @@ window.__ModuleLoader__.load({
       const rows = sessionsPoll.data?.sessions ?? []
 
       return h('div', { style: S.page }, [
-        h('div', { style: S.head }, [
-          h('div', { style: { minWidth: 0 } }, [
-            h('div', { style: S.title }, '模拟面试间'),
-            h('div', { style: S.sub }, '简历 + JD → 一场有准备的面试'),
+        h('div', { key: 'k81', style: S.head }, [
+          h('div', { key: 'k82', style: { minWidth: 0 } }, [
+            h('div', { key: 'k83', style: S.title }, '模拟面试间'),
+            h('div', { key: 'k84', style: S.sub }, '简历 + JD → 一场有准备的面试'),
             config?.workspaceRoot !== undefined
-              ? h('div', {
+              ? h('div', { key: 'k20',
                 style: { ...S.mono, fontSize: 10.5, color: C.faint, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 420 },
                 title: `${config.workspaceRoot.path}\n${config.workspaceRoot.reason ?? ''}`,
               }, `工作区：${config.workspaceRoot.path}`)
               : null,
           ]),
-          h('div', { style: S.tabs }, [
-            h('div', { style: S.tab(tab === 'prepare'), onClick: () => setTab('prepare') }, '准备'),
-            h('div', { style: S.tab(tab === 'live'), onClick: () => setTab('live') }, '面试中'),
-            h('div', { style: S.tab(tab === 'report'), onClick: () => setTab('report') }, '报告'),
+          h('div', { key: 'k85', style: S.tabs }, [
+            h('div', { key: 'k86', style: S.tab(tab === 'prepare'), onClick: () => setTab('prepare') }, '准备'),
+            h('div', { key: 'k87', style: S.tab(tab === 'live'), onClick: () => setTab('live') }, '面试中'),
+            h('div', { key: 'k88', style: S.tab(tab === 'report'), onClick: () => setTab('report') }, '报告'),
           ]),
-          h('button', { style: { ...S.btn(true, false), marginLeft: 10 }, onClick: createSession }, '新建面试'),
+          h('button', { key: 'k89', style: { ...S.btn(true, false), marginLeft: 10 }, onClick: createSession }, '新建面试'),
         ]),
 
         notice !== undefined
-          ? h('div', {
+          ? h('div', { key: 'k21',
             style: {
               padding: '8px 18px', fontSize: 12, display: 'flex', gap: 10, alignItems: 'center',
               background: notice.kind === 'error' ? `${C.red}14` : notice.kind === 'ok' ? `${C.green}12` : C.panel,
               borderBottom: `1px solid ${C.line}`, color: notice.kind === 'error' ? C.red : notice.kind === 'ok' ? C.green : C.dim,
             },
           }, [
-            h('span', { style: { fontWeight: 600 } }, notice.title),
-            notice.detail !== undefined ? h('span', { style: { color: C.dim } }, notice.detail) : null,
-            h('span', { style: { marginLeft: 'auto', cursor: 'pointer', color: C.faint }, onClick: () => setNotice(undefined) }, '×'),
+            h('span', { key: 'k90', style: { fontWeight: 600 } }, notice.title),
+            notice.detail !== undefined ? h('span', { key: 'k22', style: { color: C.dim } }, notice.detail) : null,
+            h('span', { key: 'k91', style: { marginLeft: 'auto', cursor: 'pointer', color: C.faint }, onClick: () => setNotice(undefined) }, '×'),
           ])
           : null,
 
-        h('div', { style: { display: 'flex', flex: '1 1 auto', minHeight: 0 } }, [
+        h('div', { key: 'k92', style: { display: 'flex', flex: '1 1 auto', minHeight: 0 } }, [
           // 会话列表
-          h('div', {
+          h('div', { key: 'k93',
             style: {
               width: 190, flex: '0 0 190px', borderRight: `1px solid ${C.line}`,
               overflowY: 'auto', padding: 10,
             },
           }, [
             rows.length === 0
-              ? h('div', { style: S.hint }, '还没有面试会话。')
+              ? h('div', { key: 'k23', style: S.hint }, '还没有面试会话。')
               : rows.map(row => h('div', {
                 key: row.id,
                 style: {
@@ -1433,23 +1433,23 @@ window.__ModuleLoader__.load({
                 },
                 onClick: () => setSelected(row.id),
               }, [
-                h('div', { style: { fontSize: 12.5, color: row.id === selected ? C.text : C.dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, row.title),
-                h('div', { style: { fontSize: 10.5, color: C.faint, marginTop: 3 } },
+                h('div', { key: 'k94', style: { fontSize: 12.5, color: row.id === selected ? C.text : C.dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, row.title),
+                h('div', { key: 'k95', style: { fontSize: 10.5, color: C.faint, marginTop: 3 } },
                   `${row.status} · 考点 ${row.probedCount}/${row.checklistCount}`),
               ])),
           ]),
 
           // 主区
-          h('div', { style: { flex: '1 1 auto', minWidth: 0, overflowY: 'auto', padding: 18 } }, [
+          h('div', { key: 'k96', style: { flex: '1 1 auto', minWidth: 0, overflowY: 'auto', padding: 18 } }, [
             session === undefined
-              ? h('div', { style: { ...S.hint, padding: 40, textAlign: 'center' } }, '还没有面试。先新建一场，或者从左边选一场。')
+              ? h('div', { key: 'k24', style: { ...S.hint, padding: 40, textAlign: 'center' } }, '还没有面试。先新建一场，或者从左边选一场。')
               : tab === 'prepare'
-                ? h(PrepareView, { session, config, onChanged: refreshAll, notify })
+                ? h(PrepareView, { key: 'k25', session, config, onChanged: refreshAll, notify })
                 : tab === 'live'
-                  ? h(LiveView, { session, config, onChanged: refreshAll, notify })
+                  ? h(LiveView, { key: 'k26', session, config, onChanged: refreshAll, notify })
                   : h(ReportView, { session, config, onChanged: refreshAll, notify }),
             sessionPoll.error !== undefined
-              ? h('div', { style: { ...S.hint, color: C.amber, marginTop: 12 } }, `读不到会话状态：${sessionPoll.error}`)
+              ? h('div', { key: 'k27', style: { ...S.hint, color: C.amber, marginTop: 12 } }, `读不到会话状态：${sessionPoll.error}`)
               : null,
           ]),
         ]),
