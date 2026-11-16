@@ -77,6 +77,18 @@ test('宿主 provider 返回空文本不算成功', async () => {
   assert.match(result.reason, /没有给出文字/)
 })
 
+test('宿主 provider 的「音频秒数 / 推理秒数」要接出来（准实时的判断依据）', async () => {
+  const speech = {
+    listProviders: () => [{ id: 'sensevoice-local', name: 'SenseVoice' }],
+    resolve: () => ({ provider: { info: { id: 'sensevoice-local', name: 'SenseVoice' } }, audio: Buffer.from('x') }),
+    transcribe: async () => ({ text: '你好', audioSeconds: 2.4, inferenceSeconds: 0.35 }),
+  }
+  const result = await transcribeWithHost({ ctx: { get: () => speech } }, { buffer: Buffer.from('x') })
+  assert.equal(result.ok, true)
+  assert.equal(result.text, '你好')
+  assert.deepEqual(result.timing, { audioSeconds: 2.4, inferenceSeconds: 0.35 })
+})
+
 // ── TTS：默认链路 ────────────────────────────────────────────────────────
 
 test('没配任何凭据时，auto 挑到免密钥的自然音而不是浏览器机器音', async () => {

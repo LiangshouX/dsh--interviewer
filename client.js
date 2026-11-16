@@ -1560,6 +1560,8 @@ window.__ModuleLoader__.load({
       const [active, setActive] = useState(false)
       const [error, setError] = useState(undefined)
       const [pending, setPending] = useState(0)
+      /** 上一段的「音频秒数 / 推理秒数」：准实时够不够，看这个数字。 */
+      const [timing, setTiming] = useState(undefined)
       const sessionRef = useRef(undefined)
       const onTextRef = useRef(onText)
       onTextRef.current = onText
@@ -1578,6 +1580,7 @@ window.__ModuleLoader__.load({
           const result = await apiPost('asr/transcribe', { dataBase64, mimeType: 'audio/wav', language })
           if (result?.ok === true && typeof result.text === 'string' && result.text.trim() !== '') {
             onTextRef.current?.(result.text.trim(), { mode: result.mode ?? 'server' })
+            if (result.timing !== undefined) setTiming(result.timing)
             setError(undefined)
           } else if (result?.ok !== true) {
             setError(result?.reason ?? '这一段没转出来，继续用键盘输入。')
@@ -1675,7 +1678,7 @@ window.__ModuleLoader__.load({
 
       useEffect(() => () => stop(), [stop])
 
-      return { supported, active, error, pending, start, stop, interim: pending > 0 ? '正在转写…' : '' }
+      return { supported, active, error, pending, timing, start, stop, interim: pending > 0 ? '正在转写…' : '' }
     }
 
 
@@ -3556,6 +3559,10 @@ window.__ModuleLoader__.load({
               h('div', { key: 't' }, `播报：${ttsLabel}`),
               asrInfo?.reason !== undefined
                 ? h('div', { key: 'ar', style: { fontStyle: 'italic' } }, asrInfo.reason)
+                : null,
+              serverAsr && segmentAsr.timing !== undefined
+                ? h('div', { key: 'at', style: { color: C.jade } },
+                  `上一段：${segmentAsr.timing.audioSeconds.toFixed(1)}s 音频 → ${segmentAsr.timing.inferenceSeconds.toFixed(2)}s 转写`)
                 : null,
               tts.notice !== undefined
                 ? h('div', { key: 'tn', style: { color: C.amber } }, tts.notice)

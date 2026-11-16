@@ -151,7 +151,16 @@ export async function transcribeWithHost(service, input, signal) {
         hint: '这一段可能没有说话声；继续用键盘输入不受影响。',
       }
     }
-    return { ok: true, mode: 'host', text, provider: spec?.provider?.info?.id ?? '', model: spec?.provider?.info?.name ?? '' }
+    return {
+      ok: true,
+      mode: 'host',
+      text,
+      provider: spec?.provider?.info?.id ?? '',
+      model: spec?.provider?.info?.name ?? '',
+      // 宿主 provider 会报「音频秒数 / 推理秒数」——这是判断准实时够不够
+      // 的第一手数字，面板要显示它，别把它扔掉。
+      ...(timingOf(raw) === undefined ? {} : { timing: timingOf(raw) }),
+    }
   } catch (error) {
     return {
       ok: false,
@@ -242,4 +251,22 @@ export function locationLabel(location) {
 export function messageOf(error) {
   if (error !== null && typeof error === 'object' && typeof error.message === 'string') return error.message
   return String(error)
+}
+
+/**
+ * Read the provider's own timing facts, when it reports them.
+ *
+ * SenseVoice 的返回是 `{ text, audioSeconds, inferenceSeconds }`。这两个数字
+ * 决定「分段 + 整段转写」到底够不够准实时——面板显示它，`perf` 也能拿它回归。
+ *
+ * @param {any} result
+ * @returns {{audioSeconds: number, inferenceSeconds: number}|undefined}
+ */
+export function timingOf(result) {
+  if (result === null || typeof result !== 'object') return undefined
+  const audioSeconds = result.audioSeconds
+  const inferenceSeconds = result.inferenceSeconds
+  if (typeof audioSeconds !== 'number' || typeof inferenceSeconds !== 'number') return undefined
+  if (!Number.isFinite(audioSeconds) || !Number.isFinite(inferenceSeconds)) return undefined
+  return { audioSeconds, inferenceSeconds }
 }
