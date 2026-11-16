@@ -110,7 +110,7 @@ Host 侧有两条采集通道，启动时自动选：
    Windows 11 24H2 上有一类机器 DShow 采集坏了（「相机」应用正常、ffmpeg 报
    Unable to BindToObject），而 Chromium 的 MF 采集还能用。
 
-面板会显示当前用的是哪条（fmpeg / chromium-mf）。两条都需要**本机**有对应程序：
+面板会显示当前用的是哪条（`ffmpeg` 或 `chromium-mf`）。两条都需要**本机**有对应程序：
 ffmpeg 由你指定路径或走 PATH；Chromium 通道用本机的 Chrome / Edge（也可在设置里指定）。
 
 ### 为什么需要 ffmpeg
