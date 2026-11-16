@@ -21,18 +21,29 @@
 #                   （dataRoot 是旧名，仍然认，但请换用 workspaceRoot。）
 #   jdFetchTimeoutMs  JD 链接抓取超时（毫秒）。超时即视为失败，交给手动兜底。
 #   jdMaxChars      JD 抓取后保留的最大字符数（正文裁剪）。
-#   asrProvider     语音识别来源：auto | browser | none
-#                   auto = 有 asrApiKey+asrBaseUrl 就走服务端；否则继承 DSH 宿主
-#                          的模型配置（读得到端点与凭据就用）；再否则回落浏览器原生。
-#   asrBaseUrl      服务端识别服务的基址，例如 https://api.example.com/v1
-#   asrApiKey       服务端识别服务的 API key（留空则尝试继承宿主）
-#   asrModel        识别模型，例如 whisper-1
-#   asrEndpoint     转写路径，默认 /audio/transcriptions（OpenAI 兼容 multipart）
+#   asrProvider     语音识别来源：auto | host | openai | minimax | browser | none
+#                   auto = **宿主优先**（宿主的 speechToText 服务，provider 由宿主
+#                   决定，插件不经手凭据）→ 插件自己的服务端识别 → 浏览器原生。
+#                   host = 只用宿主语音服务；openai/minimax = 只用插件自己的端点。
+#   asrBaseUrl      服务端识别基址（仅在插件自己走服务端时用）
+#   asrApiKey       明文 key（不推荐；优先用 asrApiKeyEnv）
+#   asrApiKeyEnv    凭据名（走 DSH credentials seam，密钥不进配置文件）
+#   asrModel        识别模型，留空按协议取（openai: whisper-1 / minimax: asr-1.0）
+#   asrEndpoint     转写路径，留空按协议取
 #   asrLanguage     识别语言提示，默认 zh
-#   ttsProvider     语音播报来源：auto | browser | none
-#                   auto = 运行时探测（浏览器 SpeechSynthesis 优先）。
-#   ttsRate         语速（0.5 ~ 2）。
-#   ttsVoice        音色名（留空 = 用系统默认中文音色）。
+#   ttsProvider     语音播报来源：auto | host | mimo | openai | minimax | baidu | edge | browser | none
+#                   auto = 配了凭据的模型 → 免密钥的自然音（百度 / Edge 神经音色）
+#                   → 浏览器原生音色。**默认不是系统机器音。**
+#   ttsBaseUrl      合成服务基址（留空用该 provider 的默认值）
+#   ttsApiKeyEnv    合成凭据名（MIMO_API_KEY / OPENAI_API_KEY / MINIMAX_API_KEY）
+#   ttsApiKey       明文 key（不推荐）
+#   ttsModel        合成模型。MiMo 三种：mimo-v2.5-tts（预置音色）/
+#                   mimo-v2.5-tts-voicedesign（文本描述音色）/ mimo-v2.5-tts-voiceclone（样本复刻）
+#   ttsVoice        预置音色 id（mimo 默认 mimo_default；openai 默认 alloy）
+#   ttsStyle        自然语言风格指令（音色设计描述 / 情绪语气语速）
+#   ttsReferenceAudio 声音复刻用的本机音频样本（mp3/wav，≤10 MB，仅在合成时读取）
+#   ttsFormat       输出格式：mp3 | wav
+#   ttsRate         语速（0.5 ~ 2）
 #   recordVideo     是否默认开启摄像头录像（true/false）。
 #   recordAudio     是否默认开启录音（true/false）。
 #   ffmpegPath      ffmpeg 的可执行文件路径。
@@ -55,12 +66,20 @@
         asrProvider: 'auto'
         asrBaseUrl: ''
         asrApiKey: ''
+        asrApiKeyEnv: 'MINIMAX_API_KEY'
         asrModel: ''
-        asrEndpoint: '/audio/transcriptions'
+        asrEndpoint: ''
         asrLanguage: 'zh'
         ttsProvider: 'auto'
-        ttsRate: 1.0
+        ttsBaseUrl: ''
+        ttsApiKeyEnv: ''
+        ttsApiKey: ''
+        ttsModel: ''
         ttsVoice: ''
+        ttsStyle: ''
+        ttsReferenceAudio: ''
+        ttsFormat: 'mp3'
+        ttsRate: 1.0
         recordVideo: true
         recordAudio: true
         ffmpegPath: ''

@@ -32,8 +32,8 @@
 | **动态调整** | 面试中 `add` / `update` / `remove` / `probe` 四种调整，每次都留理由 |
 | **摄像头** | 现场画面 + 录像指示灯，权限被拒就降级，不阻断流程 |
 | **录音** | MediaRecorder 录制，停止后一键保存到本机会话目录 |
-| **语音识别** | 三级链路：插件配置 → 继承 DSH 宿主 → 浏览器原生 + 键盘兜底 |
-| **语音播报** | 助手的新问题自动朗读（Web Speech Synthesis），可关 |
+| **语音识别** | 宿主优先：DSH 的语音服务 → 插件自己的服务端识别 → 浏览器原生 → 键盘兜底；前两级用**分段识别**（按静音切段，边说边出字） |
+| **语音播报** | 模型音色优先：MiMo TTS / OpenAI / MiniMax → 免密钥自然音 → 浏览器音色；同一句只合成一次 |
 | **岗位档案** | 同一个岗位第二次面试，直接继承上次的考点基线；面试结束可回写更新 |
 | **分析报告** | 面试结束基于**转录原话**写报告，不是通用套话 |
 
@@ -130,20 +130,24 @@ brew install ffmpeg             # macOS
 
 ## 语音识别怎么配
 
-插件的识别链路是**三级继承**，逐级向下：
+插件的识别链路是**宿主优先的四级继承**：
 
 ```
-① 插件配置     asrApiKey + asrBaseUrl 都有  → 服务端识别
-② 继承宿主     读 DSH 当前 provider 的端点与凭据 → 服务端识别
-③ 都没配       → 浏览器原生识别 + 键盘输入兜底（零配置，永远可用）
+① 宿主语音服务   DSH 的 ctx.speechToText（provider 由宿主注册，可以是本地模型）
+② 插件配置       asrApiKeyEnv / asrBaseUrl 指向的 OpenAI / MiniMax 兼容端点
+③ 浏览器原生     Web Speech API · Chromium 的识别后端
+④ 键盘输入       永远可用，识别失败不阻断面试
 ```
+
+前两级都是"整段录音"转写，没有流式协议，所以面板在 ①② 模式下用
+**分段识别**：按静音切段（≤6 秒），每段立刻转写立刻上屏——一句话一落定。
 
 在 `cordis.patch.yml`（或你自己的 patch 层）里配：
 
 ```yaml
 config:
-  asrProvider: 'auto'      # auto | minimax | openai | browser | none
-  asrBaseUrl: ''           # 留空 = 从宿主继承
+  asrProvider: 'auto'      # auto | host | minimax | openai | browser | none
+  asrBaseUrl: ''           # 留空 = 该协议/宿主的默认端点
   asrApiKeyEnv: 'MINIMAX_API_KEY'   # 凭据引用（推荐）：走 DSH 的 credentials seam
   asrApiKey: ''            # 明文 key（不推荐；密钥别进配置文件）
   asrModel: ''             # 留空 = 按协议取默认
@@ -159,14 +163,56 @@ config:
 
 协议按 provider / baseUrl 自动判定，也可以用 `asrProvider` 强制。
 
-**继承不到就明说**：宿主有模型 ≠ 插件拿得到 ASR 凭据。拿不到时插件会
-回落浏览器识别，并在面板上写明原因——不会偷偷失败，也不会假装在用服务端。
+**宿主优先是什么意思**：DSH 若启用了 voice-input bundle，`ctx.speechToText`
+就在，插件直接按 provider id 选它、**不经手任何厂商凭据**；宿主模型没准备好时
+面板会显示「准备语音模型」按钮。没启用时按 ②③④ 往下走。
+
+**能继承的只有凭据名，不是端点。** 已从装机包里读实：`ctx.llm.listProviders()`
+只返回 `[{id, name}]`，没有 `baseUrl`/`apiKey`/`apiKeyEnv`。所以「继承宿主聊天
+provider 的端点当识别端点」这条路不成立；宿主 profile 里的 `apiKeyEnv` 是**凭据
+引用**，插件按同一个名字走 credentials seam 就能取到——这才是不复制密钥的继承方式。
 
 **音频要转码**：浏览器只会录 webm/opus，而识别服务不收 webm。
 插件在上传前用 WebAudio 解码并重编码成 **16 kHz 单声道 WAV**。
 
 浏览器原生识别依赖 Chromium 的识别后端，在不少网络环境里连不上。
 **键盘输入永远可用**，识别失败不阻断面试。
+
+## 语音播报怎么配
+
+播报链路同样按顺序回落，**默认不是系统机器音**：
+
+```
+① 宿主语音服务   ctx.textToSpeech（DSH 目前没有，将来有就零改动接管）
+② 配好的模型     MiMo TTS / OpenAI / MiniMax（凭据走凭据名，不进插件配置）
+③ 免密钥自然音   百度朗读（普通话自然度明显好于系统 SAPI 音色）
+④ 浏览器音色     speechSynthesis，最后一步
+```
+
+```yaml
+config:
+  ttsProvider: 'auto'   # auto | host | mimo | openai | minimax | baidu | edge | browser | none
+  ttsModel: 'mimo-v2.5-tts'          # MiMo 三选一，见下表
+  ttsVoice: '冰糖'                    # 预置音色 id；留空用默认
+  ttsApiKeyEnv: 'MIMO_API_KEY'        # 凭据名；留空按 provider 预设
+  ttsStyle: '语速偏慢，语气克制'        # 风格指令 / 音色设计描述
+  ttsReferenceAudio: 'D:\voice\me.mp3' # 仅 voiceclone：本机样本，合成时才读取
+  ttsFormat: 'mp3'
+  ttsRate: 1.0
+```
+
+MiMo 三种模型请求形状不同，插件用一个适配器统一处理：
+
+| 模型 | 音色从哪来 | 适合 |
+|---|---|---|
+| `mimo-v2.5-tts` | `ttsVoice` 预置音色 id（默认 `mimo_default`） | 直接可用，面试官音色 |
+| `mimo-v2.5-tts-voicedesign` | `ttsStyle` 的**文本描述**（不支持 `ttsVoice`） | 想定制一个专属面试官音色 |
+| `mimo-v2.5-tts-voiceclone` | `ttsReferenceAudio` 的**本机样本**（mp3/wav ≤10 MB） | 想复刻某个具体声音 |
+
+> 注意：MiMo 的 TTS 走的是 `POST /v1/chat/completions` + `audio` 参数，
+> **不是** OpenAI 的 `/audio/speech`；两种协议插件都支持（`openai` 走后者）。
+
+同一条播报会被缓存（按文本+语速，容量封顶），不会每句都重新合成。
 
 ## 岗位档案（历史复用）
 

@@ -16,7 +16,6 @@
  * and a JD are personal data; the door stays narrow.
  */
 import { API_PREFIX } from './paths.js'
-import { resolveAsrConfig, transcribe } from './asr.js'
 import { FRAME_BOUNDARY } from './camera.js'
 
 /** Largest JSON body the plugin accepts (resume + JD + a few fields). */
@@ -222,8 +221,17 @@ async function readResource(service, segments, query) {
   if (head === 'host-sessions') {
     return { sessions: await service.listHostSessions() }
   }
+  if (head === 'voice') {
+    // 整条语音链路：识别走哪条、合成走哪条、为什么。
+    // 面板一次拿全，避免「识别状态」和「合成状态」分两次问、各自过期。
+    return service.voiceStatus()
+  }
   if (head === 'asr') {
-    return resolveAsrConfig(service)
+    // 兼容旧端点：只回识别那半边。
+    return (await service.voiceStatus()).asr
+  }
+  if (head === 'tts') {
+    return (await service.voiceStatus()).tts
   }
   if (head === 'transcript') {
     return { transcript: await service.getTranscript(query.session ?? '') }
@@ -369,12 +377,30 @@ async function runAction(service, segments, body) {
       throw new Error(`未知的简历操作：${rest.join('/')}`)
     case 'asr': {
       if (rest[0] === 'status') {
-        return resolveAsrConfig(service)
+        return (await service.voiceStatus()).asr
       }
       if (rest[0] === 'transcribe') {
-        return transcribe(service, body)
+        return service.transcribeAudio(body)
       }
       throw new Error(`未知的识别操作：${rest.join('/')}`)
+    }
+    case 'voice': {
+      // voice/prepare：让宿主开始准备它的语音模型（首次要下载）。
+      if (rest[0] === 'prepare') {
+        return service.prepareSpeech(body.providerId)
+      }
+      throw new Error(`未知的语音操作：${rest.join('/')}`)
+    }
+    case 'tts': {
+      // tts/speak：面板拿 base64 音频自己播；宿主不做播放。
+      if (rest[0] === 'speak') {
+        return service.synthesizeSpeech({
+          text: body.text,
+          voice: body.voice,
+          rate: body.rate,
+        })
+      }
+      throw new Error(`未知的播报操作：${rest.join('/')}`)
     }
     case 'profiles': {
       if (rest.length === 0) {

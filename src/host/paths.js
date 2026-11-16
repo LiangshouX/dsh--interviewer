@@ -175,9 +175,9 @@ export function resolveConfig(raw) {
     workspaceRootExplicit: text(config.workspaceRoot) !== undefined || text(config.dataRoot) !== undefined,
     jdFetchTimeoutMs: number(config.jdFetchTimeoutMs, 1000, 120000, 15000),
     jdMaxChars: number(config.jdMaxChars, 500, 200000, 20000),
-    asrProvider: oneOf(config.asrProvider, ['auto', 'browser', 'none'], 'auto'),
-    ttsProvider: oneOf(config.ttsProvider, ['auto', 'browser', 'none'], 'auto'),
-    // 服务端语音识别（可选）：填了 key 与 baseUrl 就用服务端，否则继承宿主，再否则回落浏览器。
+    // 语音识别：host（宿主 speechToText）> 服务端（插件自己直连）> 浏览器。
+    asrProvider: oneOf(config.asrProvider, ['auto', 'host', 'browser', 'none', 'minimax', 'openai'], 'auto'),
+    // 服务端语音识别（回落链路）：填了 key 与 baseUrl 就用服务端，否则继承宿主，再否则回落浏览器。
     asrBaseUrl: text(config.asrBaseUrl) ?? '',
     asrApiKey: text(config.asrApiKey) ?? '',
     // 凭据引用（推荐）：走 DSH 的 credentials seam，密钥不进配置文件。
@@ -185,8 +185,22 @@ export function resolveConfig(raw) {
     asrModel: text(config.asrModel) ?? '',
     asrEndpoint: text(config.asrEndpoint) ?? '',
     asrLanguage: text(config.asrLanguage) ?? 'zh',
-    ttsRate: number(config.ttsRate, 0.5, 2, 1),
+    // 语音合成：宿主 > 按配置的模型（mimo/openai/minimax）> 免密钥自然音
+    // （baidu/edge）> 浏览器。**默认不是机器音**：auto 会先找模型，再找
+    // 免密钥的自然音，最后才用系统音色。
+    ttsProvider: oneOf(config.ttsProvider, ['auto', 'host', 'mimo', 'openai', 'minimax', 'baidu', 'edge', 'browser', 'none'], 'auto'),
+    ttsBaseUrl: text(config.ttsBaseUrl) ?? '',
+    ttsApiKeyEnv: text(config.ttsApiKeyEnv) ?? '',
+    ttsApiKey: text(config.ttsApiKey) ?? '',
+    ttsModel: text(config.ttsModel) ?? '',
+    // 音色：mimo-v2.5-tts 用预置音色 id；voiceclone 时改由参考音频决定。
     ttsVoice: text(config.ttsVoice) ?? '',
+    // 风格指令（自然语言）：MiMo 的 user 消息、minimax 的音色说明都可复用。
+    ttsStyle: text(config.ttsStyle) ?? '',
+    // 声音复刻用的本机样本（mp3 / wav，≤10 MB）。只在合成时读取，不外传文件。
+    ttsReferenceAudio: text(config.ttsReferenceAudio) ?? '',
+    ttsFormat: oneOf(config.ttsFormat, ['mp3', 'wav'], 'mp3'),
+    ttsRate: number(config.ttsRate, 0.5, 2, 1),
     recordVideo: flag(config.recordVideo, true),
     recordAudio: flag(config.recordAudio, true),
     // ffmpeg 的位置。留空 = 自动找（DSH_FFMPEG_PATH → PATH → 常见安装位置）。

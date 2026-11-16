@@ -1323,37 +1323,361 @@ window.__ModuleLoader__.load({
       return { supported, active, interim, error, start, stop }
     }
 
-    /** Speech synthesis, with a Chinese voice preferred when one exists. */
-    function useTts() {
+    // ── voice ─────────────────────────────────────────────────────────────
+
+    /** 把 base64 音频变成可播放的 Blob。 */
+    function base64ToBlob(base64, mimeType) {
+      const binary = atob(String(base64))
+      const bytes = new Uint8Array(binary.length)
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+      return new Blob([bytes], { type: mimeType || 'audio/mpeg' })
+    }
+
+    /** 按句切分，浏览器音色逐句播报会更自然。 */
+    function splitSentences(text) {
+      return String(text)
+        .replace(/\s+/g, ' ')
+        .split(/(?<=[。！？!?；;…\n])/)
+        .map(item => item.trim())
+        .filter(item => item !== '')
+    }
+
+    /** 按名称挑一个尽量不"机器"的中文音色。 */
+    function pickBrowserVoice(voices) {
+      const list = Array.isArray(voices) ? voices : []
+      const chinese = list.filter(voice => /zh|cmn|Chinese|普通话/i.test(`${voice.lang} ${voice.name}`))
+      const scored = (chinese.length > 0 ? chinese : list).map(voice => {
+        const name = `${voice.name} ${voice.lang}`
+        let score = 0
+        if (/Natural/i.test(name)) score += 6
+        if (/Online|Neural/i.test(name)) score += 4
+        if (/Xiaoxiao|Xiaoyi|Yunxi|Yunyang|Yunxia|Tingting/i.test(name)) score += 3
+        if (/Google/i.test(name)) score += 2
+        if (/Huihui|Kangkang/i.test(name)) score += 1
+        if (voice.localService === false) score += 1
+        return { voice, score }
+      })
+      scored.sort((left, right) => right.score - left.score)
+      return scored.length === 0 ? undefined : scored[0].voice
+    }
+
+    /**
+     * 在第一次用户手势里解锁音频。
+     *
+     * **为什么必须做。** 服务端合成返回的是音频字节，播放走 `new Audio()`；
+     * 浏览器会拦掉"没有用户手势"的自动播放。面试里第一句提问往往是自动
+     * 播报的——不在「开始面试」这个手势里解锁，那一句就会被静默拦掉。
+     */
+    let audioUnlocked = false
+    function unlockAudio() {
+      if (audioUnlocked || typeof window === 'undefined') return
+      audioUnlocked = true
+      try {
+        const Ctor = window.AudioContext ?? window.webkitAudioContext
+        if (Ctor !== undefined) {
+          const context = new Ctor()
+          context.resume?.()
+          const oscillator = context.createOscillator()
+          const gain = context.createGain()
+          gain.gain.value = 0
+          oscillator.connect(gain)
+          gain.connect(context.destination)
+          oscillator.start()
+          oscillator.stop(context.currentTime + 0.01)
+          setTimeout(() => { context.close?.() }, 200)
+        }
+      } catch {
+        // 解锁失败不影响功能：播放时会再试一次，失败就回落浏览器音色。
+      }
+    }
+
+    /**
+     * 语音播报：**服务端模型优先，浏览器音色兜底**。
+     *
+     * 三条纪律：
+     *  1. 同一句话只合成一次（按 文本+语速 缓存，容量封顶，不常驻大对象）；
+     *  2. 服务端不可用/被拦播放 → 静默回落浏览器音色，**但要说明原因**；
+     *  3. 失败不是错误状态：面试继续，问题本来就以文字显示。
+     *
+     * @param {object|undefined} status `GET /voice` 的 tts 段
+     * @param {object|undefined} config 面板配置
+     */
+    function useSpeech(status, config) {
       const [speaking, setSpeaking] = useState(false)
+      const [notice, setNotice] = useState(undefined)
+      const cacheRef = useRef(new Map())
+      const audioRef = useRef(undefined)
+      const urlRef = useRef(undefined)
 
-      const speak = useCallback((text, options = {}) => {
-        if (typeof window === 'undefined' || window.speechSynthesis === undefined) return false
-        const utterance = new window.SpeechSynthesisUtterance(String(text ?? ''))
-        utterance.lang = 'zh-CN'
-        utterance.rate = options.rate ?? 1
-        const voices = window.speechSynthesis.getVoices?.() ?? []
-        const chinese = voices.find(voice => /zh|cmn|Chinese/i.test(`${voice.lang} ${voice.name}`))
-        if (chinese !== undefined) utterance.voice = chinese
-        utterance.onend = () => setSpeaking(false)
-        utterance.onerror = () => setSpeaking(false)
-        window.speechSynthesis.cancel()
-        window.speechSynthesis.speak(utterance)
-        setSpeaking(true)
-        return true
-      }, [])
-
-      const cancel = useCallback(() => {
+      const stop = useCallback(() => {
+        const audio = audioRef.current
+        if (audio !== undefined) {
+          try {
+            audio.pause()
+            audio.currentTime = 0
+          } catch { /* 已经停了 */ }
+        }
         if (typeof window !== 'undefined' && window.speechSynthesis !== undefined) {
-          window.speechSynthesis.cancel()
+          try { window.speechSynthesis.cancel() } catch { /* 没有在播 */ }
+        }
+        if (urlRef.current !== undefined) {
+          try { URL.revokeObjectURL(urlRef.current) } catch { /* 已经回收 */ }
+          urlRef.current = undefined
         }
         setSpeaking(false)
       }, [])
 
-      useEffect(() => () => cancel(), [cancel])
+      useEffect(() => () => stop(), [stop])
 
-      return { speak, cancel, speaking, supported: typeof window !== 'undefined' && window.speechSynthesis !== undefined }
+      /** 播一段 base64 音频；返回是否真的播起来了。 */
+      const playClip = useCallback(async clip => {
+        const audio = audioRef.current ?? (audioRef.current = new Audio())
+        audio.onended = () => setSpeaking(false)
+        audio.onerror = () => setSpeaking(false)
+        if (urlRef.current !== undefined) {
+          try { URL.revokeObjectURL(urlRef.current) } catch { /* 已回收 */ }
+        }
+        const url = URL.createObjectURL(base64ToBlob(clip.base64, clip.mimeType))
+        urlRef.current = url
+        audio.src = url
+        try {
+          setSpeaking(true)
+          await audio.play()
+          return true
+        } catch {
+          setSpeaking(false)
+          return false
+        }
+      }, [])
+
+      /** 浏览器音色（最后一步）：中文优先、按名称挑最自然的。 */
+      const speakBrowser = useCallback((text, rate) => {
+        if (typeof window === 'undefined' || window.speechSynthesis === undefined) return false
+        const sentences = splitSentences(text)
+        if (sentences.length === 0) return false
+        try {
+          window.speechSynthesis.cancel()
+        } catch { /* 没有在播 */ }
+        const voice = pickBrowserVoice(window.speechSynthesis.getVoices?.() ?? [])
+        for (const sentence of sentences) {
+          const utterance = new window.SpeechSynthesisUtterance(sentence)
+          utterance.lang = 'zh-CN'
+          utterance.rate = rate
+          if (voice !== undefined) utterance.voice = voice
+          utterance.onend = () => setSpeaking(false)
+          utterance.onerror = () => setSpeaking(false)
+          window.speechSynthesis.speak(utterance)
+        }
+        setSpeaking(true)
+        return true
+      }, [])
+
+      const speak = useCallback(async (text, options = {}) => {
+        const line = String(text ?? '').trim()
+        if (line === '') return false
+        const rate = options.rate ?? config?.ttsRate ?? 1
+        stop()
+
+        if (status?.mode === 'server') {
+          const key = `${rate}|${line}`
+          let clip = cacheRef.current.get(key)
+          if (clip === undefined) {
+            try {
+              const result = await apiPost('tts/speak', { text: line, rate })
+              if (result?.ok === true && typeof result.audioBase64 === 'string') {
+                clip = { base64: result.audioBase64, mimeType: result.mimeType ?? 'audio/mpeg' }
+                cacheRef.current.set(key, clip)
+                // 缓存封顶：语音是大对象，**不常驻内存**（见 AGENTS §11）。
+                if (cacheRef.current.size > 24) cacheRef.current.delete(cacheRef.current.keys().next().value)
+                setNotice(undefined)
+              } else {
+                setNotice(result?.reason ?? '模型播报不可用，已改用浏览器音色。')
+              }
+            } catch (failure) {
+              setNotice(`模型播报失败：${failure instanceof Error ? failure.message : String(failure)}`)
+            }
+          }
+          if (clip !== undefined) {
+            const played = await playClip(clip)
+            if (played) return true
+            setNotice('浏览器拦下了自动播放，已改用系统音色。')
+          }
+        }
+        return speakBrowser(line, rate)
+      }, [status?.mode, config?.ttsRate, playClip, speakBrowser, stop])
+
+      return { speak, stop, speaking, notice, supported: typeof window !== 'undefined' }
     }
+
+    /**
+     * 分段识别（宿主/服务端模式用）。
+     *
+     * **为什么是分段而不是流式。** 宿主的 `speechToText` 与主流 ASR 端点都
+     * 只支持"整段录音"，没有流式协议。所以"准实时"= 按静音切段（≤6 秒），
+     * 每段立刻转写、立刻上屏——一句话一落定，而不是等你说完一整段。
+     *
+     * VAD 用 RMS 阈值 + 静音时长；碎片丢弃（<350ms），避免咳嗽、键盘声
+     * 变成一条转录。
+     */
+    const ASR_SILENCE_MS = 450
+    const ASR_MAX_SEGMENT_MS = 6000
+    const ASR_MIN_SEGMENT_MS = 350
+    const ASR_RMS_THRESHOLD = 0.012
+
+    /** 合并 Float32 分片。 */
+    function mergeChunks(chunks) {
+      const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+      const merged = new Float32Array(total)
+      let offset = 0
+      for (const chunk of chunks) {
+        merged.set(chunk, offset)
+        offset += chunk.length
+      }
+      return merged
+    }
+
+    /** 线性重采样到 16 kHz（宿主与端点都要求 16 kHz 单声道 WAV）。 */
+    function resampleTo16k(samples, sampleRate) {
+      if (sampleRate === 16000 || samples.length === 0) return samples
+      const ratio = sampleRate / 16000
+      const length = Math.max(1, Math.floor(samples.length / ratio))
+      const output = new Float32Array(length)
+      for (let index = 0; index < length; index += 1) {
+        const source = Math.min(samples.length - 1, Math.floor(index * ratio))
+        output[index] = samples[source]
+      }
+      return output
+    }
+
+    /**
+     * 麦克风分段识别。
+     *
+     * @param {(text: string, meta: {mode: string}) => void} onText
+     * @param {{language?: string}} [options]
+     */
+    function useSegmentAsr(onText, options = {}) {
+      const language = options.language ?? 'zh'
+      const [active, setActive] = useState(false)
+      const [error, setError] = useState(undefined)
+      const [pending, setPending] = useState(0)
+      const sessionRef = useRef(undefined)
+      const onTextRef = useRef(onText)
+      onTextRef.current = onText
+
+      const supported = typeof window !== 'undefined'
+        && typeof navigator !== 'undefined'
+        && navigator.mediaDevices !== undefined
+        && (window.AudioContext ?? window.webkitAudioContext) !== undefined
+
+      /** 转写一段；失败只记原因，不打断面试。 */
+      const flush = useCallback(async (samples, sampleRate) => {
+        const wav = encodeWav(resampleTo16k(samples, sampleRate), 16000)
+        const dataBase64 = bufferToBase64(wav)
+        setPending(count => count + 1)
+        try {
+          const result = await apiPost('asr/transcribe', { dataBase64, mimeType: 'audio/wav', language })
+          if (result?.ok === true && typeof result.text === 'string' && result.text.trim() !== '') {
+            onTextRef.current?.(result.text.trim(), { mode: result.mode ?? 'server' })
+            setError(undefined)
+          } else if (result?.ok !== true) {
+            setError(result?.reason ?? '这一段没转出来，继续用键盘输入。')
+          }
+        } catch (failure) {
+          setError(`识别请求失败：${failure instanceof Error ? failure.message : String(failure)}`)
+        } finally {
+          setPending(count => Math.max(0, count - 1))
+        }
+      }, [language])
+
+      const stop = useCallback(() => {
+        const session = sessionRef.current
+        if (session === undefined) {
+          setActive(false)
+          return
+        }
+        try { session.processor.disconnect() } catch { /* 已断开 */ }
+        try { session.source.disconnect() } catch { /* 已断开 */ }
+        try { session.sink.disconnect() } catch { /* 已断开 */ }
+        try { session.stream.getTracks().forEach(track => track.stop()) } catch { /* 已停止 */ }
+        const rate = session.context.sampleRate
+        try { session.context.close() } catch { /* 已关闭 */ }
+        // 停止时把最后一段说完的话也送去转写，不丢尾句。
+        if (session.state.chunks.length > 0) {
+          const tail = mergeChunks(session.state.chunks)
+          session.state.chunks = []
+          if ((tail.length / rate) * 1000 >= ASR_MIN_SEGMENT_MS) void flush(tail, rate)
+        }
+        sessionRef.current = undefined
+        setActive(false)
+      }, [flush])
+
+      const start = useCallback(async () => {
+        if (sessionRef.current !== undefined) return false
+        if (!supported) {
+          setError('这个环境没有麦克风或 Web Audio，识别不可用。请用键盘输入——面试照常进行。')
+          return false
+        }
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+          const Ctor = window.AudioContext ?? window.webkitAudioContext
+          let context
+          try {
+            context = new Ctor({ sampleRate: 16000 })
+          } catch {
+            context = new Ctor()
+          }
+          const source = context.createMediaStreamSource(stream)
+          const processor = context.createScriptProcessor(4096, 1, 1)
+          const sink = context.createGain()
+          sink.gain.value = 0
+          const state = { chunks: [], speech: false, silenceMs: 0, durationMs: 0 }
+
+          processor.onaudioprocess = event => {
+            const input = event.inputBuffer.getChannelData(0)
+            let sum = 0
+            for (let index = 0; index < input.length; index += 1) sum += input[index] * input[index]
+            const rms = Math.sqrt(sum / input.length)
+            const frameMs = (input.length / context.sampleRate) * 1000
+            if (rms >= ASR_RMS_THRESHOLD) {
+              state.speech = true
+              state.silenceMs = 0
+              state.chunks.push(new Float32Array(input))
+              state.durationMs += frameMs
+            } else if (state.speech) {
+              state.chunks.push(new Float32Array(input))
+              state.silenceMs += frameMs
+              state.durationMs += frameMs
+            }
+            if (!state.speech) return
+            const done = state.silenceMs >= ASR_SILENCE_MS || state.durationMs >= ASR_MAX_SEGMENT_MS
+            if (!done) return
+            const merged = mergeChunks(state.chunks)
+            const spokeMs = state.durationMs - state.silenceMs
+            state.chunks = []
+            state.speech = false
+            state.silenceMs = 0
+            state.durationMs = 0
+            if (spokeMs >= ASR_MIN_SEGMENT_MS) void flush(merged, context.sampleRate)
+          }
+
+          source.connect(processor)
+          processor.connect(sink)
+          sink.connect(context.destination)
+          sessionRef.current = { context, source, processor, sink, stream, state }
+          setActive(true)
+          setError(undefined)
+          return true
+        } catch (failure) {
+          setError(`麦克风打不开：${failure instanceof Error ? failure.message : String(failure)}`)
+          return false
+        }
+      }, [flush, supported])
+
+      useEffect(() => () => stop(), [stop])
+
+      return { supported, active, error, pending, start, stop, interim: pending > 0 ? '正在转写…' : '' }
+    }
+
 
     // ── small components ──────────────────────────────────────────────────
 
@@ -2505,16 +2829,38 @@ window.__ModuleLoader__.load({
         return tracks.length > 0 ? new MediaStream(tracks) : undefined
       }, [media.stream])
       const audioRecorder = useRecorder(audioOnly)
-      const asrStatus = usePoll(() => apiGet('asr'), undefined, [])
-      const tts = useTts()
+      // 语音链路：识别走宿主 / 服务端 / 浏览器，播报走模型 / 免密钥自然音 / 浏览器。
+      // 4 秒轮询：宿主模型准备进度要跟着走，但不必抢面试轮询的 1.5 秒。
+      const voiceStatus = usePoll(() => apiGet('voice'), 4000, [])
+      const tts = useSpeech(voiceStatus.data?.tts, config)
       const videoRef = useRef(null)
       const [answer, setAnswer] = useState('')
       const [speaking, setSpeaking] = useState(false)
       const lastQuestionRef = useRef('')
 
-      const asr = useAsr((text) => {
-        if (text !== '') setAnswer(text)
-      })
+      /** 识别到的一句追加进草稿（用户可以改，所以只追加不覆盖）。 */
+      const appendRecognized = useCallback(text => {
+        if (typeof text !== 'string' || text.trim() === '') return
+        setAnswer(previous => `${previous}${previous.trim() === '' ? '' : ' '}${text.trim()}`)
+      }, [])
+
+      const webAsr = useAsr(appendRecognized)
+      const segmentAsr = useSegmentAsr(appendRecognized, { language: voiceStatus.data?.asr?.language ?? 'zh' })
+      const asrMode = voiceStatus.data?.asr?.mode ?? 'browser'
+      // 宿主/服务端模式用分段识别（它们只收整段录音）；浏览器模式用 Web Speech。
+      const serverAsr = asrMode === 'host' || asrMode === 'server'
+      const asr = serverAsr ? segmentAsr : webAsr
+
+      /** 让宿主开始准备它的语音模型（首次要下载）。 */
+      const prepareSpeech = useCallback(async () => {
+        try {
+          const result = await apiPost('voice/prepare', {})
+          notify(result.ok === true ? '已开始准备' : '准备没启动', result.reason ?? '', result.ok === true ? 'ok' : 'error')
+          voiceStatus.refresh()
+        } catch (failure) {
+          notify('准备失败', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [notify, voiceStatus.refresh])
 
       // 摄像头画面挂到 <video> 上。
       useEffect(() => {
@@ -2538,13 +2884,14 @@ window.__ModuleLoader__.load({
       }, [transcript])
 
       // 新问题自动朗读（可关）。
+      const speakLine = tts.speak
       useEffect(() => {
         if (lastQuestion === undefined) return
         if (!speaking) return
         if (lastQuestion.text === lastQuestionRef.current) return
         lastQuestionRef.current = lastQuestion.text
-        if (config?.ttsProvider !== 'none') tts.speak(lastQuestion.text, { rate: config?.ttsRate ?? 1 })
-      }, [lastQuestion, speaking, tts, config])
+        if (config?.ttsProvider !== 'none') void speakLine(lastQuestion.text, { rate: config?.ttsRate ?? 1 })
+      }, [lastQuestion, speaking, speakLine, config?.ttsProvider, config?.ttsRate])
 
       const submitAnswer = useCallback(async () => {
         const text = answer.trim()
@@ -2623,6 +2970,9 @@ window.__ModuleLoader__.load({
       }, [audioRecorder, notify])
 
       const startInterview = useCallback(async () => {
+        // 这是整个面试里最可靠的一次用户手势：在这里解锁音频，
+        // 第一句提问自动播报时才不会被浏览器拦掉。
+        unlockAudio()
         try {
           await apiPost(`sessions/${session.session.id}/start`, {})
           onChanged()
@@ -2665,6 +3015,24 @@ window.__ModuleLoader__.load({
       const hasAnyVideo = hasVideo || hasHostVideo
       const title = session?.session?.title ?? '面试'
       const questionText = lastQuestion?.text
+
+      // 链路名称：面板必须能直接回答「现在到底在用哪条链路」，
+      // 而不是只给一个 mode 枚举。
+      const asrInfo = voiceStatus.data?.asr
+      const ttsInfo = voiceStatus.data?.tts
+      const asrLabel = asrMode === 'host'
+        ? `宿主语音 · ${asrInfo?.host?.provider?.name ?? asrInfo?.host?.provider?.id ?? '本地模型'}`
+        : asrMode === 'server'
+          ? `服务端识别 · ${asrInfo?.server?.model ?? 'HTTP'}`
+          : asrMode === 'none'
+            ? '识别已关闭'
+            : '浏览器识别'
+      const ttsLabel = ttsInfo?.mode === 'server'
+        ? `模型播报 · ${ttsInfo.label ?? ttsInfo.provider ?? ''}`
+        : ttsInfo?.mode === 'none'
+          ? '播报已关闭'
+          : '浏览器音色'
+      const needsPrepare = asrMode === 'host' && asrInfo?.host?.needsPreparation === true
 
       // 窄容器里**纵向堆叠**：舞台在上、回答在中、控件在下，整页内部滚动。
       //
@@ -3104,24 +3472,31 @@ window.__ModuleLoader__.load({
                 h('button', {
                   key: 'asr',
                   style: S.btn(asr.active ? 'tally' : false, !asr.supported),
-                  onClick: () => (asr.active ? asr.stop() : asr.start()),
-                }, asr.active ? '停止识别' : '语音识别'),
+                  onClick: () => (asr.active ? asr.stop() : void asr.start()),
+                }, asr.active ? '停止识别' : (serverAsr ? '分段识别' : '语音识别')),
                 h('button', {
                   key: 'tts',
                   style: S.btn(false, !tts.supported),
                   onClick: () => {
                     if (speaking) {
-                      tts.cancel()
+                      tts.stop()
                       setSpeaking(false)
                       return
                     }
                     setSpeaking(true)
                     if (questionText !== undefined) {
-                      tts.speak(questionText, { rate: config?.ttsRate ?? 1 })
+                      void tts.speak(questionText, { rate: config?.ttsRate ?? 1 })
                       lastQuestionRef.current = questionText
                     }
                   },
                 }, speaking ? '关闭朗读' : '朗读问题'),
+                needsPrepare
+                  ? h('button', {
+                    key: 'prep',
+                    style: S.btn('primary', false),
+                    onClick: prepareSpeech,
+                  }, '准备语音模型')
+                  : null,
               ]),
               audioRecorder.clip !== undefined
                 ? h('button', {
@@ -3151,10 +3526,21 @@ window.__ModuleLoader__.load({
             asr.interim !== ''
               ? h('div', { key: 'ai', style: { fontSize: 11.5, color: C.boneFaint, fontStyle: 'italic' } }, asr.interim)
               : null,
-            asrStatus.data?.reason !== undefined
-              ? h('div', { key: 'asr', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.6 } },
-                `识别链路：${asrStatus.data.mode === 'server' ? `服务端 ${asrStatus.data.provider ?? ''} ${asrStatus.data.model ?? ''}` : '浏览器识别'} —— ${asrStatus.data.reason}`)
-              : null,
+            // 链路状态：**面板必须说清现在用的是哪条**，以及为什么用它。
+            // 「静默换了链路」比换个链路更糟——用户会以为在用模型，实际是系统音色。
+            h('div', { key: 'chain', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7 } }, [
+              h('div', { key: 'a' }, `识别：${asrLabel}`),
+              h('div', { key: 't' }, `播报：${ttsLabel}`),
+              asrInfo?.reason !== undefined
+                ? h('div', { key: 'ar', style: { fontStyle: 'italic' } }, asrInfo.reason)
+                : null,
+              tts.notice !== undefined
+                ? h('div', { key: 'tn', style: { color: C.amber } }, tts.notice)
+                : null,
+              needsPrepare && asrInfo?.hint !== undefined
+                ? h('div', { key: 'ah', style: { color: C.amber } }, asrInfo.hint)
+                : null,
+            ]),
           ]),
 
           // 速记：右栏的常驻滚动区。

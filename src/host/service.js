@@ -32,6 +32,7 @@ import {
 import { fetchJobDescription } from './jd.js'
 import { extractTextFromUpload } from './extract.js'
 import { CameraService } from './camera.js'
+import { VoiceService } from './voice/index.js'
 
 /** Session lifecycle. */
 export const SESSION_STATUS = {
@@ -127,6 +128,15 @@ export class InterviewService {
      * 桌面端是通的，没必要重造。
      */
     this.camera = new CameraService({ ffmpegPath: this.config.ffmpegPath })
+    /**
+     * 语音能力的门面（识别链路 + 合成链路）。
+     *
+     * **为什么是宿主优先。** 宿主的 `speechToText` 是 provider 无关的服务，
+     * 插件既不经手厂商凭据、也不绑定厂商；插件自己的 HTTP 链路只是回落。
+     * 合成则相反：宿主目前没有 TTS，所以默认走"配好的模型 → 免密钥自然音
+     * → 浏览器"。
+     */
+    this.voice = new VoiceService(this)
   }
 
   // ── paths ────────────────────────────────────────────────────────────────
@@ -994,6 +1004,56 @@ export class InterviewService {
    */
   cameraStatus() {
     return this.camera.status()
+  }
+
+  // ── voice ────────────────────────────────────────────────────────────────
+
+  /**
+   * 语音链路状态：识别走哪条（宿主 / 服务端 / 浏览器）、合成走哪条。
+   *
+   * **这是"一个操作，两个调用者"的读侧。** 面板顶部显示它，agent 也能调
+   * `interview_voice_status` 问同一件事——两边看到的必须是同一份判断。
+   *
+   * @returns {Promise<{asr: object, tts: object}>}
+   */
+  async voiceStatus() {
+    return this.voice.status()
+  }
+
+  /**
+   * 让宿主开始准备它的语音识别模型（首次要下载）。
+   *
+   * @param {string} [providerId]
+   * @returns {Promise<object>}
+   */
+  async prepareSpeech(providerId = undefined) {
+    return this.voice.prepare(providerId)
+  }
+
+  /**
+   * 转写一段音频。输入是 base64 编码的 16 kHz 单声道 PCM16 WAV。
+   *
+   * 面板录制分段后调它，agent 不需要这条路（它直接读转录）。
+   *
+   * @param {{dataBase64?: string, mimeType?: string, language?: string}} input
+   * @param {{signal?: AbortSignal}} [options]
+   * @returns {Promise<object>}
+   */
+  async transcribeAudio(input, options = {}) {
+    return this.voice.transcribe(input, options)
+  }
+
+  /**
+   * 合成一句面试官要说的话。
+   *
+   * 返回 base64 音频（mp3/wav）；这条链路失败时面板会回落到浏览器音色，
+   * 所以**失败不是错误状态**，是一条要说清原因的降级。
+   *
+   * @param {{text: string, voice?: string, rate?: number, signal?: AbortSignal}} input
+   * @returns {Promise<object>}
+   */
+  async synthesizeSpeech(input) {
+    return this.voice.speak(input)
   }
 
   /**

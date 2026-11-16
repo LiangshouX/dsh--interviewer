@@ -211,38 +211,76 @@ POST /interviewer/api/resume/extract  { "filename": "cv.pdf", "mimeType": "appli
 
 `ok: false` 时 `warnings` 必须说清**为什么**以及**怎么办**。
 
-### 2.4 语音识别
+### 2.4 语音
 
 ```
-GET  /interviewer/api/asr          → 当前识别链路状态
-POST /interviewer/api/asr/transcribe  { "dataBase64": "…", "mimeType": "audio/webm", "language": "zh" }
+GET  /interviewer/api/voice            → 整条语音链路（识别 + 播报）
+GET  /interviewer/api/asr              → 只读识别那半边（兼容旧端点）
+GET  /interviewer/api/tts              → 只读播报那半边
+
+POST /interviewer/api/asr/transcribe   { "dataBase64": "…", "mimeType": "audio/webm", "language": "zh" }
+POST /interviewer/api/voice/prepare    { "providerId": "sensevoice-local" }
+POST /interviewer/api/tts/speak        { "text": "…", "voice": "冰糖?", "rate": 1 }
 ```
 
-状态：
+`GET /voice` 的状态（**不含密钥**，只有"有没有凭据"）：
 
 ```jsonc
 {
-  "mode": "server | browser | none",
-  "source": "config | host | env | none",
-  "provider": "minimax",
-  "model": "asr-1.0",
-  "protocol": "minimax | openai",
-  "endpoint": "https://api.minimaxi.com/v1/speech_to_text",
-  "reason": "继承 DSH 宿主的 minimax 配置（凭据来自宿主的 credentials）。",
-  "language": "zh"
+  "asr": {
+    "mode": "host | server | browser | none",
+    "source": "host | config | env | none",
+    "reason": "宿主语音服务可用：SenseVoice（本机），由宿主负责识别。",
+    "language": "zh",
+    "host": {
+      "available": true, "ready": false, "needsPreparation": true,
+      "provider": { "id": "sensevoice-local", "name": "SenseVoice（本机）", "location": "host-local", "languages": ["zh"], "preparation": { "phase": "unprepared" } },
+      "providers": [], "selection": { "providerId": "sensevoice-local", "language": "zh" }
+    },
+    "server": { "available": false, "reason": "…", "source": "none" },
+    "hint": "宿主语音模型还没下载完：点面板上的「准备语音模型」…"
+  },
+  "tts": {
+    "mode": "server | browser | none",
+    "source": "host | preset | config | env | none",
+    "provider": "mimo", "protocol": "chat-audio", "label": "MiMo TTS",
+    "baseUrl": "https://api.xiaomimimo.com/v1", "model": "mimo-v2.5-tts",
+    "voice": "mimo_default", "format": "mp3", "rate": 1, "hasCredential": true,
+    "reason": "使用 MiMo TTS（凭据来自宿主）。"
+  }
 }
 ```
 
-**两套协议**：`minimax` 用 `{base}/v1/speech_to_text`，`language` 走 **HTTP 头**；
-`openai` 用 `{base}/audio/transcriptions`，`language` 走 **表单字段**。
+**识别**：`asrProvider` 走 `auto` 时**宿主优先**（`ctx.speechToText`，provider 由宿主
+注册、插件不经手凭据），其次插件自己的 HTTP 端点，最后浏览器。两套 HTTP 协议：
+`minimax` 用 `{base}/v1/speech_to_text`，`language` 走 **HTTP 头**；`openai` 用
+`{base}/audio/transcriptions`，`language` 走 **表单字段**。输入必须是
+**16 kHz 单声道 PCM16 WAV**（宿主侧会校验波形）。
 
 识别结果：
 
 ```jsonc
-{ "ok": true, "mode": "server", "text": "…", "provider": "minimax", "model": "whisper-1", "warnings": [] }
+{
+  "ok": true, "mode": "host", "text": "…",
+  "provider": "sensevoice-local", "language": "zh",
+  "attempts": [ { "mode": "host", "ok": true } ]
+}
 ```
 
-`ok: false` 时 `reason` 说明原因（配置缺失 / 宿主读不到凭据 / HTTP 错误 / 超时）。
+`ok: false` 时 `reason` 说明原因，`attempts` 里能看到**每一条链路各自为什么失败**
+（"悄悄换了链路"是不允许的）。
+
+**播报**：`tts/speak` 返回 base64 音频，面板自己播：
+
+```jsonc
+{ "ok": true, "mode": "server", "provider": "mimo", "label": "MiMo TTS",
+  "model": "mimo-v2.5-tts", "voice": "mimo_default", "mimeType": "audio/mpeg", "audioBase64": "…" }
+```
+
+`ok: false` 时面板回落到浏览器音色，并把 `reason` 显示出来（不是错误弹窗）。
+
+**宿主模型准备**：`voice/prepare` 只对 `mode: "host"` 有意义——它让宿主开始下载/加载
+识别模型，进度通过 `GET /voice` 的 `host.provider.preparation` 观察。
 
 ### 2.5 岗位档案
 
@@ -404,7 +442,9 @@ ffmpeg -version          # 能出版本号就说明在 PATH 里
 | `interview_save_profile` | `id? title company? jdUrl? jdText? checklist?` | 归档一个岗位 |
 | `interview_apply_profile` | `sessionId? profileId` | 继承档案的 JD 与考点基线 |
 | `interview_sync_profile` | `sessionId? profileId?` | 把会话成果回写档案 |
-| `interview_asr_status` | — | 读识别链路状态与原因 |
+| `interview_asr_status` | — | 读识别链路状态与原因（兼容旧名） |
+| `interview_voice_status` | — | 读整条语音链路：识别与播报分别走哪条、为什么、宿主模型准备到哪一步 |
+| `interview_voice_prepare` | `providerId?` | 让宿主开始准备语音识别模型（首次要下载） |
 | `interview_save_jd` | `sessionId? text url?` | 把 JD 正文写进一场面试；标题按「公司 · 岗位」重新提炼 |
 | `interview_archive_session` | `sessionId? archived` | 归档 / 取消归档一场面试（只是收起来，不删） |
 | `interview_list_resumes` | — | 列出简历库里的简历 |

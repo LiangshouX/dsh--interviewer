@@ -231,14 +231,38 @@ DSH 桌面端的 `installMicrophonePermissions` 只放行
   没有 base64、没有几十兆的 JSON 传输。
 - 两边的摄像头按钮**互斥**：设备是独占的，同时开必然有一个失败。
 
-### 6.5 继承宿主配置失败
+### 6.5 语音链路：宿主优先，但说清继承的边界
 
-插件会尝试继承 DSH 宿主的模型配置来做服务端语音识别。
-**宿主有模型 ≠ 插件拿得到 ASR 凭据。**
+**识别**：宿主的 `ctx.speechToText` → 插件自己的 HTTP 端点 → 浏览器 Web Speech → 键盘。
+**播报**：宿主的 `ctx.textToSpeech`（DSH 目前没有）→ 配好的模型（MiMo / OpenAI / MiniMax）
+→ 免密钥自然音（百度 / Edge）→ 浏览器音色。
 
-拿不到时必须返回 `mode: 'browser'` 并附一条说清原因的 `reason`，
-面板把它显示出来。**不许**在没有实际调用成功的情况下宣称"已继承宿主"，
-也不许静默失败——用户会以为在用服务端识别，实际听到的是空转。
+**已从装机包里读实，别再假设：**
+
+| 事实 | 含义 |
+|---|---|
+| `ctx.llm.listProviders()` 只返回 `[{id, name}]` | **没有** baseUrl / apiKey / apiKeyEnv。"继承宿主聊天 provider 当识别端点"不成立 |
+| 模型能力只有 `inputModalities: ["text","image"]` | 宿主没有"音频输出"这个能力位，**TTS 不能靠配模型进宿主生效** |
+| 装机包里没有 TTS 包 | 宿主没有语音合成服务；等它有了再依赖（代码已按"有 `textToSpeech` 就优先"写好） |
+| 宿主的语音服务是 opt-in bundle | 没启用时 `speechToText` 不存在，必须回落并**说清** |
+
+**可继承的只有凭据名。** 宿主 profile 里的 `apiKeyEnv` 是凭据引用；插件用同一个
+名字走 `ctx.credentials.resolve()` 就能取到——这是不复制密钥的唯一干净继承方式。
+
+**三条硬纪律：**
+
+1. **判定只有一处。** `describeAsr` / `describeTts` 是唯一真相；面板、工具、
+   路由都读它，不许各自猜「现在用哪条」。
+2. **回落要说出来。** 每次转写带回 `attempts`（谁试过、谁为什么失败）；
+   播报回落浏览器音色时面板显示 `reason`。**不许静默换链路**——用户会以为
+   听到的是模型，实际是系统音色。
+3. **不流式就分段。** 宿主的 `speechToText` 明确只有整段转写（no streaming）。
+   「准实时」= 客户端按静音切段（≤6 秒、丢弃 <350ms 碎片）逐段转写。
+   不要去找根本不存在的流式协议。
+
+**TTS 不绑定厂商。** 协议适配在 `src/host/voice/tts/`：`mimo.js`（chat/completions
++ audio）、`openai.js`（/audio/speech）、`minimax.js`（/v1/t2a_v2）、`baidu.js` /
+`edge.js`（免密钥）。加一家 = 加一个文件 + 一个预设，不改编排层。
 
 ### 6.6 继承岗位档案不等于照抄
 
@@ -288,6 +312,7 @@ DSH 桌面端的 `installMicrophonePermissions` 只放行
 | 路径 | 放什么 |
 |---|---|
 | `src/host/` | Host 半边：service / api / tools / skills / jd / html / extract |
+| `src/host/voice/` | 语音：`host-asr`（宿主服务适配）/ `http-asr`（两套协议）/ `tts`（编排 + `tts/` 下的协议适配）/ `credentials`（凭据 seam） |
 | `src/skills/<name>/SKILL.md` | 随包技能源码 |
 | `client.js` | 浏览器半边（单文件，零构建、零运行时依赖） |
 | `scripts/` | build / pack |

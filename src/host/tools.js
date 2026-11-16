@@ -15,7 +15,6 @@
  *   - 模型负责**内容与判断**。
  */
 import { SESSION_STATUS } from './service.js'
-import { resolveAsrConfig } from './asr.js'
 
 /** Remove `undefined` members so the value is lossless JSON. */
 function clean(value) {
@@ -411,9 +410,23 @@ export function registerTools(ctx, service) {
     ),
     tool(
       'interview_asr_status',
-      '读当前语音识别链路的状态：服务端识别（继承宿主或插件配置）还是浏览器原生识别，以及为什么这么选。',
+      '读当前语音识别链路的状态：宿主的语音服务还是插件自己的服务端识别（以及为什么这么选），拿不到时回落浏览器。',
       {},
-      async () => await resolveAsrConfig(service),
+      async () => (await service.voiceStatus()).asr,
+    ),
+    tool(
+      'interview_voice_status',
+      '读整条语音链路：识别（宿主 / 服务端 / 浏览器）与播报（模型 / 免密钥自然音 / 浏览器）分别是哪条、为什么、宿主模型准备到哪一步。',
+      {},
+      async () => await service.voiceStatus(),
+    ),
+    tool(
+      'interview_voice_prepare',
+      '让宿主开始准备它的语音识别模型（首次要下载模型文件）。面板上点「准备语音模型」走的是同一条路。',
+      {
+        providerId: { type: 'string', description: '宿主的语音 provider id；省略则用宿主当前选择的那个。' },
+      },
+      async args => await service.prepareSpeech(args.providerId),
     ),
   ]
 
