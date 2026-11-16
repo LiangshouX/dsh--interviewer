@@ -368,8 +368,10 @@
             h('button', {
               key: 'ok',
               style: S.btn(danger ? 'tally' : 'primary', false),
+              // 文案跟**点击进度**走：第一次是「确认离开」，点过之后才提示
+              // 「再次点击确认离开」——否则一上来就让人"再次"，会读成废话。
               onClick: onConfirm,
-            }, danger && guard.second !== true ? '再次点击确认离开' : '确认离开'),
+            }, danger && guard.second === true ? '再次点击确认离开' : '确认离开'),
           ]),
         ]),
       ])
