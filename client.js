@@ -3034,6 +3034,40 @@ window.__ModuleLoader__.load({
           : '浏览器音色'
       const needsPrepare = asrMode === 'host' && asrInfo?.host?.needsPreparation === true
 
+      /**
+       * 播一句并给出**真实**结果：播不出来必须说出来，不能静默空操作。
+       *
+       * **为什么放在 questionText 之后。** 依赖数组在渲染期求值，提前引用
+       * 会踩 TDZ——这条被布局闸门抓到过一次（ReferenceError）。
+       */
+      const trySpeak = useCallback(async text => {
+        unlockAudio()
+        const played = await tts.speak(text, { rate: config?.ttsRate ?? 1 })
+        if (played !== true) {
+          notify('这轮没播出来', tts.notice ?? '模型与浏览器音色都不可用；问题仍以文字显示。', 'error')
+          setSpeaking(false)
+        }
+        return played
+      }, [tts, config?.ttsRate, notify])
+
+      /** 「朗读问题」的真实入口：没有问题就播测试音频，并说明是测试。 */
+      const speakButton = useCallback(() => {
+        if (speaking) {
+          tts.stop()
+          setSpeaking(false)
+          return
+        }
+        setSpeaking(true)
+        if (questionText !== undefined) {
+          lastQuestionRef.current = questionText
+          void trySpeak(questionText)
+          return
+        }
+        // 「点了没反应」是最糟的反馈：用户会以为语音功能坏了。
+        notify('还没有可朗读的问题', '先播一句测试音频，确认音色与音箱。', 'ok')
+        void trySpeak('你好，我是本次面试官。这是一段语音测试。')
+      }, [speaking, tts, questionText, trySpeak, notify])
+
       // 窄容器里**纵向堆叠**：舞台在上、回答在中、控件在下，整页内部滚动。
       //
       // 为什么不是「让右栏变窄」——右栏一窄，「识别链路」「朗读问题」这些
@@ -3477,18 +3511,7 @@ window.__ModuleLoader__.load({
                 h('button', {
                   key: 'tts',
                   style: S.btn(false, !tts.supported),
-                  onClick: () => {
-                    if (speaking) {
-                      tts.stop()
-                      setSpeaking(false)
-                      return
-                    }
-                    setSpeaking(true)
-                    if (questionText !== undefined) {
-                      void tts.speak(questionText, { rate: config?.ttsRate ?? 1 })
-                      lastQuestionRef.current = questionText
-                    }
-                  },
+                  onClick: speakButton,
                 }, speaking ? '关闭朗读' : '朗读问题'),
                 needsPrepare
                   ? h('button', {
