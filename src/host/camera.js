@@ -241,10 +241,11 @@ export function explainCameraFailure(detail) {
   }
   if (/Could not run graph|Unable to BindToObject|I\/O error/i.test(text)) {
     return {
-      reason: '系统打不开这个摄像头（设备在、驱动正常，但激活失败）',
-      hint: '按顺序试：① 笔记本的摄像头物理开关 / Fn 热键（HASEE、联想等机型常见）；'
-        + '② 设备管理器里把摄像头「禁用」再「启用」；③ 拔插外置摄像头或重启；④ 更新摄像头驱动。'
-        + '如果 Windows「相机」应用也打不开，那就是系统/硬件层的问题，用户态的插件修不了。',
+      reason: '系统打不开这个摄像头（设备在、驱动正常，但 DirectShow 激活失败）',
+      hint: '如果 Windows「相机」应用能看到画面、只有这里失败，说明相机走的是 Media Foundation、'
+        + '而 DirectShow 这条路坏了。最有效的修复是把驱动换回微软通用 UVC 驱动：'
+        + '设备管理器 → 摄像头 → 更新驱动程序 → 浏览我的电脑 → 让我从列表中选取 → 选「USB Video Device」（USB 视频设备）→ 安装。'
+        + '其他可试：① 笔记本摄像头物理开关 / Fn 热键；② 禁用再启用设备；③ 重启；④ 更新厂商驱动。',
     }
   }
   if (/Could not find video device|among source devices/i.test(text)) {
