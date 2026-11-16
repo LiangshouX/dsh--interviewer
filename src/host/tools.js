@@ -112,10 +112,10 @@ export function registerTools(ctx, service) {
     ),
     tool(
       'interview_request_agent',
-      '把一件活派给面试工作区的助手会话：fetch-jd（抓 JD）或 checklist（出面试官底稿）。默认在面试工作区里复用/新建会话，不再用"最近会话"。',
+      '把一件活派给面试工作区的助手会话：fetch-jd（抓 JD）、checklist（出面试官底稿）或 report（写事后分析报告）。默认在面试工作区里复用/新建会话，不再用"最近会话"。',
       {
         sessionId: sessionProperty,
-        task: { type: 'string', description: 'fetch-jd 或 checklist' },
+        task: { type: 'string', description: 'fetch-jd、checklist 或 report' },
         url: { type: 'string', description: 'fetch-jd 时的岗位链接。' },
         hostSessionId: { type: 'string', description: '指定宿主会话（可选；省略则用面试工作区的助手会话）。' },
       },
@@ -126,6 +126,9 @@ export function registerTools(ctx, service) {
         }
         if (task === 'checklist') {
           return service.requestAgentChecklist(String(args.sessionId ?? ''), args.hostSessionId)
+        }
+        if (task === 'report') {
+          return service.requestAgentReport(String(args.sessionId ?? ''), args.hostSessionId)
         }
         throw new Error('task 只能是 fetch-jd 或 checklist')
       },

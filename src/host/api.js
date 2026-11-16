@@ -377,6 +377,12 @@ async function runAction(service, segments, body) {
           body.hostSessionId,
         )
       }
+      if (rest[0] === 'report') {
+        return await service.requestAgentReport(
+          String(body.sessionId ?? ''),
+          body.hostSessionId,
+        )
+      }
       if (rest[0] === 'session') {
         return await service.ensureAgentSession()
       }

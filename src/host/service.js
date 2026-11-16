@@ -979,6 +979,43 @@ export class InterviewService {
   }
 
   /**
+   * 让助手写事后分析报告。
+   *
+   * **报告由模型写，插件负责派活与落盘。** 面试结束后必须有一条
+   * "出报告"的可点路径，否则用户只能自己去对话里猜该说什么。
+   *
+   * @param {string} sessionId
+   * @param {string} [hostSessionId]
+   */
+  async requestAgentReport(sessionId, hostSessionId = undefined) {
+    const controller = this.ctx?.get?.('sessionController')
+    if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
+      throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
+    }
+    const hostSession = typeof hostSessionId === 'string' && hostSessionId.trim() !== ''
+      ? { sessionId: hostSessionId.trim(), workspace: undefined, explicit: true }
+      : { ...(await this.ensureAgentSession()), explicit: false }
+    const text = [
+      `请为面试会话 ${sessionId} 写一份事后分析报告。`,
+      '1. 先调用 interview_get_context 读简历、JD、考点清单、转录与统计；',
+      '2. 按「结构 / 深度 / 表达 / 与岗位要求的匹配」等维度写 Markdown，每个判断都要能指回某轮回答；',
+      '3. 数据不足就如实写「样本不足」，不要编造没发生过的对话；',
+      '4. 最后调用 interview_finish，把整篇报告写进 report 字段。',
+    ].join('\n')
+    await controller.prompt({
+      requestId: `report-${sessionId}-${Date.now()}`,
+      sessionId: hostSession.sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text }],
+    }, new AbortController().signal)
+    return {
+      dispatched: true,
+      hostSession: { id: hostSession.sessionId, workspace: hostSession.workspace, explicit: hostSession.explicit },
+      message: hostSession.explicit ? '请求已发到你指定的对话。' : `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
+    }
+  }
+
+  /**
    * Put a resume from the library into one session.
    *
    * **存的是快照。** 会话目录里留一份当时的正文——简历后来改了，

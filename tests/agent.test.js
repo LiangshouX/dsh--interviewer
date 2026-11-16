@@ -151,3 +151,21 @@ test('派活前登记工作区，并优先用 workspaceId 绑定会话', async (
     assert.equal(sessionLog[0].cwd, undefined)
   })
 })
+
+
+test('requestAgentReport：让助手写报告并调 interview_finish 落盘', async () => {
+  await withEnv(async ({ root }) => {
+    const log = []
+    const controller = fakeController(log)
+    const service = new InterviewService({
+      config: { workspaceRoot: root },
+      ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+    })
+    const result = await service.requestAgentReport('iv-report')
+    assert.equal(result.dispatched, true)
+    const prompt = log.find(item => item.type === 'prompt')
+    assert.match(prompt.request.content[0].text, /iv-report/)
+    assert.match(prompt.request.content[0].text, /interview_finish/)
+    assert.match(prompt.request.content[0].text, /interview_get_context/)
+  })
+})

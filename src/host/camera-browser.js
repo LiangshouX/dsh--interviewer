@@ -18,7 +18,7 @@
  * **诚实说明。** 它比 ffmpeg 多一个进程（冷启动 ~1–2 秒），并且依赖本机
  * 装了 Chrome 或 Edge。所以**优先 ffmpeg**，它失败才回落这条。
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -236,8 +236,15 @@ export class BrowserCamera {
   /** Stop the browser and the bridge, and remove the temporary profile. */
   async stop() {
     this.started = false
-    try { this.child?.kill() } catch { /* 已经退出 */ }
+    const child = this.child
     this.child = undefined
+    try { child?.kill() } catch { /* 已经退出 */ }
+    // **Windows 上必须杀进程树。** Chrome 是多进程的：只 kill 父进程时，
+    // 视频采集/GPU 子进程可能继续持有摄像头——下一次启动就会"I/O error"，
+    // 而用户看到的只是"摄像头打不开"。用 taskkill /T 把整棵树收掉。
+    if (child?.pid !== undefined && process.platform === 'win32') {
+      try { spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }) } catch { /* 进程已退出 */ }
+    }
     try { this.server?.close() } catch { /* 已经关了 */ }
     this.server = undefined
     const dir = this.userDataDir

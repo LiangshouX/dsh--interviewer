@@ -205,9 +205,32 @@ async function main() {
   // 它可能永远不返回（探针自己挂住，而不是被测代码慢）。
   // 按**文本**找页签，而不是按 borderRadius——样式一改（视觉重做那次），
   // 按半径找就会一个都找不到，于是报告页/设置页从来没被渲染过，探针还"通过"。
+  // 按文案找可点元素：有些路径（放大预览 → 编辑）只有点了才会渲染，
+  // SSR 抓不到"编辑态引用了不存在的变量"这类错误。
+  const findByText = label => renderer.root.findAll(node =>
+    typeof node.props?.onClick === 'function'
+    && node.props?.children === label)[0]
+
   const findTab = label => renderer.root.findAll(node =>
     typeof node.props?.onClick === 'function'
     && node.props?.children === label)[0]
+
+  // ③a 放大预览 → 编辑：这是准备页最常用、也最容易只在点击后出错的两步。
+  const zoomButton = findByText('放大')
+  if (zoomButton !== undefined) {
+    await act(async () => { zoomButton.props.onClick() })
+    await new Promise(done => setTimeout(done, 60))
+    const editButton = findByText('编辑')
+    if (editButton !== undefined) {
+      await act(async () => { editButton.props.onClick() })
+      await new Promise(done => setTimeout(done, 60))
+    }
+    const cancelButton = findByText('取消')
+    if (cancelButton !== undefined) {
+      await act(async () => { cancelButton.props.onClick() })
+      await new Promise(done => setTimeout(done, 60))
+    }
+  }
 
   const startedLive = Date.now()
   const liveTab = findTab('面试中')

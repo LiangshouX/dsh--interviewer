@@ -672,7 +672,15 @@
             session === undefined
               ? h('div', {key: 'k25',  style: { ...S.hint, padding: 60, textAlign: 'center' } }, '还没有面试。先新建一场，或者从左边选一场。')
               : tab === 'prepare'
-                ? h(PrepareView, { key: 'prepare', session, config, onChanged: refreshAll, notify })
+                ? h(PrepareView, {
+                  key: 'prepare',
+                  session,
+                  config,
+                  onChanged: refreshAll,
+                  notify,
+                  // 清单出来后直接进面试中——不用再让用户自己去点页签。
+                  onGoLive: () => guardRun('进入面试中', () => setTab('live')),
+                })
                 : tab === 'live'
                   ? h(LiveView, { key: 'live', session, config, onChanged: refreshAll, notify })
                   : tab === 'report'

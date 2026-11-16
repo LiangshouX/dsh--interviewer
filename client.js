@@ -2340,9 +2340,14 @@ window.__ModuleLoader__.load({
       const excerpt = text.length > limit ? `${text.slice(0, limit)}…` : text
       const clipped = text.length > limit
       return h('div', {
+        onClick: props.onOpen,
+        role: props.onOpen === undefined ? undefined : 'button',
+        tabIndex: props.onOpen === undefined ? undefined : 0,
+        title: props.onOpen === undefined ? undefined : '点击放大预览（可编辑）',
         style: {
           position: 'relative', background: C.field, border: `1px solid ${C.rule}`,
           borderRadius: 10, padding: '14px 16px', minHeight: 74,
+          cursor: props.onOpen === undefined ? undefined : 'zoom-in',
         },
       }, [
         h('div', {
@@ -2362,6 +2367,52 @@ window.__ModuleLoader__.load({
             },
           })
           : null,
+      ])
+    }
+
+    /**
+     * 放大预览：总览看摘要，点开后看全貌，还能一键进编辑。
+     *
+     * **为什么要有它。** 卡片是固定高度的——那是"总览"的尺寸，不是"阅读"的尺寸。
+     * 想通读全文的人不该被迫在 196px 高的框里滚来滚去。
+     */
+    function MaterialPreview(props) {
+      const { title, text, onClose, onEdit } = props
+      useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const handler = event => { if (event.key === 'Escape') onClose() }
+        window.addEventListener('keydown', handler)
+        return () => window.removeEventListener('keydown', handler)
+      }, [onClose])
+      const body = String(text ?? '')
+      return h('div', {
+        style: S.overlay,
+        role: 'dialog',
+        'aria-modal': 'true',
+        onClick: event => { if (event.target === event.currentTarget) onClose() },
+      }, [
+        h('div', {
+          key: 'card',
+          style: { ...S.modal, width: 'min(880px, 100%)', maxHeight: '84vh', display: 'flex', flexDirection: 'column', gap: 12 },
+        }, [
+          h('div', { key: 'h', style: { display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' } }, [
+            h('div', { key: 't', style: S.cardTitle }, title),
+            h('div', { key: 'g', style: { ...S.hint, fontFamily: F.mono } }, `${body.length} 字`),
+            h('div', { key: 'sp', style: { marginLeft: 'auto', display: 'flex', gap: 8 } }, [
+              onEdit === undefined ? null : h('button', { key: 'e', style: S.btn('primary', false), onClick: onEdit }, '编辑'),
+              h('button', { key: 'c', style: S.btn(false, false), onClick: onClose }, '关闭'),
+            ]),
+          ]),
+          h('div', {
+            key: 'body',
+            style: {
+              flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
+              background: C.field, border: `1px solid ${C.rule}`, borderRadius: 14, padding: '20px 24px',
+            },
+          }, h('div', {
+            style: { fontFamily: F.voice, fontSize: 14, lineHeight: 2, color: C.bone, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
+          }, body === '' ? '（空）' : body)),
+        ]),
       ])
     }
 
@@ -2437,6 +2488,10 @@ window.__ModuleLoader__.load({
       const [jdUrl, setJdUrl] = useState('')
       const [busy, setBusy] = useState(false)
       const [jdNote, setJdNote] = useState(undefined)
+      // 放大预览：卡片是总览，点开看全貌。
+      const [preview, setPreview] = useState(undefined)
+      // 重新生成底稿是破坏性操作：第一次点只是"上膛"。
+      const [regenArm, setRegenArm] = useState(false)
       // 这场面试叫什么、在哪家、什么岗位——用户可以直接改。
       const [identity, setIdentity] = useState({ title: '', company: '', position: '' })
       const profilesPoll = usePoll(
@@ -2838,7 +2893,7 @@ window.__ModuleLoader__.load({
             ])
             : h('div', { key: 'k3' }, [
               options.archived
-                ? h(PaperPreview, { key: 'p', text: options.archivedText })
+                ? h(PaperPreview, { key: 'p', text: options.archivedText, onOpen: options.onPreview })
                 : h('div', {
                   key: 'empty',
                   style: {
@@ -2848,6 +2903,9 @@ window.__ModuleLoader__.load({
                   },
                 }, options.emptyHint),
               h('div', { key: 'act', style: { ...S.row, marginTop: 12 } }, [
+                options.archived && options.onPreview !== undefined
+                  ? h('button', { key: 'zoom', style: S.btn(false, busy), onClick: options.onPreview }, '放大')
+                  : null,
                 options.archived
                   ? h('button', { key: 'e', style: S.btn(false, busy), onClick: options.onEdit }, '修改')
                   // **空的那份也要能打开编辑器。**
@@ -2943,6 +3001,7 @@ window.__ModuleLoader__.load({
         onSave: saveResume,
         onCancel: () => setEditing(previous => ({ ...previous, resume: false })),
         onEdit: () => setEditing(previous => ({ ...previous, resume: true })),
+        onPreview: () => setPreview({ kind: 'resume', label: '简历', text: resumeText }),
         upload: resumeArchived ? undefined : uploadResumeLabel,
         // 「存进简历库」：存一次，以后每场面试直接选。
         extraActions: resumeArchived
@@ -2970,10 +3029,26 @@ window.__ModuleLoader__.load({
         onSave: saveJd,
         onCancel: () => setEditing(previous => ({ ...previous, jd: false })),
         onEdit: () => setEditing(previous => ({ ...previous, jd: true })),
+        onPreview: () => setPreview({ kind: 'jd', label: 'JD 正文', text: jdText }),
         upload: uploadJdLabel,
       })
 
+      const previewDialog = preview === undefined
+        ? null
+        : h(MaterialPreview, {
+          key: 'preview',
+          title: preview.label,
+          text: preview.text,
+          onClose: () => setPreview(undefined),
+          onEdit: () => {
+            const kind = preview.kind
+            setPreview(undefined)
+            setEditing(previous => ({ ...previous, [kind]: true }))
+          },
+        })
+
       return h('div', { style: { maxWidth: 1180 } }, [
+        previewDialog,
         h(FlowSpine, { key: 'spine', current: flowStep }),
 
         // ── 这场面试叫什么 ────────────────────────────────────────────
@@ -3104,7 +3179,15 @@ window.__ModuleLoader__.load({
               }, [
                 h('div', { key: 'note', style: { ...S.hint, marginBottom: 12, lineHeight: 1.7 } },
                   '这是面试官的底稿。真实面试里你看不到它——所以默认收起，需要时再展开。'),
-                h('div', { key: 'list' }, checklist.map(item => h(ChecklistRow, { key: item.id, item }))),
+                // **限高容器。** 清单长短不一是美的，但不能让 200 条考点
+                // 把整页撑坏——超过一屏就装进容器里滚，信息一条也不少。
+                h('div', {
+                  key: 'list',
+                  style: {
+                    maxHeight: 'min(56vh, 520px)', overflowY: 'auto',
+                    paddingRight: 6, overscrollBehavior: 'contain',
+                  },
+                }, checklist.map(item => h(ChecklistRow, { key: item.id, item }))),
                 session?.stats?.adjustments > 0
                   ? h('div', { key: 'adj', style: { ...S.hint, marginTop: 12 } },
                     `面试中调整过 ${session.stats.adjustments} 次——每一次调整都记了理由，事后复盘会用到。`)
@@ -3125,7 +3208,27 @@ window.__ModuleLoader__.load({
                     onClick: askChecklist,
                   }, busy ? '派活中…' : '让助手出底稿'),
                 ])
-                : null,
+                : h('div', { key: 'next', style: { ...S.row, marginTop: 14 } }, [
+                  // 清单出来了，流程还没结束——把下一步摆在手边。
+                  h('button', {
+                    key: 'go',
+                    style: S.btn('primary', false),
+                    onClick: () => props.onGoLive?.(),
+                  }, '进入面试中 →'),
+                  h('button', {
+                    key: 're',
+                    style: S.btn(regenArm ? 'tally' : false, busy),
+                    onClick: () => {
+                      if (!regenArm) {
+                        setRegenArm(true)
+                        setTimeout(() => setRegenArm(false), 5000)
+                        return
+                      }
+                      setRegenArm(false)
+                      void askChecklist()
+                    },
+                  }, regenArm ? '确认重新生成（会覆盖现有清单）' : '重新生成'),
+                ]),
             ]),
 
             h(Section, {key: 'k9', 
@@ -3180,6 +3283,8 @@ window.__ModuleLoader__.load({
       const videoRef = useRef(null)
       const [answer, setAnswer] = useState('')
       const [speaking, setSpeaking] = useState(false)
+      // 一条按钮走完整条申请链路时的分步反馈。
+      const [acquireStage, setAcquireStage] = useState(undefined)
       const lastQuestionRef = useRef('')
 
       const answerSegmentsRef = useRef([])
@@ -3383,6 +3488,50 @@ window.__ModuleLoader__.load({
       const hostCamera = useHostCamera()
       const hasHostVideo = hostCamera.active
       const hasAnyVideo = hasVideo || hasHostVideo
+
+      /**
+       * 一条按钮走完整条链路：浏览器麦克风 → 宿主摄像头。
+       *
+       * **为什么不再让用户去点第二个按钮。** 桌面端里「麦克风成功、摄像头失败」
+       * 是常态；兜底路径（宿主采集）既然通，就不该让用户自己发现它。
+       */
+      const acquireMedia = async () => {
+        setAcquireStage({ text: '正在申请麦克风…' })
+        const stream = await media.start()
+        const micOk = (stream?.getAudioTracks?.() ?? []).length > 0
+        const camOk = (stream?.getVideoTracks?.() ?? []).length > 0
+        if (camOk) {
+          setAcquireStage({ text: '✓ 麦克风与摄像头已接入' })
+          return
+        }
+        if (!inDesktopHost()) {
+          setAcquireStage({ text: micOk ? '✓ 麦克风已接入；摄像头没拿到（可再试一次）' : '麦克风与摄像头都没接上；键盘输入可用。' })
+          return
+        }
+        setAcquireStage({ text: `${micOk ? '✓ 麦克风已接入 · ' : ''}摄像头被桌面端挡下，正在尝试宿主采集…` })
+        const started = await hostCamera.start()
+        setAcquireStage({
+          text: `${micOk ? '✓ 麦克风已接入 · ' : ''}${started ? '✓ 摄像头已通过宿主接入' : '摄像头仍未接上（可点「用宿主摄像头」重试）'}`,
+        })
+      }
+
+      // 手动点「开宿主摄像头」重试成功时，分步文案也要跟着变成成功态。
+      useEffect(() => {
+        if (!hostCamera.active) return
+        setAcquireStage(previous => (previous === undefined ? previous : { text: '✓ 摄像头已通过宿主接入' }))
+      }, [hostCamera.active])
+
+      const reportReady = (session?.report ?? '') !== ''
+      const durationMs = session?.stats?.durationMs ?? 0
+      const tooShortForReport = durationMs > 0 && durationMs < 3 * 60 * 1000
+      const dispatchReport = async () => {
+        try {
+          const result = await apiPost('agent/report', { sessionId: session?.session?.id })
+          notify('已让助手写报告', result?.message ?? '产出后会自动出现在「报告」页。', 'ok')
+        } catch (failure) {
+          notify('派不出去', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }
       const title = session?.session?.title ?? '面试'
       const questionText = lastQuestion?.text
 
@@ -3687,8 +3836,8 @@ window.__ModuleLoader__.load({
                 h('button', {
                   key: 'ask',
                   style: S.btn('primary', media.busy),
-                  onClick: () => { void media.start() },
-                }, media.busy
+                  onClick: () => { void acquireMedia() },
+                }, media.busy || hostCamera.busy
                   ? '正在申请…'
                   // 麦克风已经通了的时候，这按钮是去**补摄像头**的，
                   // 别再写「申请摄像头与麦克风」——麦克风不需要再申请了。
@@ -3771,6 +3920,14 @@ window.__ModuleLoader__.load({
                 running
                   ? h('button', { key: 'f', style: S.btn(false, false), onClick: finishInterview }, '结束面试')
                   : h('button', { key: 's', style: S.btn('primary', false), onClick: startInterview }, '开始面试'),
+                !running && !reportReady
+                  ? h('button', {
+                    key: 'report',
+                    style: S.btn(tooShortForReport ? false : 'primary', tooShortForReport),
+                    title: tooShortForReport ? '这场太短，报告分析不出什么；真需要可以让助手在对话里写' : '让助手写事后分析报告',
+                    onClick: () => { void dispatchReport() },
+                  }, tooShortForReport ? '太短，先不生成报告' : '生成事后报告')
+                  : null,
               ]),
             ]),
           ]),
@@ -3813,11 +3970,11 @@ window.__ModuleLoader__.load({
                 h('button', {
                   key: 'cam',
                   style: S.btn(false, false),
-                  onClick: () => (media.stream === undefined ? void media.start() : media.stop()),
+                  onClick: () => (media.stream === undefined ? void acquireMedia() : void media.stop()),
                   // 麦克风通了、摄像头没通的时候，关掉的其实是麦克风——
                   // 按钮得说它真正会关掉什么。
                 }, media.stream === undefined
-                  ? '开摄像头与麦克风'
+                  ? (media.busy || hostCamera.busy ? '正在申请…' : '开摄像头与麦克风')
                   : (hasVideo ? '关摄像头' : '关麦克风')),
                 // **Host 摄像头**：桌面端的第二条路。
                 //
@@ -3863,6 +4020,13 @@ window.__ModuleLoader__.load({
                   ? h('button', { key: 'save', style: S.btn('primary', false), onClick: saveClip }, hasVideo ? '保存录像' : '保存录音')
                   : null,
               ]),
+              // 分步反馈放在**栏里**，不在"未接通板"里：板子会在接通后卸载。
+              acquireStage === undefined
+                ? null
+                : h('div', {
+                  key: 'stage',
+                  style: { ...S.hint, marginTop: 8, color: acquireStage.text.startsWith('✓') ? C.jade : C.boneFaint },
+                }, acquireStage.text),
             ]),
 
             // 声音这一组：录音 + 识别 + 朗读。
@@ -3993,6 +4157,16 @@ window.__ModuleLoader__.load({
     function ReportView(props) {
       const { session, onChanged, notify } = props
       const report = session?.report ?? ''
+      const durationMs = session?.stats?.durationMs ?? 0
+      const tooShortForReport = durationMs > 0 && durationMs < 3 * 60 * 1000
+      const dispatchReport = async () => {
+        try {
+          const result = await apiPost('agent/report', { sessionId: session?.session?.id })
+          notify('已让助手写报告', result?.message ?? '产出后会自动出现在这里。', 'ok')
+        } catch (failure) {
+          notify('派不出去', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }
 
       return h('div', { style: { maxWidth: 1180 } }, [
         h('div', {
@@ -4010,8 +4184,18 @@ window.__ModuleLoader__.load({
         }, [
           report !== ''
             ? h(Markdown, { key: 'md', text: report })
-            : h('div', { key: 'e', style: { ...S.hint, lineHeight: 1.75 } },
-              '还没有报告。在 DSH 对话里让助手用 interview-conduct 技能收尾，它会调 interview_finish 把分析写进来。'),
+            : h('div', { key: 'e', style: { ...S.hint, lineHeight: 1.8 } }, [
+              h('div', { key: 't' }, tooShortForReport
+                ? `这场只有 ${formatClock(durationMs)}，太短了——报告分析不出什么，先不生成。`
+                : '还没有报告。可以现在让助手写一份，产出后会自动出现在这里。'),
+              !tooShortForReport
+                ? h('div', { key: 'b', style: { marginTop: 10 } }, h('button', {
+                  key: 'r',
+                  style: S.btn('primary', false),
+                  onClick: () => { void dispatchReport() },
+                }, '生成事后报告'))
+                : null,
+            ]),
         ]),
         ]),
         h('div', { key: 'side' }, [
@@ -5098,7 +5282,15 @@ function SettingsView(props) {
             session === undefined
               ? h('div', {key: 'k25',  style: { ...S.hint, padding: 60, textAlign: 'center' } }, '还没有面试。先新建一场，或者从左边选一场。')
               : tab === 'prepare'
-                ? h(PrepareView, { key: 'prepare', session, config, onChanged: refreshAll, notify })
+                ? h(PrepareView, {
+                  key: 'prepare',
+                  session,
+                  config,
+                  onChanged: refreshAll,
+                  notify,
+                  // 清单出来后直接进面试中——不用再让用户自己去点页签。
+                  onGoLive: () => guardRun('进入面试中', () => setTab('live')),
+                })
                 : tab === 'live'
                   ? h(LiveView, { key: 'live', session, config, onChanged: refreshAll, notify })
                   : tab === 'report'
