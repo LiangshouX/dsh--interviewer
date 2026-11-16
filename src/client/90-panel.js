@@ -441,25 +441,6 @@
             // 保护开关都是这个插件自己的事，混进宿主设置只会让人找不着。
             h('div', { key: 'd', style: S.tab(tab === 'settings'), onClick: () => guardRun('切换到「设置」', () => setTab('settings')) }, '设置'),
           ]),
-          guard === undefined ? null : h(GuardDialog, {
-            key: 'guard',
-            guard,
-            onCancel: () => setGuard(undefined),
-            onToggleRemember: checked => setGuard(previous => ({ ...previous, remember: checked })),
-            onConfirm: async () => {
-              if (guard.inInterview === true && guard.second !== true) {
-                setGuard(previous => ({ ...previous, second: true }))
-                return
-              }
-              if (guard.remember === true) {
-                try { await apiPost('settings', { guardQuiet: true }) } catch { /* 存不下也继续 */ }
-              }
-              const action = guard.action
-              setGuard(undefined)
-              await releaseAllMedia()
-              action()
-            },
-          }),
           h('button', {
             key: 'theme',
             // 按钮上写的是**切过去之后**的样子：「亮色」= 点一下变亮色。
@@ -702,6 +683,25 @@
               : null,
           ]),
         ]),
+        guard === undefined ? null : h(GuardDialog, {
+          key: 'guard',
+          guard,
+          onCancel: () => setGuard(undefined),
+          onToggleRemember: checked => setGuard(previous => ({ ...previous, remember: checked })),
+          onConfirm: async () => {
+            if (guard.inInterview === true && guard.second !== true) {
+              setGuard(previous => ({ ...previous, second: true }))
+              return
+            }
+            if (guard.remember === true) {
+              try { await apiPost('settings', { guardQuiet: true }) } catch { /* 存不下也继续 */ }
+            }
+            const action = guard.action
+            setGuard(undefined)
+            await releaseAllMedia()
+            action()
+          },
+        }),
       ])
     }
 
