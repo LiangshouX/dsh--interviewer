@@ -113,7 +113,7 @@ Host 侧有两条采集通道，启动时自动选：
 面板会显示当前用的是哪条（fmpeg / chromium-mf）。两条都需要**本机**有对应程序：
 ffmpeg 由你指定路径或走 PATH；Chromium 通道用本机的 Chrome / Edge（也可在设置里指定）。
 
-### ffmpeg 为什么需要它
+### 为什么需要 ffmpeg
 
 DSH 桌面端（Electron）**只放行纯音频的媒体请求**，摄像头在主进程就被拒了——
 请求压根没走到 Windows 的隐私设置，所以**改系统设置没用**。
