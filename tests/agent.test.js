@@ -115,3 +115,39 @@ test('宿主没有 sessionController 时，派活要如实说不支持', async (
     await assert.rejects(() => service.requestAgentJd('iv-x', 'https://jobs.example.com/1'), /没有提供/)
   })
 })
+
+
+test('派活前登记工作区，并优先用 workspaceId 绑定会话', async () => {
+  await withEnv(async ({ root }) => {
+    const log = []
+    const sessionLog = []
+    const ctx = {
+      get(name) {
+        if (name === 'sessionController') {
+          return {
+            async create(request) { sessionLog.push(request); return { sessionId: 'host-ws' } },
+            async prompt() { return { accepted: true } },
+          }
+        }
+        if (name === 'workspaceController') {
+          return {
+            async create(request) {
+              log.push(request)
+              return { workspace: { workspaceId: 'ws-1', path: request.path, title: 'DSH-REALTIME-INTERVIEW' }, created: true }
+            },
+          }
+        }
+        return undefined
+      },
+    }
+    const service = new InterviewService({ config: { workspaceRoot: root }, ctx })
+    const info = await service.ensureAgentSession()
+    assert.equal(info.registered, true)
+    assert.equal(info.workspaceId, 'ws-1')
+    assert.equal(log.length, 1)
+    assert.equal(log[0].path, root, '登记的就是面试工作区')
+    assert.equal(sessionLog.length, 1)
+    assert.equal(sessionLog[0].workspaceId, 'ws-1', '会话要用已登记的工作区 id 绑定')
+    assert.equal(sessionLog[0].cwd, undefined)
+  })
+})

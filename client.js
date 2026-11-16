@@ -4388,6 +4388,9 @@ function SettingsView(props) {
       line('profiles', '岗位档案', data.profilesDir ?? ''),
       line('settings', '设置文件', data.settingsFile ?? ''),
       line('host', '宿主工作区', data.hostWorkspace?.path ?? ''),
+      line('wsreg', 'DSH 工作区', data.workspaceRegistration?.registered === true
+        ? `已登记 · ${data.workspaceRegistration.title || data.workspaceRegistration.workspaceId}`
+        : (data.workspaceRegistration === undefined ? '尚未登记（派活/建场次时会自动登记）' : '未登记'), data.workspaceRegistration?.workspaceId ?? ''),
       line('model', '宿主模型', `${model.provider ?? ''} · ${formatBytes(model.bytes ?? 0)} · ${model.files ?? 0} 个文件`, model.exists === true ? '已就绪' : '未下载'),
       line('modeldir', '模型目录', model.dir ?? ''),
       (data.emptySessions ?? []).length > 0

@@ -493,6 +493,8 @@ export class InterviewService {
    * @param {{title?: string, role?: string, resumeText?: string, jdText?: string, jdUrl?: string, jdMeta?: object}} input
    */
   async createSession(input = {}) {
+    // 让面试工作区出现在 DSH 左侧项目列表（登记失败也不挡建场次）。
+    try { await this.ensureAgentWorkspace() } catch { /* 宿主没有工作区接口时忽略 */ }
     const root = await this.sessionsDir()
     const id = input.id ?? makeSessionId()
     const dir = await this.sessionDir(id)
@@ -833,16 +835,48 @@ export class InterviewService {
    * 现在用 `sessionController.create({ cwd: 工作区根 })`：会话属于这场面试
    * 的卷宗目录，助手读写的文件、日志都在同一个地方。
    */
+  /**
+   * 把面试工作区**登记进 DSH 的工作区列表**（左侧项目列表）。
+   *
+   * **绑定 ≠ 登记。** `sessionController.create({ cwd })` 只让会话拥有那个目录，
+   * 工作区注册表里并没有条目——所以左侧项目列表不会出现它。用户看到的是
+   * "会话确实在那，但列表里没有"，这正是本次要修的。登记走
+   * `workspaceController.create({ path })`，然后会话用 `workspaceId` 绑定。
+   */
+  async ensureAgentWorkspace() {
+    const root = await this.effectiveRoot()
+    const ensured = await ensureDataRoot(root)
+    if (ensured.error !== undefined) throw new Error(`面试工作区建不出来：${ensured.error}`)
+    const controller = this.ctx?.get?.('workspaceController')
+    if (controller === undefined || controller === null || typeof controller.create !== 'function') {
+      const fallback = { registered: false, path: root, workspaceId: '', reason: '这个宿主没有提供工作区登记接口' }
+      this.workspaceRegistration = fallback
+      return fallback
+    }
+    const result = await controller.create({ path: root })
+    const workspaceId = typeof result?.workspace?.workspaceId === 'string' ? result.workspace.workspaceId : ''
+    const info = {
+      registered: workspaceId !== '',
+      workspaceId,
+      created: result?.created === true,
+      path: root,
+      title: typeof result?.workspace?.title === 'string' ? result.workspace.title : '',
+    }
+    this.workspaceRegistration = info
+    return info
+  }
+
   async ensureAgentSession() {
     const controller = this.ctx?.get?.('sessionController')
     if (controller === undefined || controller === null || typeof controller.create !== 'function') {
       throw new Error('这个宿主没有提供建会话接口，不能把请求派给助手')
     }
-    const root = await this.effectiveRoot()
-    const ensured = await ensureDataRoot(root)
-    if (ensured.error !== undefined) throw new Error(`面试工作区建不出来：${ensured.error}`)
+    const workspace = await this.ensureAgentWorkspace()
     const settings = await readSettings()
-    const request = { cwd: root }
+    // 优先用 **已登记的工作区 id** 绑定；宿主没有工作区接口时才退回 cwd。
+    const request = workspace.workspaceId !== ''
+      ? { workspaceId: workspace.workspaceId }
+      : { cwd: workspace.path }
     if (typeof settings.agentSessionId === 'string' && settings.agentSessionId !== '') {
       request.sessionId = settings.agentSessionId
     }
@@ -852,7 +886,13 @@ export class InterviewService {
     if (agentSessionId !== settings.agentSessionId) {
       await writeSettings({ agentSessionId })
     }
-    return { sessionId: agentSessionId, workspace: root }
+    return {
+      sessionId: agentSessionId,
+      workspace: workspace.path,
+      workspaceId: workspace.workspaceId,
+      registered: workspace.registered,
+      workspaceCreated: workspace.created === true,
+    }
   }
 
   /**
@@ -1240,6 +1280,8 @@ export class InterviewService {
       emptySessions: await this.listEmptySessions(),
       // 助手会话落在哪个工作区——面板要能说清楚请求会发到哪。
       agent: { sessionId: settings.agentSessionId ?? '', workspace: await this.effectiveRoot() },
+      // DSH 左侧项目列表里有没有这个工作区（绑定 ≠ 登记，必须分开说）。
+      workspaceRegistration: this.workspaceRegistration ?? undefined,
       session,
     }
   }
