@@ -145,7 +145,38 @@ async function main() {
       },
     },
   }
-  const sandbox = { window: windowStub, console, fetch: stubFetch, navigator: {}, setTimeout, clearTimeout, setInterval, clearInterval }
+  // **抓 React 的警告。** 缺 key / 重复 key 在 React 里只是 console.error，
+  // 不影响渲染——所以它们会一路溜到生产环境，在用户界面上变成「列表串位」。
+  // 这里把警告变成硬失败。
+  const warnings = []
+  // React 跑在 vm 之外，它打日志走的是**全局** console，不是沙箱里的那个。
+  // 所以要拦全局的，否则 React 的内部错误（和 key 警告）全都漏掉。
+  const realError = globalThis.console.error
+  const realWarn = globalThis.console.warn
+  globalThis.console.error = (...args) => {
+    warnings.push(args.map(String).join(' '))
+    realError(...args)
+  }
+  globalThis.console.warn = (...args) => {
+    warnings.push(args.map(String).join(' '))
+    realWarn(...args)
+  }
+  const restoreConsole = () => {
+    globalThis.console.error = realError
+    globalThis.console.warn = realWarn
+  }
+  const sandboxConsole = {
+    ...console,
+    error: (...args) => {
+      warnings.push(args.map(String).join(' '))
+      console.error(...args)
+    },
+    warn: (...args) => {
+      warnings.push(args.map(String).join(' '))
+      console.warn(...args)
+    },
+  }
+  const sandbox = { window: windowStub, console: sandboxConsole, fetch: stubFetch, navigator: {}, setTimeout, clearTimeout, setInterval, clearInterval }
   runInNewContext(source, sandbox, { filename: 'client.js' })
   if (main === undefined) throw new Error('client.js 没有注册 main 槽')
 
@@ -183,8 +214,25 @@ async function main() {
   const liveRenderMs = Date.now() - startedLive
   await new Promise(done => setTimeout(done, 80))
 
-  const nodes = renderer.toJSON()
-  const nodeCount = countNodes(nodes)
+  // 面试中视图的产物规模（最重的那个）。
+  const liveNodes = renderer.toJSON()
+  const nodeCount = countNodes(liveNodes)
+
+  // ③b 把**三个页签都点一遍**。
+  // 之前只点到了「面试中」，报告页的代码路径从来没跑过——
+  // 于是报告页里的 React key 警告就没人看见。三个页签都得渲染。
+  const reportStarted = Date.now()
+  if (tabs.length >= 3) {
+    await act(async () => { tabs[2].props.onClick() })
+    await new Promise(done => setTimeout(done, 80))
+  }
+  const reportRenderMs = Date.now() - reportStarted
+  const reportHtml = JSON.stringify(renderer.toJSON())
+  if (!reportHtml.includes('面试后分析') && !reportHtml.includes('还没有报告')) {
+    warnings.push('报告页签点开后没有渲染出报告区')
+  }
+
+
 
   // ④ 轮询一次：**revision 相同**，渲染次数不得增加。
   // 面试中的轮询间隔是 1.5 秒，所以要真的等过这个间隔才测得到。
@@ -195,7 +243,7 @@ async function main() {
   const idlePollRenders = renderCount - rendersBefore
 
   // 统计产物体积。
-  const html = JSON.stringify(nodes)
+  const html = JSON.stringify(liveNodes)
   const clientBytes = Buffer.byteLength(source, 'utf8')
 
   console.log('\n渲染开销（Linux 容器 + react-test-renderer；用户机是 Windows + Electron）\n')
@@ -205,13 +253,18 @@ async function main() {
   console.log(`  产物体积                        ${String((html.length / 1024).toFixed(1)).padStart(6)} KiB`)
   console.log(`  client.js 体积                  ${String((clientBytes / 1024).toFixed(1)).padStart(6)} KiB`)
   console.log(`  切到面试中（200 轮转录）        ${String(liveRenderMs).padStart(6)} ms`)
+  console.log(`  切到报告                        ${String(reportRenderMs).padStart(6)} ms`)
   console.log(`  空闲轮询引发的重渲染            ${String(idlePollRenders).padStart(6)} 次  ← 必须为 0`)
+  console.log(`  React 警告                      ${String(warnings.length).padStart(6)} 条  ← 必须为 0`)
 
   const failures = []
   if (firstRenderMs > THRESHOLDS.firstRender) failures.push(`首屏渲染 ${firstRenderMs}ms > ${THRESHOLDS.firstRender}ms`)
   if (dataRenderMs > THRESHOLDS.dataRender) failures.push(`数据回填渲染 ${dataRenderMs}ms > ${THRESHOLDS.dataRender}ms`)
   if (idlePollRenders > THRESHOLDS.idlePollRender) {
     failures.push(`空闲轮询引发了 ${idlePollRenders} 次重渲染（应为 0）：revision 比对失效`)
+  }
+  for (const warning of warnings) {
+    failures.push(`React 警告：${warning.split('\n').slice(0, 6).join(' | ')}`)
   }
   console.log('')
   if (failures.length > 0) {
@@ -221,6 +274,7 @@ async function main() {
     return
   }
   console.log('✓ 全部在阈值内')
+  restoreConsole()
   // 沙箱里的轮询定时器会一直持有事件循环；测完就退出。
   process.exit(0)
 }

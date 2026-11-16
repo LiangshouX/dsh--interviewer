@@ -37,6 +37,7 @@
 | `config` | `{asrProvider, ttsProvider, ttsRate, ttsVoice, recordVideo, recordAudio, workspaceRoot, jdFetchTimeoutMs}` | 插件配置；`workspaceRoot` 含 `path` / `source` / `reason` |
 | `sessions` | `{sessions: SessionSummary[]}` | 会话列表，最新在前 |
 | `sessions/<id>` | `SessionState` | 单场面试的全量状态 |
+| `sessions/<id>/documents` | `{resume, jd, jdMeta}` | **归档正文**。单独取，不跟轮询走——简历动辄几十 KB，1.5 秒一次地传是纯浪费，而且它只有「准备」页用得上 |
 
 ### 1.1 `SessionSummary`
 

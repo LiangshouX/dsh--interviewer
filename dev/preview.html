@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dsh-interviewer 预览</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #0b0b0d; }
+    #root { height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="/dev/react.development.js"></script>
+  <script src="/dev/react-dom.development.js"></script>
+  <script src="/dev/fixtures.js"></script>
+  <script>
+    // ── 桩宿主：只提供插件真正用到的那几个能力 ──────────────────────────
+    window.__CAPTURED__ = {}
+    window.__PREVIEW__ = { mode: 'prepare', media: 'granted' }
+
+    window.fetch = async function (url) {
+      const path = String(url).replace('/interviewer/api', '')
+      const data = window.__FIXTURES__.route(path, window.__PREVIEW__)
+      return { ok: true, status: 200, json: async () => ({ ok: true, data }) }
+    }
+
+    // **模拟「权限被拒」**：这是插件必须给出路的核心场景，
+    // 光看「未接通」的空状态是看不出问题���。
+    //   · permissions.query 一律报 denied（系统已经记住了拒绝）；
+    //   · getUserMedia 抛 NotAllowedError；
+    //   · onchange 可以在截图前手动触发，用来验证「用户在系统设置里放行后自动接上」。
+    if (window.__PRESET__ && window.__PRESET__.media === 'denied') {
+      const makeStatus = state => ({
+        state,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+      })
+      const states = { camera: makeStatus('denied'), microphone: makeStatus('denied') }
+      // navigator 上的这些属性是**只读访问器**，直接赋值在非严格模式下
+      // 会静默失败——必须用 defineProperty 覆盖。
+      Object.defineProperty(navigator, 'permissions', {
+        configurable: true,
+        value: { query: async name => states[name] ?? makeStatus('denied') },
+      })
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          getUserMedia: async () => {
+            const error = new Error('Permission denied')
+            error.name = 'NotAllowedError'
+            throw error
+          },
+        },
+      })
+      window.__GRANT__ = () => {
+        states.camera.state = 'granted'
+        states.microphone.state = 'granted'
+        if (typeof states.camera.onchange === 'function') states.camera.onchange()
+        if (typeof states.microphone.onchange === 'function') states.microphone.onchange()
+      }
+    }
+
+    window.__ModuleLoader__ = {
+      load(definition) {
+        const module = definition.factory(name => {
+          if (name === 'react') return window.React
+          throw new Error('预览环境不支持模块：' + name)
+        })
+        module.apply({
+          effect: fn => fn(),
+          locale: { register: () => () => {}, bind: () => key => key },
+          slots: {
+            register(spec, component) {
+              window.__CAPTURED__[spec.name] = { spec, component }
+              return () => {}
+            },
+            inject(name, factory) { factory(); return () => {} },
+          },
+        })
+      },
+    }
+  </script>
+  <script src="/client.js"></script>
+  <script>
+    window.__RENDER__ = function render() {
+      const main = window.__CAPTURED__.main
+      if (main === undefined) throw new Error('client.js 没有注册 main 槽')
+      window.ReactDOM.createRoot(document.getElementById('root')).render(
+        window.React.createElement(main.component, {})
+      )
+    }
+  </script>
+</body>
+</html>

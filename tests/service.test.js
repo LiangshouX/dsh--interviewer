@@ -135,3 +135,28 @@ test('转录有上限：面板轮询不会因为面试变长而无限膨胀', as
     await rm(join(workspaceRoot), { recursive: true, force: true })
   }
 })
+
+test('归档正文单独可取：简历/JD 不跟轮询走', async () => {
+  const { service, workspaceRoot } = await makeService()
+  try {
+    const session = await service.createSession({
+      title: '正文场',
+      resumeText: '梁守 / 2.5 年后端',
+      jdText: '高级后端工程师（交易方向）',
+    })
+    // 状态里只有字数——正文不跟着 getState 走（轮询 1.5 秒一次，
+    // 每次传几十 KB 是纯浪费）。
+    const state = await service.getState(session.id)
+    assert.equal(state.documents.resumeChars, '梁守 / 2.5 年后端'.length)
+    assert.equal(state.documents.jdChars, '高级后端工程师（交易方向）'.length)
+    assert.equal(state.resume, undefined)
+
+    // 但单独取得到。
+    const documents = await service.getDocuments(session.id)
+    assert.equal(documents.resume, '梁守 / 2.5 年后端')
+    assert.equal(documents.jd, '高级后端工程师（交易方向）')
+    assert.equal(typeof documents.jdMeta, 'object')
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
+})

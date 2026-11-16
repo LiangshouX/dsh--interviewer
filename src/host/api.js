@@ -174,6 +174,16 @@ async function readResource(service, segments, query) {
   }
   if (head === 'sessions') {
     if (rest.length === 0) return { sessions: await service.listSessions() }
+    // **归档正文单独取。** 简历/动辄几十 KB，跟着 1.5 秒一次的轮询传
+    // 是纯浪费——而且它在「准备」页才有用，面试页根本不需要。
+    if (rest[1] === 'documents') {
+      const documents = await service.getDocuments(rest[0])
+      return {
+        resume: documents.resume,
+        jd: documents.jd,
+        jdMeta: documents.jdMeta,
+      }
+    }
     const limit = Number(query.transcriptLimit)
     const state = await service.getState(rest[0], {
       transcriptLimit: Number.isFinite(limit) && limit > 0 ? limit : undefined,

@@ -9,3 +9,8 @@ release/
 .DS_Store
 Thumbs.db
 __pycache__/
+
+# dev/ 的运行时产物：React UMD 拷贝与截图不入库
+dev/react.development.js
+dev/react-dom.development.js
+dev/shots/
