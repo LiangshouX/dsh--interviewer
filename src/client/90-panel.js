@@ -298,6 +298,52 @@
       // 变成顶部一条横向的场次带——不然它会吃掉一半宽度，
       // 把「面试中」那一页挤到连舞台都放不下。
       const [pageRef, pageWidth] = useContainerWidth()
+
+      // ── 面板外的离开拦截 ──────────────────────────────────────────────
+      //
+      // 侧栏切到「会话 / 自媒体工作台 / Skill-MCP」这类导航由 DSH 完成，
+      // 不是我们的按钮——只能在这里**捕获阶段拦一次**：设备开着时，
+      // 点击落在面板左侧（DSH 侧栏）就先问；确认后把这次点击重放回去。
+      // 顶部菜单栏允许通过，避免把无关点击也拦住。
+      const guardStateRef = useRef({ quiet: false, running: false })
+      guardStateRef.current = { quiet: guardQuiet, running: session?.session?.status === 'running' }
+      useEffect(() => {
+        if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return undefined
+        const handler = event => {
+          if (!mediaInUse().any || guardStateRef.current.quiet) return
+          const root = pageRef.current
+          if (root === null || root === undefined || typeof root.getBoundingClientRect !== 'function') return
+          // 只拦**面板左侧**的点击（DSH 侧栏是导航入口）；顶部菜单与面板内放行。
+          const rect = root.getBoundingClientRect()
+          if (event.clientX >= rect.left) return
+          event.preventDefault()
+          event.stopPropagation()
+          const point = { x: event.clientX, y: event.clientY }
+          setGuard({
+            label: '离开面试间',
+            remember: false,
+            second: false,
+            inInterview: guardStateRef.current.running,
+            action: () => {
+              // 确认后把这次点击重放回原位置，用户不用再点一次。
+              setTimeout(() => {
+                try {
+                  const target = typeof document.elementFromPoint === 'function'
+                    ? document.elementFromPoint(point.x, point.y)
+                    : null
+                  if (target === null) return
+                  target.dispatchEvent(new MouseEvent('click', {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: point.x, clientY: point.y,
+                  }))
+                } catch { /* 重放不了就让用户再点一次，设备已经释放 */ }
+              }, 0)
+            },
+          })
+        }
+        document.addEventListener('click', handler, true)
+        return () => document.removeEventListener('click', handler, true)
+      }, [])
       const narrow = pageWidth > 0 && pageWidth < 760
 
       return h('div', {
