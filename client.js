@@ -1407,9 +1407,11 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState(undefined)
       const cacheRef = useRef(new Map())
       const audioRef = useRef(undefined)
-      const urlRef = useRef(undefined)
+      /** 每次新的朗读 +1；旧的请求回来时看到代际不对就丢弃。 */
+      const generationRef = useRef(0)
 
       const stop = useCallback(() => {
+        generationRef.current += 1
         const audio = audioRef.current
         if (audio !== undefined) {
           try {
@@ -1420,34 +1422,30 @@ window.__ModuleLoader__.load({
         if (typeof window !== 'undefined' && window.speechSynthesis !== undefined) {
           try { window.speechSynthesis.cancel() } catch { /* 没有在播 */ }
         }
-        if (urlRef.current !== undefined) {
-          try { URL.revokeObjectURL(urlRef.current) } catch { /* 已经回收 */ }
-          urlRef.current = undefined
-        }
         setSpeaking(false)
       }, [])
 
       useEffect(() => () => stop(), [stop])
 
-      /** 播一段 base64 音频；返回是否真的播起来了。 */
-      const playClip = useCallback(async clip => {
-        const audio = audioRef.current ?? (audioRef.current = new Audio())
-        audio.onended = () => setSpeaking(false)
-        audio.onerror = () => setSpeaking(false)
-        if (urlRef.current !== undefined) {
-          try { URL.revokeObjectURL(urlRef.current) } catch { /* 已回收 */ }
-        }
-        const url = URL.createObjectURL(base64ToBlob(clip.base64, clip.mimeType))
-        urlRef.current = url
-        audio.src = url
+      /** 取一句的音频（命中缓存就不请求）；失败返回 undefined。 */
+      const fetchClip = useCallback(async (sentence, rate) => {
+        const key = `${rate}|${sentence}`
+        const cached = cacheRef.current.get(key)
+        if (cached !== undefined) return cached
         try {
-          setSpeaking(true)
-          await audio.play()
-          return true
-        } catch {
-          setSpeaking(false)
-          return false
+          const result = await apiPost('tts/speak', { text: sentence, rate })
+          if (result?.ok === true && typeof result.audioBase64 === 'string') {
+            const clip = { base64: result.audioBase64, mimeType: result.mimeType ?? 'audio/mpeg' }
+            cacheRef.current.set(key, clip)
+            // 语音是大对象：缓存封顶，**不常驻**（AGENTS §11.4）。
+            if (cacheRef.current.size > 48) cacheRef.current.delete(cacheRef.current.keys().next().value)
+            return clip
+          }
+          setNotice(result?.reason ?? '模型播报不可用，已改用浏览器音色。')
+        } catch (failure) {
+          setNotice(`模型播报失败：${failure instanceof Error ? failure.message : String(failure)}`)
         }
+        return undefined
       }, [])
 
       /** 浏览器音色（最后一步）：中文优先、按名称挑最自然的。 */
@@ -1472,39 +1470,82 @@ window.__ModuleLoader__.load({
         return true
       }, [])
 
+      /**
+       * 播报：**逐句流水线**。
+       *
+       * **为什么按句流水。** 整段合成要等所有句子都合成完才出声；而面谈里
+       * 「面试官什么时候开口」几乎等于「这像不像真的」。按句拆开后，第一句
+       * 一到就播，后面的句子在播放期间继续合成——首音延迟从「整段」降到
+       * 「一句」。
+       *
+       * 注意：这是**请求级流水**，不是音频流式；真正的 SSE/流式要等 provider
+       * 支持（MiMo 的 stream 是"整段音频出流式文字/音频"，不是麦克风实时）。
+       */
       const speak = useCallback(async (text, options = {}) => {
         const line = String(text ?? '').trim()
         if (line === '') return false
         const rate = options.rate ?? config?.ttsRate ?? 1
         stop()
+        const generation = generationRef.current
 
-        if (status?.mode === 'server') {
-          const key = `${rate}|${line}`
-          let clip = cacheRef.current.get(key)
-          if (clip === undefined) {
+        if (status?.mode !== 'server') return speakBrowser(line, rate)
+
+        const sentences = splitSentences(line)
+        const chunks = sentences.length === 0 ? [line] : sentences
+        /** 按句序存放 objectURL；undefined = 还没好，null = 这句失败。 */
+        const parts = new Array(chunks.length)
+        const audio = audioRef.current ?? (audioRef.current = new Audio())
+        let cursor = 0
+        let pumping = false
+
+        const pump = async () => {
+          if (pumping) return
+          pumping = true
+          while (generation === generationRef.current) {
+            const part = parts[cursor]
+            if (part === undefined) break
+            cursor += 1
+            if (part === null) continue
+            setSpeaking(true)
+            audio.src = part
             try {
-              const result = await apiPost('tts/speak', { text: line, rate })
-              if (result?.ok === true && typeof result.audioBase64 === 'string') {
-                clip = { base64: result.audioBase64, mimeType: result.mimeType ?? 'audio/mpeg' }
-                cacheRef.current.set(key, clip)
-                // 缓存封顶：语音是大对象，**不常驻内存**（见 AGENTS §11）。
-                if (cacheRef.current.size > 24) cacheRef.current.delete(cacheRef.current.keys().next().value)
-                setNotice(undefined)
-              } else {
-                setNotice(result?.reason ?? '模型播报不可用，已改用浏览器音色。')
+              await audio.play()
+            } catch {
+              // 播放被拦：把整段交给浏览器音色，并说明原因。
+              if (generation === generationRef.current) {
+                setNotice('浏览器拦下了自动播放，已改用系统音色。')
+                speakBrowser(line, rate)
               }
-            } catch (failure) {
-              setNotice(`模型播报失败：${failure instanceof Error ? failure.message : String(failure)}`)
+              pumping = false
+              return
             }
+            await new Promise(resolve => {
+              audio.onended = resolve
+              audio.onerror = resolve
+            })
+            try { URL.revokeObjectURL(part) } catch { /* 已回收 */ }
           }
-          if (clip !== undefined) {
-            const played = await playClip(clip)
-            if (played) return true
-            setNotice('浏览器拦下了自动播放，已改用系统音色。')
-          }
+          pumping = false
+          if (generation === generationRef.current && cursor >= chunks.length) setSpeaking(false)
         }
-        return speakBrowser(line, rate)
-      }, [status?.mode, config?.ttsRate, playClip, speakBrowser, stop])
+
+        for (let index = 0; index < chunks.length; index += 1) {
+          const sentence = chunks[index]
+          void fetchClip(sentence, rate).then(clip => {
+            if (generation !== generationRef.current) return
+            if (clip === undefined) {
+              parts[index] = null
+              // 第一句就没有音频：整段回落浏览器音色，别让用户干等。
+              if (index === 0) speakBrowser(line, rate)
+              void pump()
+              return
+            }
+            parts[index] = URL.createObjectURL(base64ToBlob(clip.base64, clip.mimeType))
+            void pump()
+          })
+        }
+        return true
+      }, [status?.mode, config?.ttsRate, fetchClip, speakBrowser, stop])
 
       return { speak, stop, speaking, notice, supported: typeof window !== 'undefined' }
     }
@@ -1571,15 +1612,20 @@ window.__ModuleLoader__.load({
         && navigator.mediaDevices !== undefined
         && (window.AudioContext ?? window.webkitAudioContext) !== undefined
 
-      /** 转写一段；失败只记原因，不打断面试。 */
-      const flush = useCallback(async (samples, sampleRate) => {
+      /**
+       * 转写一段；失败只记原因，不打断面试。
+       *
+       * 同时把这一段的**语流原始测量**（说话/静音/段前停顿/能量波动）交给
+       * 调用方——它随这一轮回答一起上报，Host 端算指标。
+       */
+      const flush = useCallback(async (samples, sampleRate, stats) => {
         const wav = encodeWav(resampleTo16k(samples, sampleRate), 16000)
         const dataBase64 = bufferToBase64(wav)
         setPending(count => count + 1)
         try {
           const result = await apiPost('asr/transcribe', { dataBase64, mimeType: 'audio/wav', language })
           if (result?.ok === true && typeof result.text === 'string' && result.text.trim() !== '') {
-            onTextRef.current?.(result.text.trim(), { mode: result.mode ?? 'server' })
+            onTextRef.current?.(result.text.trim(), { mode: result.mode ?? 'server', segment: stats })
             if (result.timing !== undefined) setTiming(result.timing)
             setError(undefined)
           } else if (result?.ok !== true) {
@@ -1591,6 +1637,22 @@ window.__ModuleLoader__.load({
           setPending(count => Math.max(0, count - 1))
         }
       }, [language])
+
+      /** 从 VAD 状态里取这一段的原始测量。 */
+      const statsOf = state => {
+        let energyCv = 0
+        if (state.energyCount > 1) {
+          const mean = state.energySum / state.energyCount
+          const variance = Math.max(0, state.energySq / state.energyCount - mean * mean)
+          energyCv = mean > 0 ? Math.min(10, Math.sqrt(variance) / mean) : 0
+        }
+        return {
+          speechMs: Math.round(state.speechMs),
+          silenceMs: Math.round(state.silenceMs),
+          gapBeforeMs: Math.round(state.pendingGapMs),
+          energyCv: Math.round(energyCv * 100) / 100,
+        }
+      }
 
       const stop = useCallback(() => {
         const session = sessionRef.current
@@ -1608,7 +1670,7 @@ window.__ModuleLoader__.load({
         if (session.state.chunks.length > 0) {
           const tail = mergeChunks(session.state.chunks)
           session.state.chunks = []
-          if ((tail.length / rate) * 1000 >= ASR_MIN_SEGMENT_MS) void flush(tail, rate)
+          if ((tail.length / rate) * 1000 >= ASR_MIN_SEGMENT_MS) void flush(tail, rate, statsOf(session.state))
         }
         sessionRef.current = undefined
         setActive(false)
@@ -1633,7 +1695,12 @@ window.__ModuleLoader__.load({
           const processor = context.createScriptProcessor(4096, 1, 1)
           const sink = context.createGain()
           sink.gain.value = 0
-          const state = { chunks: [], speech: false, silenceMs: 0, durationMs: 0 }
+          /** 一段的测量状态；每次切段后清零。 */
+          const state = {
+            chunks: [], speech: false,
+            speechMs: 0, silenceMs: 0, pendingGapMs: 0, lastEndAt: undefined,
+            energySum: 0, energySq: 0, energyCount: 0,
+          }
 
           processor.onaudioprocess = event => {
             const input = event.inputBuffer.getChannelData(0)
@@ -1641,26 +1708,40 @@ window.__ModuleLoader__.load({
             for (let index = 0; index < input.length; index += 1) sum += input[index] * input[index]
             const rms = Math.sqrt(sum / input.length)
             const frameMs = (input.length / context.sampleRate) * 1000
-            if (rms >= ASR_RMS_THRESHOLD) {
+            const speaking = rms >= ASR_RMS_THRESHOLD
+
+            if (speaking && !state.speech) {
+              // 新的一段开始。与上一段结束之间的空档 = 一次真实的"停住"。
               state.speech = true
+              state.pendingGapMs = state.lastEndAt === undefined ? 0 : Math.max(0, performance.now() - state.lastEndAt)
+              state.speechMs = 0
               state.silenceMs = 0
-              state.chunks.push(new Float32Array(input))
-              state.durationMs += frameMs
-            } else if (state.speech) {
-              state.chunks.push(new Float32Array(input))
-              state.silenceMs += frameMs
-              state.durationMs += frameMs
+              state.energySum = 0
+              state.energySq = 0
+              state.energyCount = 0
             }
             if (!state.speech) return
-            const done = state.silenceMs >= ASR_SILENCE_MS || state.durationMs >= ASR_MAX_SEGMENT_MS
+
+            state.chunks.push(new Float32Array(input))
+            if (speaking) {
+              state.speechMs += frameMs
+              state.energySum += rms
+              state.energySq += rms * rms
+              state.energyCount += 1
+              state.silenceMs = 0
+            } else {
+              state.silenceMs += frameMs
+            }
+
+            const done = state.silenceMs >= ASR_SILENCE_MS
+              || state.speechMs + state.silenceMs >= ASR_MAX_SEGMENT_MS
             if (!done) return
             const merged = mergeChunks(state.chunks)
-            const spokeMs = state.durationMs - state.silenceMs
+            const stats = statsOf(state)
             state.chunks = []
             state.speech = false
-            state.silenceMs = 0
-            state.durationMs = 0
-            if (spokeMs >= ASR_MIN_SEGMENT_MS) void flush(merged, context.sampleRate)
+            state.lastEndAt = performance.now()
+            if (stats.speechMs >= ASR_MIN_SEGMENT_MS) void flush(merged, context.sampleRate, stats)
           }
 
           source.connect(processor)
@@ -2841,9 +2922,14 @@ window.__ModuleLoader__.load({
       const [speaking, setSpeaking] = useState(false)
       const lastQuestionRef = useRef('')
 
+      const answerSegmentsRef = useRef([])
       /** 识别到的一句追加进草稿（用户可以改，所以只追加不覆盖）。 */
-      const appendRecognized = useCallback(text => {
+      const appendRecognized = useCallback((text, meta) => {
         if (typeof text !== 'string' || text.trim() === '') return
+        // 每一段都带一份语流原始测量；这一轮回答结束时一起上报。
+        if (meta?.segment !== undefined) {
+          answerSegmentsRef.current = [...answerSegmentsRef.current, meta.segment]
+        }
         setAnswer(previous => `${previous}${previous.trim() === '' ? '' : ' '}${text.trim()}`)
       }, [])
 
@@ -2886,6 +2972,20 @@ window.__ModuleLoader__.load({
         return count
       }, [transcript])
 
+      /**
+       * 最近一轮回答的语流观察。
+       *
+       * **它从会话状态里读，不从客户端本地攒。** Host 端是唯一算指标的地方，
+       * 面板只是显示——这样报告、agent、面板看到的是同一份数字。
+       */
+      const lastFluency = useMemo(() => {
+        for (let index = transcript.length - 1; index >= 0; index -= 1) {
+          const row = transcript[index]
+          if (row.role === 'candidate' && row.meta?.fluency !== undefined) return row.meta.fluency
+        }
+        return undefined
+      }, [transcript])
+
       // 新问题自动朗读（可关）。
       const speakLine = tts.speak
       useEffect(() => {
@@ -2899,8 +2999,15 @@ window.__ModuleLoader__.load({
       const submitAnswer = useCallback(async () => {
         const text = answer.trim()
         if (text === '') return
+        const segments = answerSegmentsRef.current
         try {
-          await apiPost(`sessions/${session.session.id}/turn`, { role: 'candidate', text, meta: { source: 'panel' } })
+          await apiPost(`sessions/${session.session.id}/turn`, {
+            role: 'candidate',
+            text,
+            // 语流只上报**原始测量**：Host 端统一算指标（单一实现）。
+            meta: { source: 'panel', ...(segments.length > 0 ? { fluency: { segments } } : {}) },
+          })
+          answerSegmentsRef.current = []
           setAnswer('')
           onChanged()
           notify('回答已记录', 'ok')
@@ -3543,6 +3650,15 @@ window.__ModuleLoader__.load({
               ]),
               h(SegmentedMeter, { key: 'm', level: media.level }),
             ]),
+
+            // 语流：上一轮回答的「怎么说」。观察值，不是评分。
+            lastFluency !== undefined
+              ? h('div', { key: 'flu', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7 } },
+                `语流：说 ${(lastFluency.speechMs / 1000).toFixed(1)}s · 停 ${(lastFluency.silenceMs / 1000).toFixed(1)}s`
+                + `（长停顿 ${lastFluency.pauseCount} 次，最长 ${(lastFluency.longestPauseMs / 1000).toFixed(1)}s）`
+                + ` · 语速 ${lastFluency.speechRate} 字/秒`
+                + ` · 口头语 ${lastFluency.fillerCount} 次 · 重复 ${lastFluency.repeats} 次`)
+              : null,
 
             // 权限错误**不在这里再说一遍**——舞台上的红框已经把话说全了，
             // 同一句话出现在两个地方只会让人以为出了两个问题。

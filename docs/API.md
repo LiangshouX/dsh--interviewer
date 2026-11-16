@@ -92,9 +92,13 @@
   "documents": { "resumeChars", "jdChars", "jdUrl", "jdSections", "jdWarnings" },
   "recordings": [{ "name", "kind", "bytes", "modifiedAt", "path" }],
   "report": "# 报告…",
+  "fluency": { "turns", "speechMs", "silenceMs", "speechRate", "pauseCount", "longestPauseMs", "fillerCount", "repeats", "corrections", "notes" },
   "stats": { "asked", "answered", "durationMs", "checklistTotal", "checklistProbed", "adjustments" }
 }
 ```
+
+`fluency` 是整场的**语流观察**（没有带语流的回答时为 `undefined`）。
+它是观察值，**不是评分**；报告与面试官读它，但不许念给候选人听。
 
 ### 1.3 `ChecklistItem`
 
@@ -117,6 +121,38 @@
 ```jsonc
 { "ts": 1763259500000, "role": "interviewer | candidate | system", "text": "…", "meta": {} }
 ```
+
+候选人一轮回答可以带 `meta.fluency`。**客户端只上报原始测量**，指标由 Host 的
+`src/host/fluency.js` 算出（单一实现，纯函数）。
+
+POST 时的上报形状：
+
+```jsonc
+{
+  "role": "candidate", "text": "…",
+  "meta": { "source": "panel", "fluency": { "segments": [
+    { "speechMs": 2200, "silenceMs": 300, "gapBeforeMs": 0, "energyCv": 0.3 },
+    { "speechMs": 1800, "silenceMs": 450, "gapBeforeMs": 900, "energyCv": 0.5 }
+  ] } }
+}
+```
+
+落盘后读回来的形状（同一字段，已被 Host 归一化）：
+
+```jsonc
+{
+  "version": 1, "segments": 2,
+  "speechMs": 4000, "silenceMs": 750,
+  "pauseCount": 1, "longestPauseMs": 900, "pausesMs": [900],
+  "speechRate": 4.7, "chars": 21,
+  "fillers": [{ "word": "那个", "count": 1 }], "fillerCount": 1,
+  "repeats": 0, "corrections": 1, "energyCv": 0.4,
+  "notes": ["这是启发式测量，不是能力评分；麦克风回声会抬高静音段能量。"]
+}
+```
+
+`gapBeforeMs` 是**段与段之间的空档**——分段器在 450ms 静音处切段，所以"卡住了"
+通常表现为这个字段，而不是段内静音。
 
 ### 1.5 `Adjustment`（清单调整留痕）
 

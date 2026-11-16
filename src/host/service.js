@@ -33,6 +33,7 @@ import { fetchJobDescription } from './jd.js'
 import { extractTextFromUpload } from './extract.js'
 import { CameraService } from './camera.js'
 import { VoiceService } from './voice/index.js'
+import { measureFluency, summarizeFluency } from './fluency.js'
 
 /** Session lifecycle. */
 export const SESSION_STATUS = {
@@ -945,11 +946,17 @@ export class InterviewService {
     const role = turn.role === 'interviewer' ? 'interviewer' : turn.role === 'system' ? 'system' : 'candidate'
     const text = String(turn.text ?? '').trim()
     if (text === '') throw new Error('空的转录内容不记录')
+    const meta = turn.meta !== undefined && typeof turn.meta === 'object' ? { ...turn.meta } : {}
+    // 语流：客户端只上报原始测量（每段说话/静音/段间停顿），指标在 Host 算。
+    // **单一实现**：面板、agent 上下文、报告读到的都是这一份。
+    if (meta.fluency !== undefined && typeof meta.fluency === 'object' && Array.isArray(meta.fluency.segments)) {
+      meta.fluency = measureFluency({ text, segments: meta.fluency.segments })
+    }
     const row = {
       ts: Date.now(),
       role,
       text,
-      meta: turn.meta !== undefined && typeof turn.meta === 'object' ? turn.meta : {},
+      meta,
     }
     await appendJsonl(join(dir, 'transcript.jsonl'), row)
     await this.touch(sessionId)
@@ -1246,6 +1253,9 @@ export class InterviewService {
       },
       recordings,
       report,
+      // 语流：整场面试的表达习惯观察（停顿 / 语速 / 口头语 …）。
+      // **不是评分**，是观察值；报告与面试官都读它，但不许念给候选人听。
+      fluency: summarizeFluency(transcript),
       stats: {
         asked,
         answered,
@@ -1273,6 +1283,9 @@ export class InterviewService {
       checklist: state.checklist.items,
       pendingTopics: pending.map(item => ({ id: item.id, topic: item.topic, why: item.why, level: item.level })),
       transcript: state.transcript,
+      // 语流汇总：面试官可以据此调整追问方式（停顿长的地方换更小的切口），
+      // 但**不要**把"你语速 2.1 字/秒"这种话回给候选人。
+      fluency: state.fluency,
       stats: state.stats,
       report: state.report,
     }
