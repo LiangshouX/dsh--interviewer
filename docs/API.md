@@ -38,6 +38,9 @@
 | `sessions` | `{sessions: SessionSummary[]}` | 会话列表，最新在前 |
 | `sessions/<id>` | `SessionState` | 单场面试的全量状态 |
 | `sessions/<id>/documents` | `{resume, jd, jdMeta}` | **归档正文**。单独取，不跟轮询走——简历动辄几十 KB，1.5 秒一次地传是纯浪费，而且它只有「准备」页用得上 |
+| `resumes` | `{resumes: ResumeSummary[]}` | **简历库**列表，只含元信息（不带正文），最新在前 |
+| `resumes/<id>` | `{resume: ResumeFull}` | 简历库里某一份的正文 |
+| `host-sessions` | `{sessions: HostSession[]}` | 宿主自己的对话列表（`{id, title, updatedAt}`），用来把「让助手去抓」的请求派过去 |
 
 ### 1.1 `SessionSummary`
 
@@ -49,6 +52,10 @@
   "status": "draft | ready | running | done",
   "createdAt": 1763259012000,
   "updatedAt": 1763259600000,
+  "position": "后端开发",
+  "company": "字节",
+  "archived": false,
+  "archivedAt": 0,
   "hasResume": true,
   "hasJd": true,
   "checklistCount": 12,
@@ -58,11 +65,28 @@
 }
 ```
 
+`position` / `company` 供列表**按岗位分组**；`archived` 只是收起，不是删除。
+
+### 1.1.1 `ResumeSummary` / `ResumeFull`
+
+```jsonc
+// ResumeSummary（列表里只有这些）
+{ "id": "rs-20261116-1a2b", "title": "字节 · 后端开发", "chars": 1832,
+  "createdAt": 1763259012000, "updatedAt": 1763259012000 }
+
+// ResumeFull（单独取）
+{ "id": "rs-20261116-1a2b", "title": "字节 · 后端开发", "text": "…",
+  "chars": 1832, "createdAt": 1763259012000, "updatedAt": 1763259012000 }
+```
+
+存储位置：`<workspaceRoot>/resumes/<id>/{resume.txt, meta.json}`；
+`id` 形如 `rs-<时间戳>-<随机>`，只允许 `[A-Za-z0-9]`。
+
 ### 1.2 `SessionState`
 
 ```jsonc
 {
-  "session": { "id", "title", "role", "status", "createdAt", "startedAt", "endedAt", "updatedAt", "dir" },
+  "session": { "id", "title", "role", "status", "createdAt", "startedAt", "endedAt", "updatedAt", "position", "company", "resumeId", "dir" },
   "checklist": { "version": 2, "items": ChecklistItem[], "adjustments": Adjustment[] },
   "transcript": TranscriptRow[],
   "documents": { "resumeChars", "jdChars", "jdUrl", "jdSections", "jdWarnings" },
@@ -109,7 +133,7 @@
 | 动作 | 请求体 | 说明 |
 |---|---|---|
 | `sessions` | `{title?, role?, resumeText?, jdText?, jdUrl?}` | 新建会话 |
-| `sessions/<id>` | `{title?, role?, status?, notes?}` | 改元信息 |
+| `sessions/<id>` | `{title?, role?, status?, notes?, position?, company?}` | 改元信息（`position`/`company` 供列表分组） |
 | `sessions/<id>/start` | `{}` | 标记开始（记 `startedAt`） |
 | `sessions/<id>/finish` | `{}` | 标记结束（记 `endedAt`） |
 | `sessions/<id>/resume` | `{text}` | 存简历正文 |
@@ -119,6 +143,41 @@
 | `sessions/<id>/turn` | `{role, text, meta?}` | 追加一轮转录 |
 | `sessions/<id>/recording` | `{kind, filename?, mimeType?, dataBase64}` | 保存录像/录音 |
 | `sessions/<id>/report` | `{markdown}` | 写分析报告并置 `done` |
+| `sessions/<id>/archive` | `{archived: true \| false}` | **归档 / 取回**。只是收起来，内容、报告、底稿都还在；取消归档时 `archivedAt` 一并抹掉 |
+
+### 2.1.1 简历库
+
+```
+POST /interviewer/api/resumes              { "title": "字节 · 后端", "text": "…" }
+POST /interviewer/api/resumes              { "sessionId": "iv-…", "title": "…" }
+POST /interviewer/api/resumes/<id>         { "sessionId": "iv-…" }
+POST /interviewer/api/resumes/<id>/delete  {}
+```
+
+- 第一种：直接存一份新简历（`id` 可选，给了就是更新那一份）。
+- 第二种：把某场面试里的简历存进库。
+- 第三种：把库里那份用到某场面试上——**在会话目录存一份快照**，
+  并把 `resumeId` 记到会话元信息里（历史面试的复盘依据不受库里改动影响）。
+- 第四种：删库里的原件；**已经用过的场次里的快照不受影响**。
+
+### 2.1.2 让助手去抓 JD
+
+```
+POST /interviewer/api/jd/request-agent  { "sessionId": "iv-…", "url": "https://…", "hostSessionId": "…" }
+POST /interviewer/api/jd/save           { "sessionId": "iv-…", "text": "…", "url": "https://…" }
+```
+
+`request-agent` 把抓取请求发到**宿主的对话**里（默认最近活跃的那个），
+让有浏览器的助手去把正文抄回来：
+
+```jsonc
+{ "dispatched": true,
+  "hostSession": { "id": "s-…", "title": "当前的对话" },
+  "message": "请求已经发给助手了。在 DSH 对话里能看到它跑，抓到后正文会自动回到这一场面试。" }
+```
+
+助手拿到正文后调 `interview_save_jd`（或本接口 `jd/save`）写回这场面试。
+宿主没有会话接口时，接口要**如实说**并给出下一步，不能静默失败。
 
 ### 2.2 JD 抓取
 
@@ -198,6 +257,136 @@ POST /interviewer/api/asr/transcribe  { "dataBase64": "…", "mimeType": "audio/
 读取：`GET /interviewer/api/profiles` → `{profiles: [...]}`；
 `GET /interviewer/api/profiles/<id>` → `{profile: {...}}`。
 
+### 2.6 卷宗库（工作区根）
+
+面板上的「浏览…」是**两步**，不是一个动作——先让用户选，再切：
+
+```
+POST /interviewer/api/config/workspace-root/pick   {}
+POST /interviewer/api/config/workspace-root        { "path": "D:\\DSH-INTERVIEWER", "migrateFrom": "C:\\Users\\me\\DSH-INTERVIEWER" }
+```
+
+`pick`（弹宿主原生目录选择器）：
+
+```jsonc
+{ "picker": { "available": true, "picked": "D:\\DSH-INTERVIEWER" } }
+```
+
+宿主没有目录选择器，或用户取消了：
+
+```jsonc
+{ "picker": { "available": false, "picked": null, "reason": "这个宿主没有提供目录选择器" } }
+```
+
+`reason` 说清**为什么**，并给出下一步（手动填绝对路径）。
+
+`workspace-root`（切根，`migrateFrom` 可选）：
+
+```jsonc
+{ "workspaceRoot": { "path": "D:\\DSH-INTERVIEWER", "source": "settings", "reason": "面板里选的" },
+  "migrated": { "copied": true, "sessions": 1, "profiles": 0, "from": "C:\\Users\\me\\DSH-INTERVIEWER" } }
+```
+
+- 迁移是**复制**，不是移动——老目录原样保留（`migrated.copied`）。
+- 配置里写死了 `workspaceRoot` 时，面板这次的选择不生效，返回
+  `warning` 说明「改配置才作数」。
+- 切根**立即生效**：有效根每次重算，不缓存。
+
+---
+
+## 2.7 摄像头（Host 侧 ffmpeg 采集）
+
+DSH 桌面端的 Electron 权限处理器只放行**纯音频**请求，摄像头在主进程就被拒了——
+**改 Windows 设置也没用**（那道闸门在系统隐私层之上，请求压根没走到系统）。
+但插件的 Host 半边跑在 Node 宿主进程里，那里没有这道闸门。
+
+所以摄像头走 **Host 侧 ffmpeg**：Host 直接打开设备，把画面以 MJPEG 流推回来。
+
+### 2.7.1 预览流（不是 JSON）
+
+```
+GET /interviewer/camera/stream
+Content-Type: multipart/x-mixed-replace; boundary=--dshframe
+```
+
+浏览器端 **一行 JS 都不用写**：`<img src="/interviewer/camera/stream">` 直接吃这个流。
+
+**响应不能带 `content-length`。** DSH 桌面端把应用页的请求转发给 Host 时会剥掉
+`content-length`/`transfer-encoding`，所以这是 chunked 的（逐帧 `res.write()`）。
+
+### 2.7.2 控制接口
+
+```
+GET  /interviewer/api/camera            → 采集状态
+GET  /interviewer/api/camera/devices    → 本机的摄像头/麦克风设备
+POST /interviewer/api/camera/start      → 开摄像头
+POST /interviewer/api/camera/stop       → 关摄像头（释放设备）
+POST /interviewer/api/camera/record/start  { "sessionId": "iv-…" } → 开始录像
+POST /interviewer/api/camera/record/stop   { "sessionId": "iv-…" } → 停止录像
+```
+
+状态：
+
+```jsonc
+{
+  "running": true,          // 采集进程是否活着
+  "hasFrame": true,         // 是否已经出过帧
+  "device": "XiaoMi USB 2.0 Webcam",
+  "recording": false,
+  "ffmpeg": "D:\\ProgramFils\\ffmpeg\\bin\\ffmpeg.exe",
+  "ffmpegSource": "path",  // config | env | path | wellknown
+  "clients": 1,            // 当前有几个预览连接
+  "error": ""
+}
+```
+
+**录像落盘位置**：`<sessionDir>/recordings/video-<时间戳>.mp4`。
+它直接就在这场面试的卷宗目录里——**没有 base64、没有几十兆的 JSON 传输**。
+
+**摄像头是独占设备**（实测：第二个进程打开直接 `I/O error`）。所以浏览器的
+摄像头和 Host 的摄像头**不能同时开**——客户端两个按钮互斥。
+
+### 2.7.3 ffmpeg 是不是每台机器都有？
+
+**不是。** ffmpeg 是一个**独立的第三方程序**，不是 Windows 自带，也不是 DSH 自带。
+新装的 Windows 机器上大概率没有（服务器版镜像更常见没有）。
+
+插件对它的定位顺序是四级：
+
+| 顺序 | 来源 | 说明 |
+|---|---|---|
+| 1 | `config.ffmpegPath` | 插件配置里的绝对路径（最优先） |
+| 2 | `DSH_FFMPEG_PATH` | 环境变量，适合多机部署时统一指定 |
+| 3 | `PATH` | 只要 `ffmpeg.exe` 在 PATH 里就能找到 |
+| 4 | 常见安装位置 | `D:\ProgramFils\ffmpeg\bin`、`C:\ffmpeg\bin`、`C:\Program Files\ffmpeg\bin`、`C:\ProgramData\chocolatey\bin`（Windows）；`/usr/local/bin`、`/opt/homebrew/bin`、`/usr/bin`（Unix） |
+
+`camera/devices` 与 `camera/start` 的响应里，`ffmpeg` 字段是**实际用到的那个路径**，
+`ffmpegSource` 是**从哪一级找到的**（`config` / `env` / `path` / `wellknown`）——
+一眼就能看出是「配错了」还是「装在 PATH 里」。
+
+**没装怎么办：**
+
+1. **装一个。** 最省事的是 `winget install Gyan.FFmpeg`（Windows 官方源）；
+   有 Chocolatey 就 `choco install ffmpeg`；macOS 用 `brew install ffmpeg`。
+   装完**不用重装插件**，但要**重启 DSH**（Host 半边不热重载）。
+2. **或者指定绝对路径。** 在插件配置里写 `ffmpegPath`，
+   或设环境变量 `DSH_FFMPEG_PATH` 指向 `ffmpeg.exe`。适合公司内网统一分发、
+   或者 ffmpeg 装在非标准目录的情况。
+3. **或者手动放一个。** 把 `ffmpeg.exe`（Windows 版是单个可执行文件）丢进
+   `D:\ProgramFils\ffmpeg\bin\`，插件第四级就能认出来。
+
+**没装 ffmpeg 时面试照常。** 插件会如实说「这台机器没有摄像头采集程序」，
+并告诉用户怎么装——**不会**说成「摄像头坏了」。麦克风、键盘提问、文字回答、
+考点清单、报告全都照常工作。受影响的只有「摄像头画面」和「录像」这两项。
+
+装完之后的自检：
+
+```bash
+ffmpeg -version          # 能出版本号就说明在 PATH 里
+# 不在 PATH 里就测绝对路径
+"D:\ProgramFils\ffmpeg\bin\ffmpeg.exe" -version
+```
+
 ---
 
 ## 3. Agent 工具
@@ -216,6 +405,14 @@ POST /interviewer/api/asr/transcribe  { "dataBase64": "…", "mimeType": "audio/
 | `interview_apply_profile` | `sessionId? profileId` | 继承档案的 JD 与考点基线 |
 | `interview_sync_profile` | `sessionId? profileId?` | 把会话成果回写档案 |
 | `interview_asr_status` | — | 读识别链路状态与原因 |
+| `interview_save_jd` | `sessionId? text url?` | 把 JD 正文写进一场面试；标题按「公司 · 岗位」重新提炼 |
+| `interview_archive_session` | `sessionId? archived` | 归档 / 取消归档一场面试（只是收起来，不删） |
+| `interview_list_resumes` | — | 列出简历库里的简历 |
+| `interview_save_resume` | `text? sessionId? title?` | 存一份简历进库（或把某场面试里的简历存进去） |
+| `interview_apply_resume` | `resumeId sessionId?` | 把库里那份用到某场面试上（卷内留快照） |
+| `interview_delete_resume` | `resumeId` | 从简历库删掉一份（已建好的面试不受影响） |
+| `interview_workspace_root` | — | 读卷宗库位置：路径、来源（配置 / 面板里选的 / 默认）与理由 |
+| `interview_set_workspace_root` | `path` `migrateFrom?` | 换卷宗库根；带 `migrateFrom` 时把那边的会话与档案**复制**过去 |
 
 **每个工具都是 `src/host/service.js` 的一个方法**，不重新实现业务逻辑。
 

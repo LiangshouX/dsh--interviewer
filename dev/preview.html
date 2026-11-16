@@ -19,41 +19,93 @@
     window.__CAPTURED__ = {}
     window.__PREVIEW__ = { mode: 'prepare', media: 'granted' }
 
+    // 预设要指定主题时，先把用户的选择写进去——
+    // 面板启动时读的就是这个键，这样截图和断言跑的是用户真的看到的那一套。
+    //
+    // **没指定就写回暗色**：同一个浏览器里 localStorage 是跨页面共享的，
+    // 否则上一张截图选了亮色，后一张没指定主题的截图就会「继承」亮色，
+    // 于是同一批截图里混着两套主题，看起来像主题自己会变。
+    try {
+      window.localStorage.setItem(
+        'dsh-interviewer.theme',
+        (window.__PRESET__ && window.__PRESET__.theme) || 'dark',
+      )
+    } catch (error) {
+      console.error('预设主题写入失败', error)
+    }
+
     window.fetch = async function (url) {
       const path = String(url).replace('/interviewer/api', '')
       const data = window.__FIXTURES__.route(path, window.__PREVIEW__)
       return { ok: true, status: 200, json: async () => ({ ok: true, data }) }
     }
 
-    // **模拟「权限被拒」**：这是插件必须给出路的核心场景，
+    // **模拟媒体权限的各种情形**：这是插件必须给出路的核心场景，
     // 光看「未接通」的空状态是看不出问题���。
-    //   · permissions.query 一律报 denied（系统已经记住了拒绝）；
-    //   · getUserMedia 抛 NotAllowedError；
+    //   · denied       —— 全军覆没（系统/浏览器把两块设备都拒了）；
+    //   · partial      —— 麦克风通了、摄像头被挡（DSH 桌面端的真实情况）；
+    //   · host-blocked —— 同上，但按**桌面端**的口气说（宿主策略挡的，
+    //                      改 Windows 设置没用）；
     //   · onchange 可以在截图前手动触发，用来验证「用户在系统设置里放行后自动接上」。
-    if (window.__PRESET__ && window.__PRESET__.media === 'denied') {
+    const mediaPreset = window.__PRESET__ && window.__PRESET__.media
+    if (mediaPreset === 'denied' || mediaPreset === 'partial' || mediaPreset === 'host-blocked') {
       const makeStatus = state => ({
         state,
         onchange: null,
         addEventListener() {},
         removeEventListener() {},
       })
-      const states = { camera: makeStatus('denied'), microphone: makeStatus('denied') }
+      const states = {
+        camera: makeStatus(mediaPreset === 'denied' ? 'denied' : 'denied'),
+        microphone: makeStatus(mediaPreset === 'denied' ? 'denied' : 'granted'),
+      }
       // navigator 上的这些属性是**只读访问器**，直接赋值在非严格模式下
       // 会静默失败——必须用 defineProperty 覆盖。
       Object.defineProperty(navigator, 'permissions', {
         configurable: true,
         value: { query: async name => states[name] ?? makeStatus('denied') },
       })
+
+      /**
+       * 麦克风这一路**走 Chromium 的假设备**（--use-fake-device-for-media-stream），
+       * 拿到的��**真轨**。
+       *
+       * **为什么不能自己造轨。** `new MediaStream([假轨])` 会抛
+       * 「Failed to convert value to 'MediaStreamTrack'」，而插件里那条
+       * `new MediaStream(audioTracks)` 是在 useMemo 里裸调的——一抛就把
+       * 整个面板掀了（页签都点不到）。所以只挡摄像头，麦克风交给真设备。
+       */
+      const nativeGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+      const denied = () => {
+        const error = new Error('Permission denied')
+        error.name = 'NotAllowedError'
+        throw error
+      }
+
       Object.defineProperty(navigator, 'mediaDevices', {
         configurable: true,
         value: {
-          getUserMedia: async () => {
-            const error = new Error('Permission denied')
-            error.name = 'NotAllowedError'
-            throw error
+          getUserMedia: async constraints => {
+            const wantsVideo = constraints.video !== undefined
+            const wantsAudio = constraints.audio !== undefined
+            // 「全拒」预设：连麦克风一起拒（模拟系统/浏览器全拒）。
+            if (mediaPreset === 'denied') denied()
+            // 摄像头+麦克风一起申请 —— 桌面端宿主会直接拒掉这种请求。
+            if (wantsVideo) denied()
+            if (wantsAudio) return nativeGetUserMedia(constraints)
+            denied()
           },
         },
       })
+
+      // 桌面端口气：把 UA 改成带 Electron 的，插件就会按宿主策略来解释。
+      if (mediaPreset === 'host-blocked') {
+        Object.defineProperty(navigator, 'userAgent', {
+          configurable: true,
+          value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Electron/30.0.0',
+        })
+      }
+
       window.__GRANT__ = () => {
         states.camera.state = 'granted'
         states.microphone.state = 'granted'

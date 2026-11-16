@@ -12,8 +12,12 @@
 #   workspaceRoot   工作区根——**所有数据都集中在这里**，一场面试一个子目录：
 #                     <root>/workspaces/<session-id>/   一场面试
 #                     <root>/profiles/<profile-id>/     岗位档案
-#                   留空 = 自动（用户主目录下的 DSH-INTERVIEWER/）。
-#                   想指到 D 盘这类大盘，就写绝对路径，例如 D:\DSH-INTERVIEW-ROOT。
+#                   留空 = 自动。Windows 上自动挑**非系统盘**（D 盘优先，
+#                   目录名 DSH-INTERVIEWER）；没有别的盘才用用户主目录。
+#                   想指到别处，就写绝对路径，例如 D:\DSH-INTERVIEW-ROOT。
+#                   也可以在插件面板里点「浏览…」用系统目录选择器来选——
+#                   那个选择存在 profile 的 dsh-interviewer.json 里，不动本文件，
+#                   且本文件写死时以本文件为准（面板改动只会给出提示）。
 #                   （dataRoot 是旧名，仍然认，但请换用 workspaceRoot。）
 #   jdFetchTimeoutMs  JD 链接抓取超时（毫秒）。超时即视为失败，交给手动兜底。
 #   jdMaxChars      JD 抓取后保留的最大字符数（正文裁剪）。
@@ -31,6 +35,16 @@
 #   ttsVoice        音色名（留空 = 用系统默认中文音色）。
 #   recordVideo     是否默认开启摄像头录像（true/false）。
 #   recordAudio     是否默认开启录音（true/false）。
+#   ffmpegPath      ffmpeg 的可执行文件路径。
+#                   **摄像头是 Host 侧用 ffmpeg 采的**——DSH 桌面端的 Electron
+#                   权限处理器只放行纯音频请求，摄像头在主进程就被拒了，改
+#                   Windows 设置也没用。但插件的 Host 半边跑在 Node 宿主进程
+#                   里，那儿没有那道闸门。
+#                   留空 = 自动找：DSH_FFMPEG_PATH 环境变量 → PATH 上的
+#                   ffmpeg → 若干常见安装位置。
+#                   **ffmpeg 不是系统自带的**，别的机器上未必有。找不到时
+#                   插件会如实说「这台机器没有摄像头采集程序」，面试本身不受
+#                   影响（麦克风、键盘、报告照常）。
 - insert:
     - id: interviewer
       name: 'dsh-interviewer'
@@ -49,3 +63,4 @@
         ttsVoice: ''
         recordVideo: true
         recordAudio: true
+        ffmpegPath: ''

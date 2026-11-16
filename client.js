@@ -66,6 +66,10 @@ window.__ModuleLoader__.load({
         'state.ready': '准备就绪',
         'state.listening': '正在聆听…',
         'state.idle': '待命',
+        'theme.dark': '暗色',
+        'theme.light': '亮色',
+        'theme.toDark': '切换到暗色主题',
+        'theme.toLight': '切换到亮色主题',
       },
       en: {
         'brand.title': 'Mock interview room',
@@ -92,6 +96,10 @@ window.__ModuleLoader__.load({
         'state.ready': 'Ready',
         'state.listening': 'Listening…',
         'state.idle': 'Idle',
+        'theme.dark': 'Dark',
+        'theme.light': 'Light',
+        'theme.toDark': 'Switch to the dark theme',
+        'theme.toLight': 'Switch to the light theme',
       },
     }
 
@@ -115,20 +123,186 @@ window.__ModuleLoader__.load({
     //   tally 氧化朱红 = 正在录制（唯一用到它的地方是 REC 灯）
     //   amber 琥珀     = 面试官在提问（提问卡的竖线、当前问题）
     //   jade  青玉     = 已就绪 / 已完成 / 已保存
+    //
+    // **颜色一律写成 CSS 变量。**
+    //
+    // 为什么不是「两份 JS 调色板，切换时换一份」：那样每一处颜色都得改成
+    // 「读当前主题」，漏一处就是一块不换色的斑。而变量是浏览器自己解析的——
+    // 切换主题只需要改根节点上的自定义属性，其余一律自动跟着变。
     const C = {
-      ink900: '#0E1116',
-      ink850: '#131820',
-      ink800: '#1A2029',
-      ink750: '#202833',
-      ink700: '#28313E',
-      rule: '#232B36',
-      ruleSoft: '#1D242D',
-      bone: '#E9E5DB',
-      boneDim: '#A5ACB7',
-      boneFaint: '#6C7480',
-      tally: '#E0563F',
-      amber: '#D9A441',
-      jade: '#4FA98C',
+      ink900: 'var(--iv-ink900)',
+      ink850: 'var(--iv-ink850)',
+      ink800: 'var(--iv-ink800)',
+      ink750: 'var(--iv-ink750)',
+      ink700: 'var(--iv-ink700)',
+      rule: 'var(--iv-rule)',
+      ruleSoft: 'var(--iv-rule-soft)',
+      bone: 'var(--iv-bone)',
+      boneDim: 'var(--iv-bone-dim)',
+      boneFaint: 'var(--iv-bone-faint)',
+      tally: 'var(--iv-tally)',
+      amber: 'var(--iv-amber)',
+      jade: 'var(--iv-jade)',
+      // 输入框底色：深色下比底再深一点，亮色下是纯白纸面。
+      field: 'var(--iv-field)',
+      // 「主色块上的字」：深色主题下是浅底深字，亮色主题下反过来。
+      onBone: 'var(--iv-on-bone)',
+      stage: 'var(--iv-stage)',
+      plateTop: 'var(--iv-plate-top)',
+      plateMid: 'var(--iv-plate-mid)',
+      plateLow: 'var(--iv-plate-low)',
+      cueTop: 'var(--iv-cue-top)',
+      cueMid: 'var(--iv-cue-mid)',
+      cueLow: 'var(--iv-cue-low)',
+      band: 'var(--iv-band)',
+      clock: 'var(--iv-clock)',
+      shadow: 'var(--iv-shadow)',
+      sheen: 'var(--iv-sheen)',
+      fade: 'var(--iv-fade)',
+    }
+
+    /**
+     * 语气色（tone）：一组「同色不同浓度」的颜色。
+     *
+     * 徽章、清单序号、提示条都要「同一种颜色配三种浓度」——
+     * 文字色、描边色、底色。以前是拿十六进制拼 `${color}55`，
+     * 换成 CSS 变量后那种拼法就不成立了（`var(--x)55` 不是合法颜色），
+     * 所以每种语气在两套主题下都各配齐三样。
+     */
+    const TONES = {
+      faint: { text: 'var(--iv-tone-faint-text)', edge: 'var(--iv-tone-faint-edge)', wash: 'var(--iv-tone-faint-wash)' },
+      amber: { text: 'var(--iv-tone-amber-text)', edge: 'var(--iv-tone-amber-edge)', wash: 'var(--iv-tone-amber-wash)' },
+      jade: { text: 'var(--iv-tone-jade-text)', edge: 'var(--iv-tone-jade-edge)', wash: 'var(--iv-tone-jade-wash)' },
+      tally: {
+        text: 'var(--iv-tone-tally-text)',
+        edge: 'var(--iv-tone-tally-edge)',
+        wash: 'var(--iv-tone-tally-wash)',
+        glow: 'var(--iv-tone-tally-glow)',
+      },
+    }
+
+    /**
+     * 两套主题。
+     *
+     * **暗色**是原来的样子：墨底、骨白字。
+     * **亮色**是纸面：卷宗本来就是纸，这套底色让「归档」那部分更像纸。
+     *
+     * 亮色下的强调色都**压深了一档**——同一个色相在白底上太浅，
+     * 文字对比度会掉到读不清。
+     */
+    const THEMES = {
+      dark: {
+        '--iv-ink900': '#0E1116',
+        '--iv-ink850': '#131820',
+        '--iv-ink800': '#1A2029',
+        '--iv-ink750': '#202833',
+        '--iv-ink700': '#28313E',
+        '--iv-rule': '#232B36',
+        '--iv-rule-soft': '#1D242D',
+        '--iv-bone': '#E9E5DB',
+        '--iv-bone-dim': '#A5ACB7',
+        '--iv-bone-faint': '#6C7480',
+        '--iv-tally': '#E0563F',
+        '--iv-amber': '#D9A441',
+        '--iv-jade': '#4FA98C',
+        '--iv-field': '#0F131A',
+        '--iv-on-bone': '#11151C',
+        '--iv-stage': '#0A0D11',
+        '--iv-plate-top': '#171E28',
+        '--iv-plate-mid': '#0C0F14',
+        '--iv-plate-low': '#090B0E',
+        '--iv-cue-top': 'rgba(7,9,13,0)',
+        '--iv-cue-mid': 'rgba(7,9,13,0.82)',
+        '--iv-cue-low': 'rgba(7,9,13,0.96)',
+        '--iv-band': 'rgba(9,11,14,0.96)',
+        '--iv-clock': 'rgba(10,13,17,0.72)',
+        '--iv-shadow': 'rgba(0,0,0,0.95)',
+        '--iv-sheen': 'rgba(233,229,219,0.035)',
+        '--iv-fade': 'rgba(17,21,28,0)',
+        '--iv-tone-faint-text': '#6C7480',
+        '--iv-tone-faint-edge': 'rgba(108,116,128,0.33)',
+        '--iv-tone-faint-wash': 'rgba(108,116,128,0.09)',
+        '--iv-tone-amber-text': '#D9A441',
+        '--iv-tone-amber-edge': 'rgba(217,164,65,0.33)',
+        '--iv-tone-amber-wash': 'rgba(217,164,65,0.08)',
+        '--iv-tone-jade-text': '#4FA98C',
+        '--iv-tone-jade-edge': 'rgba(79,169,140,0.35)',
+        '--iv-tone-jade-wash': 'rgba(79,169,140,0.08)',
+        '--iv-tone-tally-text': '#E0563F',
+        '--iv-tone-tally-edge': 'rgba(224,86,63,0.4)',
+        '--iv-tone-tally-wash': 'rgba(224,86,63,0.12)',
+        '--iv-tone-tally-glow': 'rgba(224,86,63,0.55)',
+      },
+      light: {
+        '--iv-ink900': '#F3F1EA',
+        '--iv-ink850': '#FAF8F2',
+        '--iv-ink800': '#FFFFFF',
+        '--iv-ink750': '#F0EDE4',
+        '--iv-ink700': '#E7E3D9',
+        '--iv-rule': '#D9D4C7',
+        '--iv-rule-soft': '#E6E2D7',
+        '--iv-bone': '#1F242E',
+        '--iv-bone-dim': '#4B5462',
+        '--iv-bone-faint': '#7E8794',
+        '--iv-tally': '#C0402A',
+        '--iv-amber': '#9A6B12',
+        '--iv-jade': '#2E7C63',
+        '--iv-field': '#FFFFFF',
+        '--iv-on-bone': '#F7F5F0',
+        '--iv-stage': '#E9E5DA',
+        '--iv-plate-top': '#FFFFFF',
+        '--iv-plate-mid': '#F4F1E9',
+        '--iv-plate-low': '#EAE6DB',
+        '--iv-cue-top': 'rgba(255,255,255,0)',
+        '--iv-cue-mid': 'rgba(248,246,240,0.88)',
+        '--iv-cue-low': 'rgba(246,243,236,0.97)',
+        '--iv-band': 'rgba(250,248,243,0.97)',
+        '--iv-clock': 'rgba(255,255,255,0.85)',
+        '--iv-shadow': 'rgba(58,50,36,0.16)',
+        '--iv-sheen': 'rgba(255,255,255,0.65)',
+        '--iv-fade': 'rgba(255,255,255,0)',
+        '--iv-tone-faint-text': '#7E8794',
+        '--iv-tone-faint-edge': 'rgba(126,135,148,0.35)',
+        '--iv-tone-faint-wash': 'rgba(126,135,148,0.10)',
+        '--iv-tone-amber-text': '#9A6B12',
+        '--iv-tone-amber-edge': 'rgba(154,107,18,0.35)',
+        '--iv-tone-amber-wash': 'rgba(154,107,18,0.10)',
+        '--iv-tone-jade-text': '#2E7C63',
+        '--iv-tone-jade-edge': 'rgba(46,124,99,0.38)',
+        '--iv-tone-jade-wash': 'rgba(46,124,99,0.10)',
+        '--iv-tone-tally-text': '#C0402A',
+        '--iv-tone-tally-edge': 'rgba(192,64,42,0.45)',
+        '--iv-tone-tally-wash': 'rgba(192,64,42,0.12)',
+        '--iv-tone-tally-glow': 'rgba(192,64,42,0.40)',
+      },
+    }
+
+    /** 主题在 localStorage 里的键。存的是用户的**选择**，不是系统设置。 */
+    const THEME_KEY = 'dsh-interviewer.theme'
+
+    /**
+     * 读用户上次选的主题。
+     *
+     * 读不到就用暗色——这是这个插件一直以来的样子；
+     * localStorage 不可用（隐私模式）时也不能报错，所以整段都包起来。
+     */
+    function readTheme() {
+      try {
+        const stored = window.localStorage.getItem(THEME_KEY)
+        if (stored === 'light' || stored === 'dark') return stored
+      } catch {
+        // 读不到就用默认。
+      }
+      return 'dark'
+    }
+
+    /** 记住用户选的主题。存不进去也不该拦住切换。 */
+    function saveTheme(theme) {
+      try {
+        window.localStorage.setItem(THEME_KEY, theme)
+      } catch {
+        // 存不下就算了，这次切换照样生效。
+      }
     }
 
     const S = {
@@ -170,7 +344,7 @@ window.__ModuleLoader__.load({
         borderRadius: 14,
         padding: '18px 20px',
         marginBottom: 16,
-        boxShadow: 'inset 0 1px 0 rgba(233,229,219,0.035), 0 18px 40px -32px rgba(0,0,0,0.95)',
+        boxShadow: `inset 0 1px 0 ${C.sheen}, 0 18px 40px -32px ${C.shadow}`,
       },
       cardHead: { display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 14 },
       eyebrow: {
@@ -181,12 +355,12 @@ window.__ModuleLoader__.load({
       hint: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.65 },
       label: { fontSize: 11.5, color: C.boneDim, marginBottom: 7, display: 'block', letterSpacing: '0.02em' },
       input: {
-        width: '100%', boxSizing: 'border-box', background: '#0F131A', color: C.bone,
+        width: '100%', boxSizing: 'border-box', background: C.field, color: C.bone,
         border: `1px solid ${C.rule}`, borderRadius: 9, padding: '9px 12px', fontSize: 13,
         fontFamily: F.ui, outline: 'none', transition: 'border-color 140ms ease, box-shadow 140ms ease',
       },
       textarea: {
-        width: '100%', boxSizing: 'border-box', background: '#0F131A', color: C.bone,
+        width: '100%', boxSizing: 'border-box', background: C.field, color: C.bone,
         border: `1px solid ${C.rule}`, borderRadius: 9, padding: '12px', fontSize: 13,
         fontFamily: F.ui, outline: 'none', minHeight: 130, resize: 'vertical', lineHeight: 1.7,
         transition: 'border-color 140ms ease, box-shadow 140ms ease',
@@ -199,22 +373,25 @@ window.__ModuleLoader__.load({
         }
         if (kind === 'primary') {
           return {
-            ...base, background: C.bone, color: '#11151C', borderColor: C.bone, fontWeight: 600,
+            ...base, background: C.bone, color: C.onBone, borderColor: C.bone, fontWeight: 600,
             opacity: disabled ? 0.4 : 1,
           }
         }
         if (kind === 'tally') {
-          return { ...base, background: 'rgba(224,86,63,0.12)', color: C.tally, borderColor: 'rgba(224,86,63,0.4)', opacity: disabled ? 0.45 : 1 }
+          return { ...base, background: TONES.tally.wash, color: C.tally, borderColor: TONES.tally.edge, opacity: disabled ? 0.45 : 1 }
         }
         return { ...base, background: C.ink800, color: C.boneDim, opacity: disabled ? 0.45 : 1 }
       },
       row: { display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' },
       mono: { fontFamily: F.mono },
-      pill: (color) => ({
-        fontFamily: F.mono, fontSize: 10, padding: '2px 8px', borderRadius: 999,
-        border: `1px solid ${color}55`, color, background: `${color}16`, whiteSpace: 'nowrap',
-        letterSpacing: '0.04em', alignSelf: 'flex-start', lineHeight: 1.6,
-      }),
+      pill: (tone) => {
+        const colors = TONES[tone] ?? TONES.faint
+        return {
+          fontFamily: F.mono, fontSize: 10, padding: '2px 8px', borderRadius: 999,
+          border: `1px solid ${colors.edge}`, color: colors.text, background: colors.wash, whiteSpace: 'nowrap',
+          letterSpacing: '0.04em', alignSelf: 'flex-start', lineHeight: 1.6,
+        }
+      },
     }
 
     // ── api ───────────────────────────────────────────────────────────────
@@ -463,6 +640,40 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 量一个容器的实际宽度，并随它变化更新。
+     *
+     * **为什么必须量容器，而不是看屏幕。**
+     * 这个面板是**被塞进别人家应用**的一块：桌面版 DSH 里它能分到 1200px，
+     * 网页版 DSH 的侧栏里可能只有 250px。两种宽度下「一套固定布局」必然
+     * 有一边是坏的——之前就坏在这里：右栏写死 396px 且不许收缩，
+     * 容器一窄，**舞台被压成 0 宽**，用户连「申请摄像头」都点不到。
+     *
+     * 所以布局必须**按容器实际宽度换挡**。
+     *
+     * @returns {[React.RefObject<HTMLElement>, number]} ref 与宽度（px）
+     */
+    function useContainerWidth() {
+      const ref = useRef(null)
+      const [width, setWidth] = useState(0)
+      useEffect(() => {
+        const element = ref.current
+        if (element === null || element === undefined) return undefined
+        const update = () => {
+          const next = element.getBoundingClientRect().width
+          // 差不到 1px 就不动 state：ResizeObserver 在布局没变时也会回调，
+          // 无脑 setState 会让「空闲时零重渲染」的红线破掉。
+          setWidth(previous => (Math.abs(previous - next) < 1 ? previous : next))
+        }
+        update()
+        if (typeof ResizeObserver === 'undefined') return undefined
+        const observer = new ResizeObserver(update)
+        observer.observe(element)
+        return () => observer.disconnect()
+      }, [])
+      return [ref, width]
+    }
+
+    /**
      * `requestAnimationFrame` / `cancelAnimationFrame` 的安全包装。
      *
      * 有些宿主环境（测试沙箱、某些内嵌 WebView）没有这两个函数——
@@ -481,17 +692,44 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 这个界面是不是跑在 **DSH 桌面端**（Electron）里。
+     *
+     * **为什么必须分清。** 桌面端宿主自己管权限：它的权限处理器只放行
+     * 「mediaTypes 恰好是 ['audio']」的请求，摄像头会被**直接拒掉**，
+     * 而且连系统窗口都不弹——用户看到的只是「被拒绝」，却在系统设置里
+     * 找不到任何能改的地方。浏览器里则是操作系统/浏览器弹窗，去了设置
+     * 就能改。同一个「拿不到摄像头」，两边的出路完全相反：
+     * 说错一句，就等于让用户白跑一趟系统设置。
+     *
+     * 桌面端的应用页协议是 `dsh-app://app`；Electron 的 UA 里也带
+     * `Electron`。两个都认，认不出就当普通浏览器处理（保守地说
+     * 「去系统设置放行」，不会把人引到死路上）。
+     */
+    function inDesktopHost() {
+      try {
+        if (typeof location !== 'undefined' && location.protocol === 'dsh-app:') return true
+        if (typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent ?? '')) return true
+      } catch {
+        // 取不到就当普通浏览器。
+      }
+      return false
+    }
+
+    /**
      * Camera + microphone, with a **主动授权** path.
      *
      * 拿不到权限是常事（没设备、系统关掉了、被拒过）。所以这里的契约是：
      *
-     *   - 先查 `navigator.permissions` 拿到当前授权状态；
-     *   - 状态是 `prompt` 就**发起申请**（getUserMedia 会弹出系统对话框）；
-     *   - 状态是 `denied` 就明确告诉用户去哪儿放行，并**盯着状态变化**，
-     *     用户在系统设置里放行后**自动接上**，不用再点一次；
+     *   - 先按「摄像头+麦克风一起申请」的老路走一次——普通浏览器里
+     *     这样只弹一次窗；
+     *   - 被拒了再**分开**申请一次，分清**是哪一半**被挡：麦克风没有
+     *     和摄像头没有，出路完全不一样；
      *   - 分清「没设备」「被占用」「页面不安全」「被拒绝」四种原因——
-     *     它们的出路完全不同。
-     */    function useMedia() {
+     *     它们的出路也完全不一样；
+     *   - **说清楚是宿主挡的，还是系统挡的。** 这两件事看着像，
+     *     但修的地方不同（见 `inDesktopHost`）。
+     */
+    function useMedia() {
       const [stream, setStream] = useState(undefined)
       const [error, setError] = useState(undefined)
       const [permission, setPermission] = useState({ camera: 'unknown', microphone: 'unknown' })
@@ -557,8 +795,50 @@ window.__ModuleLoader__.load({
         setLevel(0)
       }, [])
 
+      /**
+       * 申请一块媒体。
+       *
+       * **失败时把原因带回来，不要抛。** 我们要靠「哪一种设备拿不到」
+       * 来判断出路：麦克风没有，多半是系统或宿主不放行；摄像头没有，
+       * 在 DSH 桌面端里往往是宿主策略只放行纯音频请求的结果。
+       */
+      const request = useCallback(async constraints => {
+        try {
+          const media = await navigator.mediaDevices.getUserMedia(constraints)
+          return { ok: true, media }
+        } catch (failure) {
+          return {
+            ok: false,
+            name: failure?.name ?? 'Error',
+            message: failure instanceof Error ? failure.message : String(failure),
+          }
+        }
+      }, [])
+
+      /**
+       * 「麦克风通了、摄像头没通」时给用户的说法。
+       *
+       * **桌面端和浏览器的出路是相反的**，所以必须分开写：
+       * 桌面端改系统设置没用（是宿主策略挡的），浏览器里改了就能自动接上。
+       */
+      const cameraBlockedError = useCallback(() => (
+        inDesktopHost()
+          ? {
+              kind: 'partial',
+              text: '麦克风已接上；摄像头被 DSH 桌面端挡下了。',
+              action: '桌面端只放行「只申请麦克风」的请求，摄像头这条路现在走不通——'
+                + '改 Windows 设置也没用。面试照常：语音提问、文字回答、录音都不受影响。',
+            }
+          : {
+              kind: 'partial',
+              text: '麦克风已接上；摄像头被拒绝了。',
+              action: '浏览器地址栏左侧的权限图标 → 允许摄像头；或 Windows'
+                + '「设置 → 隐私和安全性 → 摄像头 → 允许桌面应用访问」。'
+                + '放行后这里会自动接上，不用再点一次。',
+            }
+      ), [])
+
       const start = useCallback(async () => {
-        if (streamRef.current !== undefined) return streamRef.current
         if (navigator.mediaDevices?.getUserMedia === undefined) {
           setError({
             kind: 'unsupported',
@@ -568,15 +848,135 @@ window.__ModuleLoader__.load({
           return undefined
         }
         setBusy(true)
-        const states = await probe()
+        await probe()
+        const videoConstraints = { width: { ideal: 1280 }, height: { ideal: 720 } }
+        const audioConstraints = { echoCancellation: true, noiseSuppression: true }
         try {
-          const media = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: { echoCancellation: true, noiseSuppression: true },
-          })
+          const existing = streamRef.current
+          const hasVideoTrack = existing !== undefined
+            && typeof existing.getVideoTracks === 'function'
+            && existing.getVideoTracks().length > 0
+          if (existing !== undefined && hasVideoTrack) return existing
+
+          // **已经有流、但没有视频轨**——那是「麦克风通了、摄像头没通」。
+          // 这时重试只补摄像头，别把已经在用的麦克风也断了重来。
+          if (existing !== undefined) {
+            const onlyVideo = await request({ video: videoConstraints })
+            if (onlyVideo.ok) {
+              // **用 addTrack 往现有流里加，不要重新构造一条流。**
+              // 构造器在有些 WebView 里认不得外来的轨，而 addTrack
+              // 是给「已经开着的那条流」加轨，天然不丢麦克风。
+              try {
+                for (const track of onlyVideo.media.getVideoTracks()) existing.addTrack(track)
+              } catch {
+                // 加不进去就还是只有麦克风，如实说。
+              }
+              setStream(existing)
+              setError(existing.getVideoTracks().length > 0 ? undefined : cameraBlockedError())
+              return existing
+            }
+            setError(cameraBlockedError())
+            return undefined
+          }
+
+          // 先按老路走一次：摄像头+麦克风**一起**申请。
+          // 普通浏览器里这样只弹一次窗，体验最好。
+          const combined = await request({ video: videoConstraints, audio: audioConstraints })
+          let audio
+          let video
+          let failure = combined.ok ? undefined : combined
+          if (combined.ok) {
+            audio = combined.media
+            video = combined.media
+          } else {
+            // 一起申请被拒 → **分开**再试一次，才知道是哪一半被挡。
+            //
+            // **为什么必须分开。** DSH 桌面端自己的权限处理器只放行
+            // 「mediaTypes 恰好是 ['audio']」的请求；摄像头+麦克风一起申请
+            // 会被它直接拒掉，而且**连系统窗口都不弹**——用户看到的只是
+            // 一句「系统已记住拒绝」，却在设置里找不到任何可改的地方。
+            // 分开申请，麦克风就能过；摄像头过不去时，我们能说清是谁挡的。
+            const onlyAudio = await request({ audio: audioConstraints })
+            const onlyVideo = await request({ video: videoConstraints })
+            audio = onlyAudio.ok ? onlyAudio.media : undefined
+            video = onlyVideo.ok ? onlyVideo.media : undefined
+            if (onlyAudio.ok === false && onlyVideo.ok === false) {
+              failure = { name: onlyAudio.name, message: onlyAudio.message }
+            }
+          }
+
+          const tracks = []
+          if (audio !== undefined) tracks.push(...audio.getAudioTracks())
+          if (video !== undefined) tracks.push(...video.getVideoTracks())
+          if (tracks.length === 0) {
+            // 一块都没拿到：按失败原因分类，给出**能做的下一步**。
+            const name = failure?.name
+            if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+              setError({
+                kind: 'missing',
+                text: '没有找到摄像头或麦克风。',
+                action: '接上设备后重试；键盘输入仍然可用。',
+              })
+            } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+              setError({
+                kind: 'busy',
+                text: '设备被别的程序占用了。',
+                action: '关掉占用它的程序（会议软件、录屏工具），再重试。',
+              })
+            } else if (name === 'NotAllowedError' || name === 'SecurityError') {
+              setError(inDesktopHost()
+                ? {
+                    kind: 'denied',
+                    text: '麦克风被挡住了，摄像头也没接上。',
+                    action: '桌面端只放行「只申请麦克风」的请求，麦克风这一步就卡住了——'
+                      + '多半是 Windows 隐私设置或宿主帧的限制。查 Windows'
+                      + '「设置 → 隐私和安全性 → 麦克风 → 允许桌面应用访问」，'
+                      + '再点「重新检测授权状态」。',
+                  }
+                : {
+                    kind: 'denied',
+                    text: '系统或浏览器拒绝了这次申请。',
+                    action: '浏览器地址栏左侧的权限图标 → 允许；或 Windows'
+                      + '「设置 → 隐私和安全性 → 摄像头 / 麦克风 → 允许桌面应用访问」。'
+                      + '放行后这里会自动接上，不用再点一次。',
+                  })
+            } else {
+              setError({
+                kind: 'other',
+                text: `打不开摄像头/麦克风：${failure?.message ?? '未知原因'}`,
+                action: '可以先用键盘继续面试。',
+              })
+            }
+            return undefined
+          }
+
+          // 把两条轨并成一条流。**合并不了就用其中一条**——
+          // 有些内嵌 WebView 的 MediaStream 构造器认不得外来的轨，
+          // 宁可少一条轨，也不能让整条申请链断在这儿。
+          let media
+          try {
+            media = new MediaStream(tracks)
+          } catch {
+            media = audio ?? video
+          }
+          if (media === undefined) {
+            setError({
+              kind: 'other',
+              text: '拿到设备了，但拼不出可用的媒体流。',
+              action: '可以先用键盘继续面试。',
+            })
+            return undefined
+          }
           streamRef.current = media
           setStream(media)
-          setError(undefined)
+
+          // **部分成功也要说话。** 麦克风通了、摄像头没有，面试照样能跑，
+          // 但用户得知道「为什么没有画面」，而且不用他去白改设置。
+          if (video === undefined) {
+            setError(cameraBlockedError())
+          } else {
+            setError(undefined)
+          }
 
           // 音量条：示波器式的输入电平。
           try {
@@ -606,40 +1006,19 @@ window.__ModuleLoader__.load({
           }
           return media
         } catch (failure) {
-          const name = failure && failure.name
-          const denied = name === 'NotAllowedError' || name === 'SecurityError'
-          const states2 = await probe()
-          if (denied && (states2?.camera === 'denied' || states2?.microphone === 'denied')) {
-            setError({
-              kind: 'denied',
-              text: '系统已记住「拒绝」。',
-              action: '在系统设置里放行摄像头与麦克风后，这里会自动接上——不用再点一次。',
-            })
-          } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-            setError({
-              kind: 'missing',
-              text: '没有找到摄像头或麦克风。',
-              action: '接上设备后重试；键盘输入仍然可用。',
-            })
-          } else if (name === 'NotReadableError' || name === 'TrackStartError') {
-            setError({
-              kind: 'busy',
-              text: '设备被别的程序占用了。',
-              action: '关掉占用它的程序（会议软件、录屏工具），再重试。',
-            })
-          } else {
-            setError({
-              kind: 'other',
-              text: `打不开摄像头/麦克风：${failure instanceof Error ? failure.message : String(failure)}`,
-              action: '可以先用键盘继续面试。',
-            })
-          }
+          // 申请本身的失败已经被 `request()` 分类过了；能落到这里的，
+          // 是拼流之类的意外（比如环境里没有 MediaStream 构造器）。
+          setError({
+            kind: 'other',
+            text: `打不开摄像头/麦克风：${failure instanceof Error ? failure.message : String(failure)}`,
+            action: '可以先用键盘继续面试。',
+          })
           return undefined
         } finally {
           setBusy(false)
           watch()
         }
-      }, [probe, watch])
+      }, [cameraBlockedError, probe, request, watch])
 
       const startRef = useRef(undefined)
       startRef.current = start
@@ -661,6 +1040,125 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The Host-side camera — the way to get a picture inside the desktop host.
+     *
+     * **为什么需要它。** DSH 桌面端的 Electron 权限处理器（读自 `app.asar`）
+     * 只放行 `mediaTypes === ['audio']` 的纯音频请求，摄像头在**主进程**就被
+     * `callback(false)` 拒了——连系统权限窗口都不弹。所以浏览器这条路在桌面端
+     * 是死的，改 Windows 设置也没用。
+     *
+     * 但插件的 Host 半边跑在 Node 宿主进程里，**没有那道闸门**：它能用
+     * ffmpeg 直接打开摄像头，把画面以 MJPEG 流推回来。
+     *
+     * **浏览器端一行 JS 都不用写**：`<img src>` 直接吃
+     * `multipart/x-mixed-replace` 流。
+     *
+     * **和浏览器的摄像头是二选一。** 摄像头设备是独占的（实测：第二个进程
+     * 打开直接 I/O error），所以两边不能同时开。这个 hook 只在浏览器的
+     * `getUserMedia` 拿不到画面时才启用。
+     */
+    function useHostCamera() {
+      const [state, setState] = useState({ active: false, busy: false, error: undefined, recording: false })
+
+      /**
+       * Ask the Host to open the camera.
+       *
+       * @returns {Promise<boolean>} whether the camera came up
+       */
+      const start = useCallback(async () => {
+        setState(previous => ({ ...previous, busy: true, error: undefined }))
+        try {
+          await apiPost('camera/start', {})
+          setState({ active: true, busy: false, error: undefined, recording: false })
+          return true
+        } catch (error) {
+          setState({
+            active: false,
+            busy: false,
+            error: {
+              kind: 'host-camera',
+              text: error instanceof Error ? error.message : String(error),
+              action: 'Host 侧的摄像头通路没起来。装一个 ffmpeg（或在插件配置里写上它的路径）就能用；'
+                + '面试照常进行，语音提问、文字回答、录音都不受影响。',
+            },
+          })
+          return false
+        }
+      }, [])
+
+      /**
+       * Ask the Host to release the camera.
+       *
+       * @returns {Promise<void>}
+       */
+      const stop = useCallback(async () => {
+        try {
+          await apiPost('camera/stop', {})
+        } catch {
+          // 停不掉也不要紧——宿主重启时会释放摄像头。
+        }
+        setState({ active: false, busy: false, error: undefined, recording: false })
+      }, [])
+
+      /**
+       * Start recording on the Host side.
+       *
+       * @param {string} sessionId
+       * @returns {Promise<boolean>}
+       */
+      const startRecording = useCallback(async sessionId => {
+        if (sessionId === '') return false
+        try {
+          await apiPost('camera/record/start', { sessionId })
+          setState(previous => ({ ...previous, recording: true }))
+          return true
+        } catch (error) {
+          setState(previous => ({
+            ...previous,
+            error: {
+              kind: 'host-camera',
+              text: error instanceof Error ? error.message : String(error),
+              action: '录像开不了。画面本身不受影响，面试可以继续。',
+            },
+          }))
+          return false
+        }
+      }, [])
+
+      /**
+       * Stop recording; the finished file is already in the session's folder.
+       *
+       * @param {string} sessionId
+       * @returns {Promise<object|undefined>}
+       */
+      const stopRecording = useCallback(async sessionId => {
+        try {
+          const result = await apiPost('camera/record/stop', { sessionId })
+          setState(previous => ({ ...previous, recording: false }))
+          return result
+        } catch (error) {
+          setState(previous => ({
+            ...previous,
+            recording: false,
+            error: {
+              kind: 'host-camera',
+              text: error instanceof Error ? error.message : String(error),
+              action: '录像收尾没成功。面试可以继续。',
+            },
+          }))
+          return undefined
+        }
+      }, [])
+
+      useEffect(() => () => {
+        // 组件卸载时把摄像头还回去——不然它会一直被独占着。
+        apiPost('camera/stop', {}).catch(() => {})
+      }, [])
+
+      return { ...state, start, stop, startRecording, stopRecording }
+    }
+
+    /**
      * Record the current stream into a blob.
      *
      * @param {MediaStream|undefined} stream
@@ -673,7 +1171,7 @@ window.__ModuleLoader__.load({
 
       const start = useCallback(() => {
         if (stream === undefined || recorderRef.current !== undefined) return false
-        const mimeType = pickMimeType()
+        const mimeType = pickMimeType(stream)
         try {
           const recorder = mimeType === undefined
             ? new MediaRecorder(stream)
@@ -714,9 +1212,20 @@ window.__ModuleLoader__.load({
       return { recording, clip, start, stop, reset }
     }
 
-    /** The best mime type this browser supports for MediaRecorder. */
-    function pickMimeType() {
-      const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'audio/webm']
+    /**
+     * The best mime type this browser supports for MediaRecorder.
+     *
+     * **要按流里有没有视频轨来挑。** 只有麦克风的时候还去用
+     * `video/webm`，MediaRecorder 会因为「流和容器对不上」直接抛错，
+     * 录音就录不成——而这时候录音恰恰是唯一还能用的那部分。
+     */
+    function pickMimeType(stream) {
+      const withVideo = stream !== undefined
+        && typeof stream.getVideoTracks === 'function'
+        && stream.getVideoTracks().length > 0
+      const candidates = withVideo
+        ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'audio/webm']
+        : ['audio/webm;codecs=opus', 'audio/webm']
       if (typeof MediaRecorder === 'undefined') return undefined
       for (const candidate of candidates) {
         try {
@@ -926,7 +1435,7 @@ window.__ModuleLoader__.load({
             },
           }),
           h('span', { key: 'label', style: { flex: '1 1 auto' } }, props.summary),
-          props.badge !== undefined ? h('span', { key: 'badge', style: S.pill(C.boneFaint) }, props.badge) : null,
+          props.badge !== undefined ? h('span', { key: 'badge', style: S.pill('faint') }, props.badge) : null,
         ]),
         open ? h('div', { key: 'body', style: { borderTop: `1px solid ${C.ruleSoft}`, paddingTop: 12 } }, props.children) : null,
       ])
@@ -935,7 +1444,7 @@ window.__ModuleLoader__.load({
     /** One checklist item row. */
     function ChecklistRow(props) {
       const item = props.item
-      const levelColor = item.level === 'core' ? C.tally : item.level === 'deep' ? C.amber : C.boneFaint
+      const levelTone = item.level === 'core' ? 'tally' : item.level === 'deep' ? 'amber' : 'faint'
       const levelText = item.level === 'core' ? '必问' : item.level === 'deep' ? '深挖' : '加分'
       return h('div', {
         style: {
@@ -943,7 +1452,7 @@ window.__ModuleLoader__.load({
           padding: '10px 0', borderBottom: `1px solid ${C.ruleSoft}`,
         },
       }, [
-        h('span', { key: 'lvl', style: S.pill(levelColor) }, levelText),
+        h('span', { key: 'lvl', style: S.pill(levelTone) }, levelText),
         h('div', { key: 'body', style: { flex: '1 1 auto', minWidth: 0 } }, [
           h('div', {
             key: 'topic',
@@ -984,11 +1493,42 @@ window.__ModuleLoader__.load({
             width: 7, height: 7, borderRadius: 999, display: 'block',
             background: on ? C.tally : 'transparent',
             border: `1px solid ${on ? C.tally : C.boneFaint}`,
-            boxShadow: on ? `0 0 0 3px rgba(224,86,63,0.16), 0 0 14px rgba(224,86,63,0.55)` : 'none',
+            boxShadow: on ? `0 0 0 3px ${TONES.tally.wash}, 0 0 14px ${TONES.tally.glow}` : 'none',
             transition: 'box-shadow 200ms ease',
           },
         }),
         h('span', { key: 'text' }, on ? 'REC' : 'STBY'),
+      ])
+    }
+
+    /**
+     * The clock + tally badge.
+     *
+     * 有摄像头时它压在画面右上角；没摄像头时它进板子的标题行——
+     * 绝对定位的计时器在窄面板下会正好压住居中的标题。
+     *
+     * **它是个组件，不是工厂。** 工厂（`clockBadge(true)`）在数组里直接
+     * 调用时，key 就没法由调用方给，`scripts/fix-keys.mjs` 会拦下。
+     * 而且定义在渲染函数里的组件每帧都是新函数，React 会把它当成
+     * 另一个组件卸载重建——所以它必须待在模块作用域。
+     *
+     * @param {{durationMs?: number, recording?: boolean, absolute?: boolean}} props
+     */
+    function ClockBadge(props) {
+      const absolute = props.absolute === true
+      return h('div', {
+        style: {
+          position: absolute ? 'absolute' : 'relative',
+          top: absolute ? 14 : undefined,
+          right: absolute ? 16 : undefined,
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '5px 11px', borderRadius: 8, background: C.clock,
+          border: `1px solid ${C.rule}`,
+        },
+      }, [
+        h('span', { key: 't', style: { ...S.mono, fontSize: 12, color: C.boneDim, letterSpacing: '0.06em' } },
+          formatClock(props.durationMs ?? 0)),
+        h(Tally, { key: 'r', on: props.recording === true }),
       ])
     }
 
@@ -1116,7 +1656,7 @@ window.__ModuleLoader__.load({
         if (token.startsWith('`')) {
           pieces.push(h('code', {
             key: `i${key++}`,
-            style: { ...S.mono, background: '#0F131A', padding: '2px 6px', borderRadius: 5, fontSize: 12, color: C.amber },
+            style: { ...S.mono, background: C.field, padding: '2px 6px', borderRadius: 5, fontSize: 12, color: C.amber },
           }, token.slice(1, -1)))
         } else if (token.startsWith('**')) {
           pieces.push(h('strong', { key: `i${key++}`, style: { color: C.bone, fontWeight: 600 } }, token.slice(2, -2)))
@@ -1166,7 +1706,7 @@ window.__ModuleLoader__.load({
       const clipped = text.length > limit
       return h('div', {
         style: {
-          position: 'relative', background: '#11151C', border: `1px solid ${C.rule}`,
+          position: 'relative', background: C.field, border: `1px solid ${C.rule}`,
           borderRadius: 10, padding: '14px 16px', minHeight: 74,
         },
       }, [
@@ -1183,7 +1723,7 @@ window.__ModuleLoader__.load({
             key: 'f',
             style: {
               position: 'absolute', left: 1, right: 1, bottom: 1, height: 40, pointerEvents: 'none',
-              background: 'linear-gradient(180deg, rgba(17,21,28,0) 0%, #11151C 92%)',
+              background: 'linear-gradient(180deg, ' + C.fade + ' 0%, ' + C.field + ' 92%)',
             },
           })
           : null,
@@ -1217,7 +1757,9 @@ window.__ModuleLoader__.load({
         ...steps.flatMap((step, index) => {
           const done = index < props.current
           const current = index === props.current
-          const color = done ? C.jade : current ? C.amber : C.boneFaint
+          // 流程脊线的圆点也走语气色——它要表达「走到哪一步」，
+          // 和徽章、序号是同一套语言。
+          const dot = TONES[done ? 'jade' : current ? 'amber' : 'faint']
           const items = [
             h('span', {
               key: `s${step.key}`,
@@ -1232,9 +1774,9 @@ window.__ModuleLoader__.load({
                   width: 15, height: 15, borderRadius: 999, display: 'inline-flex',
                   alignItems: 'center', justifyContent: 'center',
                   fontFamily: F.mono, fontSize: 9, lineHeight: 1,
-                  border: `1px solid ${color}66`,
-                  background: current ? `${color}22` : 'transparent',
-                  color,
+                  border: `1px solid ${dot.edge}`,
+                  background: current ? dot.wash : 'transparent',
+                  color: dot.text,
                 },
               }, done ? '✓' : String(index + 1)),
               h('span', { key: 'l' }, step.label),
@@ -1260,14 +1802,39 @@ window.__ModuleLoader__.load({
       const [jdUrl, setJdUrl] = useState('')
       const [busy, setBusy] = useState(false)
       const [jdNote, setJdNote] = useState(undefined)
+      // 这场面试叫什么、在哪家、什么岗位——用户可以直接改。
+      const [identity, setIdentity] = useState({ title: '', company: '', position: '' })
       const profilesPoll = usePoll(
         () => apiGet('profiles'),
         10000,
         [],
         data => (data?.profiles ?? []).map(row => `${row.id}:${row.updatedAt}:${row.checklistCount}`).join(','),
       )
+      // 简历库：简历不会每场都变，存一次就能一直用。
+      const resumesPoll = usePoll(
+        () => apiGet('resumes'),
+        15000,
+        [],
+        data => (data?.resumes ?? []).map(row => `${row.id}:${row.updatedAt}:${row.title}:${row.chars}`).join(','),
+      )
 
       const sessionId = session?.session?.id
+
+      // 服务端会从 JD 正文里提炼公司与岗位（提炼不出来就留空）。
+      // 提炼出来的值要显示出来，也允许用户改——**认错了就该能改**。
+      const identityTouched = useRef(false)
+      useEffect(() => { identityTouched.current = false }, [session?.session?.id])
+      useEffect(() => {
+        const meta = session?.session
+        if (meta === undefined) return
+        // 用户正在改的时候别覆盖他的输入。
+        if (identityTouched.current) return
+        setIdentity({
+          title: meta.title ?? '',
+          company: meta.company ?? '',
+          position: meta.position ?? '',
+        })
+      }, [session?.session?.id, session?.session?.title, session?.session?.company, session?.session?.position])
 
       // **归档正文单独取一次。** 它跟着 1.5 秒的轮询传是纯浪费——
       // 简历几十 KB，而且只有准备页需要它。
@@ -1278,6 +1845,34 @@ window.__ModuleLoader__.load({
       )
 
       const profiles = profilesPoll.data?.profiles ?? []
+      const resumes = resumesPoll.data?.resumes ?? []
+
+      // 存进简历库时给个**能认出来**的名字。
+      // 「面试 2026-11-16」这种默认标题进库等于没存——库里全是这种名字，
+      // 选的时候还是认不出来。
+      const libraryTitle = (() => {
+        const company = (session?.session?.company ?? '').trim()
+        const position = (session?.session?.position ?? '').trim()
+        if (company !== '' && position !== '') return `${company} · ${position}`
+        if (position !== '') return position
+        if (company !== '') return company
+        const title = (session?.session?.title ?? '').trim()
+        return /^面试 \d{4}-\d{2}-\d{2}$/.test(title) ? '' : title
+      })()
+
+      // 助手把 JD 写回来之后，正文得跟着更新。
+      //
+      // **不轮询正文，只看字数。** 简历动辄几十 KB，每 6 秒拉一次
+      // 是白拉；而「字数变了」就足以说明正文变了——所以拿字数当指纹，
+      // 变了才去取一次。
+      const docFingerprint = `${session?.documents?.resumeChars ?? 0}:${session?.documents?.jdChars ?? 0}`
+      const lastDocFingerprint = useRef(docFingerprint)
+      useEffect(() => {
+        // 第一次不刷：文档本来就是刚取来的。
+        if (lastDocFingerprint.current === docFingerprint) return
+        lastDocFingerprint.current = docFingerprint
+        void docsPoll.refresh()
+      }, [docFingerprint])
 
       // 拿到正文就填进编辑器（正在编辑时不动用户的光标）。
       useEffect(() => {
@@ -1362,10 +1957,16 @@ window.__ModuleLoader__.load({
             onChanged()
             void docsPoll.refresh()
           } else {
-            setJdNote({ ok: false, text: `${result.error}。${result.hint}` })
+            // 抓不到不是死路：**给一条能走的路**。
+            // 所以这里除了说清楚卡在哪，还把「让助手去抓」摆出来。
+            setJdNote({ ok: false, text: `${result.error}。${result.hint}`, canAsk: true })
           }
         } catch (failure) {
-          setJdNote({ ok: false, text: failure instanceof Error ? failure.message : String(failure) })
+          setJdNote({
+            ok: false,
+            text: `${failure instanceof Error ? failure.message : String(failure)}`,
+            canAsk: true,
+          })
         } finally {
           setBusy(false)
         }
@@ -1421,6 +2022,125 @@ window.__ModuleLoader__.load({
         }
       }, [sessionId, jdUrl, onChanged, notify, docsPoll])
 
+      // ── 简历库 ──────────────────────────────────────────────────────
+      //
+      // **简历不是每场面试都变的。** 让用户每一场都重新上传同一份简历，
+      // 是把「一次录入」变成「N 次录入」。所以简历单独存在工作区里，
+      // 每场面试只引用它。
+      const applyResume = useCallback(async resumeId => {
+        setBusy(true)
+        try {
+          const result = await apiPost(`resumes/${resumeId}`, { sessionId })
+          const title = result?.resume?.title ?? resumeId
+          setResumeText(result?.resume?.text ?? '')
+          setEditing(previous => ({ ...previous, resume: false }))
+          notify(
+            `换上了「${title}」`,
+            '卷内存的是这一份的快照——以后改了简历，也不会动这场面试的记录。',
+            'ok',
+          )
+          onChanged()
+          void docsPoll.refresh()
+        } catch (failure) {
+          notify('换不了简历', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setBusy(false)
+        }
+      }, [sessionId, onChanged, notify, docsPoll])
+
+      /** 把这场面试的简历存进库。 */
+      const saveToLibrary = useCallback(async () => {
+        setBusy(true)
+        try {
+          const result = await apiPost('resumes', { sessionId, title: libraryTitle })
+          notify(
+            '存进简历库了',
+            `以后新建面试可以直接选「${result?.resume?.title ?? '这份简历'}」。`,
+            'ok',
+          )
+          void resumesPoll.refresh()
+        } catch (failure) {
+          notify('没存进去', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setBusy(false)
+        }
+      }, [sessionId, libraryTitle, notify, resumesPoll])
+
+      /** 从库里删掉一份简历。卷内已经用掉的快照不受影响。 */
+      const deleteResume = useCallback(async resumeId => {
+        setBusy(true)
+        try {
+          await apiPost(`resumes/${resumeId}/delete`, {})
+          notify('删了', '已经用过的面试里存的快照还在。', 'ok')
+          void resumesPoll.refresh()
+        } catch (failure) {
+          notify('没删掉', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setBusy(false)
+        }
+      }, [notify, resumesPoll])
+
+      // ── 这场面试叫什么 ────────────────────────────────────────────────
+      const saveIdentity = useCallback(async () => {
+        setBusy(true)
+        try {
+          const company = identity.company.trim()
+          const position = identity.position.trim()
+          const patch = { company, position }
+          // 标题还是默认的「面试 2026-11-16」，而岗位已经知道了——
+          // 那就把标题补成人话：**列表里一眼认得出来**。
+          const current = (session?.session?.title ?? '').trim()
+          if (/^面试 \d{4}-\d{2}-\d{2}$/.test(current)) {
+            const derived = company !== '' && position !== ''
+              ? `${company} · ${position}`
+              : (position !== '' ? position : company)
+            if (derived !== '') patch.title = derived
+          } else if (identity.title.trim() !== '') {
+            patch.title = identity.title.trim()
+          }
+          await apiPost(`sessions/${sessionId}`, patch)
+          identityTouched.current = false
+          notify('记下了', '列表会按新的岗位分组。', 'ok')
+          onChanged()
+        } catch (failure) {
+          notify('没改成', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setBusy(false)
+        }
+      }, [sessionId, identity, session?.session?.title, onChanged, notify])
+
+      // ── 让助手去抓 JD ────────────────────────────────────────────────
+      //
+      // **直连抓网页看着简单，实际最常挂在三件事上：** 登录墙、验证码、
+      // 前端渲染的正文。宿主里的助手有浏览器，能把页面真的打开、看完、
+      // 把正文抄下来——所以抓不到的时候，正确的做法不是让用户复制粘贴，
+      // 而是**请助手去拿**。
+      const askAgent = useCallback(async () => {
+        if (jdUrl.trim() === '') {
+          notify('没链接', '先把岗位链接填上，再交给助手。', 'error')
+          return
+        }
+        setBusy(true)
+        try {
+          const result = await apiPost('jd/request-agent', { sessionId, url: jdUrl.trim() })
+          const host = result?.hostSession ?? {}
+          setJdNote({
+            ok: true,
+            text: `${result?.message ?? '已经交给助手了。'}`,
+          })
+          notify(
+            '交给助手了',
+            `发到 DSH 对话「${host.title || host.id || '当前对话'}」，在那边能看着它跑。抓到正文会自动回到这一场。`,
+            'ok',
+          )
+        } catch (failure) {
+          const message = failure instanceof Error ? failure.message : String(failure)
+          setJdNote({ ok: false, text: `${message}。可以改用下面的手动兜底：把正文粘进 JD 框里。` })
+        } finally {
+          setBusy(false)
+        }
+      }, [jdUrl, sessionId, notify])
+
       const checklist = session?.checklist?.items ?? []
       const probed = checklist.filter(item => item.probed === true).length
       const resumeArchived = (session?.documents?.resumeChars ?? 0) > 0
@@ -1473,8 +2193,12 @@ window.__ModuleLoader__.load({
               h('div', { key: 'act', style: { ...S.row, marginTop: 12 } }, [
                 options.archived
                   ? h('button', { key: 'e', style: S.btn(false, busy), onClick: options.onEdit }, '修改')
-                  : null,
+                  // **空的那份也要能打开编辑器。**
+                  // 空态上写着「或把正文粘进来」，却只有「上传文件」一个入口——
+                  // 承诺了却给不出路。新场次里没文件也照样得能贴简历。
+                  : h('button', { key: 'paste', style: S.btn(false, busy), onClick: options.onEdit }, '粘正文'),
                 options.upload !== undefined ? options.upload : null,
+                options.extraActions !== undefined ? options.extraActions : null,
                 options.archived
                   ? h('span', { key: 'n', style: S.hint }, options.archivedNote)
                   : null,
@@ -1498,6 +2222,55 @@ window.__ModuleLoader__.load({
         }),
       ])
 
+      // ── 简历库 ──────────────────────────────────────────────────────
+      //
+      // 简历不会每场面试都变。存一次，之后每场直接选——
+      // 这就是「新建面试时可以直接选」的地方。
+      const libraryStrip = h('div', {
+        key: 'lib',
+        style: {
+          border: `1px solid ${C.ruleSoft}`, borderRadius: 10, padding: '10px 12px',
+          marginBottom: 14, background: C.ink850,
+        },
+      }, [
+        h('div', {
+          key: 'h',
+          style: { ...S.row, justifyContent: 'space-between', marginBottom: resumes.length > 0 ? 6 : 2 },
+        }, [
+          h('span', { key: 't', style: { fontSize: 11.5, color: C.boneDim } }, `简历库 · ${resumes.length} 份`),
+          h('span', { key: 'h2', style: S.hint }, '简历存一次，之后每场直接选'),
+        ]),
+        resumes.length === 0
+          ? h('div', { key: 'e', style: S.hint },
+            '还没有存过简历。归档简历后按「存进简历库」，以后新建面试就不用再传了。')
+          : h('div', { key: 'l' }, resumes.map(item => h('div', {
+            key: item.id,
+            style: { display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0' },
+          }, [
+            h('div', { key: 'b', style: { flex: '1 1 auto', minWidth: 0 } }, [
+              h('div', {
+                key: 't',
+                style: { fontSize: 12.5, color: C.bone, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+              }, item.title),
+              h('div', { key: 'm', style: { ...S.mono, fontSize: 10, color: C.boneFaint, marginTop: 2 } },
+                `${item.chars} 字${session?.session?.resumeId === item.id ? ' · 本场用的就是它' : ''}`),
+            ]),
+            h('button', {
+              key: 'u',
+              style: S.btn(false, busy),
+              title: '把这份简历用到这场面试',
+              onClick: () => applyResume(item.id),
+            }, '用这份'),
+            h('button', {
+              key: 'x',
+              title: '从简历库删掉（已经用过的面试里存的快照不受影响）',
+              'aria-label': '从简历库删掉',
+              style: { ...S.btn(false, busy), padding: '8px 10px' },
+              onClick: () => deleteResume(item.id),
+            }, '删'),
+          ]))),
+      ])
+
       const resumeSlot = material({
         key: 'resume',
         editing: editing.resume,
@@ -1514,6 +2287,15 @@ window.__ModuleLoader__.load({
         onCancel: () => setEditing(previous => ({ ...previous, resume: false })),
         onEdit: () => setEditing(previous => ({ ...previous, resume: true })),
         upload: resumeArchived ? undefined : uploadResumeLabel,
+        // 「存进简历库」：存一次，以后每场面试直接选。
+        extraActions: resumeArchived
+          ? h('button', {
+            key: 'lib',
+            style: S.btn(false, busy),
+            title: '把这份简历存进简历库，以后新建面试直接选',
+            onClick: saveToLibrary,
+          }, '存进简历库')
+          : undefined,
       })
 
       const jdSlot = material({
@@ -1536,6 +2318,54 @@ window.__ModuleLoader__.load({
 
       return h('div', { style: { maxWidth: 1180 } }, [
         h(FlowSpine, { key: 'spine', current: flowStep }),
+
+        // ── 这场面试叫什么 ────────────────────────────────────────────
+        //
+        // **公司 · 岗位是从 JD 正文里提炼出来的。** 提炼不出来就留空，
+        // 让用户自己写——但**认错了必须能改**，所以这三个框一直都在。
+        h(Section, { key: 'id',
+          title: '这场面试',
+          extra: h('span', { style: { ...S.row } }, [
+            // 归档了却还在主区显示着，得让人一眼看出来——
+            // 否则「这场已经收起来了」这件事就没人知道。
+            session?.session?.archived === true
+              ? h('span', { key: 'a', style: S.pill('amber') }, '已归档')
+              : null,
+            h('span', { key: 'h', style: S.hint }, '归档 JD 后自动提炼；认不出来就自己写'),
+          ]),
+        }, [
+          h('div', {
+            key: 'row',
+            style: {
+              display: 'grid', gap: 12, alignItems: 'end',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+            },
+          }, [
+            h(Field, { key: 'c',
+              label: '公司',
+              value: identity.company,
+              placeholder: '例如：字节跳动',
+              onChange: value => { identityTouched.current = true; setIdentity(previous => ({ ...previous, company: value })) },
+            }),
+            h(Field, { key: 'p',
+              label: '岗位',
+              value: identity.position,
+              placeholder: '例如：前端工程师',
+              onChange: value => { identityTouched.current = true; setIdentity(previous => ({ ...previous, position: value })) },
+            }),
+            h(Field, { key: 't',
+              label: '标题',
+              value: identity.title,
+              placeholder: '这场面试叫什么',
+              onChange: value => { identityTouched.current = true; setIdentity(previous => ({ ...previous, title: value })) },
+            }),
+          ]),
+          h('div', { key: 'act', style: { ...S.row, marginTop: 12 } }, [
+            h('button', { key: 'b', style: S.btn('primary', busy), onClick: saveIdentity }, '保存'),
+            h('span', { key: 'h', style: S.hint }, '列表会按岗位分组——同一个岗位的几场聚在一起。'),
+          ]),
+        ]),
+
         h('div', {
           key: 'grid',
           style: {
@@ -1550,7 +2380,7 @@ window.__ModuleLoader__.load({
               step: '01',
               title: '简历',
               extra: h('span', { style: S.hint }, resumeArchived ? `已归档 ${session.documents.resumeChars} 字` : '待归档'),
-            }, [resumeSlot]),
+            }, [libraryStrip, resumeSlot]),
 
             h(Section, {key: 'k6', 
               step: '02',
@@ -1559,7 +2389,7 @@ window.__ModuleLoader__.load({
             }, [
               h('div', { key: 'link', style: { ...S.row, marginBottom: 14, alignItems: 'flex-end' } }, [
                 h('div', { key: 'f', style: { flex: '1 1 260px' } }, [
-                  h(Field, {key: 'k7', 
+                  h(Field, {key: 'k7',
                     label: '岗位链接（抓不到会自动给手动兜底）',
                     value: jdUrl,
                     placeholder: 'https://…',
@@ -1567,17 +2397,37 @@ window.__ModuleLoader__.load({
                   }),
                 ]),
                 h('button', { key: 'f2', style: S.btn(false, busy || jdUrl.trim() === ''), onClick: fetchJd }, '抓取'),
+                // 直连抓不动的时候，就**请助手去拿**——宿主里的助手有浏览器，
+                // 能把登录墙、验证码、前端渲染的正文都对付过去。
+                h('button', {
+                  key: 'f3',
+                  style: S.btn(false, busy || jdUrl.trim() === ''),
+                  title: '把链接发给 DSH 对话里的助手，让它把正文抄回来',
+                  onClick: askAgent,
+                }, '让助手去抓'),
               ]),
               jdNote !== undefined
                 ? h('div', {
                   key: 'note',
                   style: {
                     padding: '10px 13px', borderRadius: 9, marginBottom: 14, fontSize: 12, lineHeight: 1.6,
-                    border: `1px solid ${jdNote.ok ? 'rgba(79,169,140,0.35)' : 'rgba(217,164,65,0.35)'}`,
-                    background: jdNote.ok ? 'rgba(79,169,140,0.08)' : 'rgba(217,164,65,0.08)',
+                    border: `1px solid ${jdNote.ok ? TONES.jade.edge : TONES.amber.edge}`,
+                    background: jdNote.ok ? TONES.jade.wash : TONES.amber.wash,
                     color: jdNote.ok ? C.jade : C.amber,
                   },
-                }, jdNote.text)
+                }, [
+                  h('span', { key: 't' }, jdNote.text),
+                  jdNote.canAsk === true
+                    ? h('div', { key: 'a', style: { ...S.row, marginTop: 9 } }, [
+                      h('button', {
+                        key: 'b',
+                        style: S.btn(false, busy),
+                        onClick: askAgent,
+                      }, '让助手去抓'),
+                      h('span', { key: 'h', style: S.hint }, '或者直接把正文粘进下面的框里。'),
+                    ])
+                    : null,
+                ])
                 : null,
               jdSlot,
             ]),
@@ -1792,9 +2642,52 @@ window.__ModuleLoader__.load({
       }, [session?.session?.id, onChanged, notify])
 
       const running = session?.session?.status === 'running'
+      /**
+       * 「有画面」= 流里真的有**视频轨**。
+       *
+       * **不能只看流存不存在。** 桌面端里常常是「麦克风通了、摄像头没通」，
+       * 流照样存在——那时候如果按流判断，舞台会变成一块黑屏，
+       * 用户看到的是「画面黑了」，而不是「摄像头没接上」。
+       */
       const hasVideo = media.stream !== undefined
+        && typeof media.stream.getVideoTracks === 'function'
+        && media.stream.getVideoTracks().length > 0
+      /**
+       * Host 侧的摄像头画面。
+       *
+       * **桌面端里它是唯一有画面的可能。** 浏览器的 `getUserMedia` 在桌面端
+       * 拿不到摄像头（宿主只放行纯音频请求），画面只能由 Host 用 ffmpeg 采。
+       *
+       * 它和浏览器的摄像头**互斥**——设备是独占的，两边同时开必然有一个失败。
+       */
+      const hostCamera = useHostCamera()
+      const hasHostVideo = hostCamera.active
+      const hasAnyVideo = hasVideo || hasHostVideo
       const title = session?.session?.title ?? '面试'
       const questionText = lastQuestion?.text
+
+      // 窄容器里**纵向堆叠**：舞台在上、回答在中、控件在下，整页内部滚动。
+      //
+      // 为什么不是「让右栏变窄」——右栏一窄，「识别链路」「朗读问题」这些
+      // 控件就挤成两行字，等于把功能藏起来；而舞台是这一页的主角，
+      // 窄的时候更该它占满，而不是被压成一条缝。
+      //
+      // 阈值 700 是算出来的：并排时舞台至少要留 300px，
+      // 加右栏 396 和 16 的间距，一共要 712。
+      const [liveRef, liveWidth] = useContainerWidth()
+      const stacked = liveWidth > 0 && liveWidth < 700
+
+      /**
+       * 计时器 + REC 灯的 props。
+       *
+       * 组件在模块作用域（`ClockBadge`），key 由**调用点**给——
+       * `scripts/fix-keys.mjs` 会盯着这件事。
+       */
+      const clockProps = (absolute) => ({
+        absolute,
+        durationMs: session?.stats?.durationMs ?? 0,
+        recording: recorder.recording,
+      })
 
       /**
        * The **lower third**: the question, laid over the bottom of the frame.
@@ -1802,46 +2695,71 @@ window.__ModuleLoader__.load({
        * 为什么提问要压在画面上而不是放在旁边的框里——因为在真实的线上面试里，
        * 提问是**对面那个人说的**，它和你的人像在同一块画面上。把它挪进侧栏，
        * 它就变成了「界面上的一个字段」，面试的现场感就没了。
+       *
+       * **但没有摄像头时不能压。** 没接通的时候，舞台里放的是「未接通板」
+       * （monogram + 说明 + 申请按钮）。提问条要是也压上去，两者会重叠——
+       * 而且压掉的往往是**按钮**：被拒之后那句「在系统设置里放行」的说法，
+       * 恰恰要靠那个按钮兑现。所以那种情况下提问条改成舞台下方的**一条带子**，
+       * 仍然紧贴舞台、仍然占满左半屏，但它不再和板子抢地方。
        */
-      const lowerThird = h('div', {
-        key: 'cue',
+      const questionRule = h('div', {
+        key: 'rule',
         style: {
-          position: 'absolute', left: 0, right: 0, bottom: 0,
-          padding: '54px 26px 20px',
-          background: 'linear-gradient(180deg, rgba(7,9,13,0) 0%, rgba(7,9,13,0.82) 46%, rgba(7,9,13,0.96) 100%)',
-          pointerEvents: 'none',
+          borderLeft: `3px solid ${questionText === undefined ? C.rule : C.amber}`,
+          paddingLeft: 16,
         },
       }, [
         h('div', {
-          key: 'rule',
+          key: 'eyebrow',
+          style: { ...S.eyebrow, color: questionText === undefined ? C.boneFaint : C.amber, marginBottom: 7 },
+        }, questionText === undefined ? '等待提问' : `第 ${questionIndex} 问`),
+        h('div', {
+          key: 'text',
           style: {
-            borderLeft: `3px solid ${questionText === undefined ? C.rule : C.amber}`,
-            paddingLeft: 16,
+            fontFamily: F.voice, fontSize: 19, lineHeight: 1.58, color: C.bone,
+            letterSpacing: '0.005em', maxHeight: hasAnyVideo ? 132 : 200, overflow: 'hidden',
           },
-        }, [
-          h('div', {
-            key: 'eyebrow',
-            style: { ...S.eyebrow, color: questionText === undefined ? C.boneFaint : C.amber, marginBottom: 7 },
-          }, questionText === undefined ? '等待提问' : `第 ${questionIndex} 问`),
-          h('div', {
-            key: 'text',
-            style: {
-              fontFamily: F.voice, fontSize: 19, lineHeight: 1.58, color: C.bone,
-              letterSpacing: '0.005em', maxHeight: 132, overflow: 'hidden',
-            },
-          }, questionText === undefined
-            ? '助手还没提问。在 DSH 对话区让它开始——它每问一轮，这里就会更新。'
-            : questionText),
-        ]),
+        }, questionText === undefined
+          ? '助手还没提问。在 DSH 对话区让它开始——它每问一轮，这里就会更新。'
+          : questionText),
       ])
+
+      /** 有画面：压在画面下缘。没有：落在舞台下方的一条带子。 */
+      const lowerThird = hasAnyVideo
+        ? h('div', {
+          key: 'cue',
+          style: {
+            position: 'absolute', left: 0, right: 0, bottom: 0,
+            padding: '54px 26px 20px',
+            background: 'linear-gradient(180deg, ' + C.cueTop + ' 0%, ' + C.cueMid + ' 46%, ' + C.cueLow + ' 100%)',
+            pointerEvents: 'none',
+          },
+        }, [questionRule])
+        : h('div', {
+          key: 'band',
+          style: {
+            flex: '0 0 auto',
+            padding: '16px 26px 18px',
+            background: C.band,
+            borderTop: `1px solid ${C.rule}`,
+          },
+        }, [questionRule])
 
       /** The stage: video when we have it, a designed "not connected" plate when we don't. */
       const stage = h('div', {
         key: 'stage',
+        'data-iv-stage': '1',
         style: {
-          position: 'relative', flex: '1 1 auto', minWidth: 0, minHeight: 260,
-          borderRadius: 14, overflow: 'hidden', background: '#0A0D11',
+          position: 'relative', flex: '1 1 auto', minWidth: 0,
+          // 没摄像头的时候，舞台里装的是「未接通板 + 提问带」两块。
+          // 给它一个够高的下限，免得窄面板下板子被压扁、按钮被裁掉。
+          minHeight: hasAnyVideo ? 260 : (stacked ? 300 : 400),
+          borderRadius: 14, overflow: 'hidden', background: C.stage,
           border: `1px solid ${C.rule}`,
+          // 有摄像头：舞台就是一块画面，提问压在上面。
+          // 没摄像头：舞台变成上下两段（板子 / 提问带），**各占各的**。
+          display: hasAnyVideo ? 'block' : 'flex',
+          flexDirection: hasAnyVideo ? undefined : 'column',
         },
       }, [
         h('video', {
@@ -1855,91 +2773,208 @@ window.__ModuleLoader__.load({
             transform: 'scaleX(-1)', display: hasVideo ? 'block' : 'none',
           },
         }),
-        hasVideo
+        // Host 侧的摄像头画面。
+        //
+        // **`<img>` 直接吃 multipart/x-mixed-replace 流**——浏览器端一行
+        // JS 都不用写。镜像是镜像的（跟 `<video>` 一样），所以同样
+        // `scaleX(-1)`。
+        hasHostVideo
+          ? h('img', {
+            key: 'host-v',
+            'data-iv-host-video': '1',
+            src: '/interviewer/camera/stream',
+            alt: '摄像头画面',
+            style: {
+              width: '100%', height: '100%', objectFit: 'cover',
+              transform: 'scaleX(-1)', display: 'block',
+            },
+          })
+          : null,
+        hasAnyVideo
           ? null
           : h('div', {
             key: 'plate',
+            'data-iv-plate': '1',
             style: {
-              position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center', gap: 16, padding: 30,
-              background: 'radial-gradient(circle at 50% 38%, #171E28 0%, #0C0F14 62%, #090B0E 100%)',
+              // 这块板子只在**没有摄像头**的时候出现，所以它在**流里**：
+              // 板子占上面一段，提问带占下面一段，两者不可能重叠。
+              position: 'relative',
+              flex: '1 1 auto',
+              minHeight: 0,
+              overflow: 'auto',
+              display: 'flex', flexDirection: 'column',
+              gap: 13,
+              padding: '22px 30px',
+              background: 'radial-gradient(circle at 50% 38%, ' + C.plateTop + ' 0%, ' + C.plateMid + ' 62%, ' + C.plateLow + ' 100%)',
             },
           }, [
+            // **用 auto 外边距居中，不要用 justifyContent: 'center'。**
+            // 居中 + overflow:auto 时，内容超出容器的话上沿会被裁掉、
+            // 而且滚不回去——而这里超出意味着「板子比舞台高」，
+            // 那正是最不该把按钮弄丢的时候。
             h('div', {
-              key: 'mono',
+              key: 'scroll',
               style: {
-                width: 104, height: 104, borderRadius: 999, display: 'flex',
-                alignItems: 'center', justifyContent: 'center',
-                border: `1px solid ${C.rule}`, background: C.ink850,
-                fontFamily: F.voice, fontSize: 29, color: C.boneFaint, letterSpacing: '0.04em',
+                flex: '1 1 auto', minHeight: 0, overflow: 'auto',
+                display: 'flex', flexDirection: 'column',
               },
-            }, initialsOf(title)),
-            h('div', { key: 'who', style: { textAlign: 'center', maxWidth: 420 } }, [
-              h('div', { key: 't', style: { fontFamily: F.voice, fontSize: 16, color: C.boneDim } }, title),
-              h('div', { key: 's', style: { ...S.hint, marginTop: 6 } },
-                media.error === undefined
-                  ? '摄像头未接通——面试照常进行，键盘输入随时可用'
-                  : '摄像头未接通——面试照常进行，键盘输入随时可用'),
-            ]),
-            media.error !== undefined
-              ? h('div', {
-                key: 'err',
+            }, [
+              h('div', {
+                key: 'inner',
                 style: {
-                  maxWidth: 460, textAlign: 'center', padding: '11px 15px', borderRadius: 10,
-                  border: `1px solid ${media.error.kind === 'denied' ? 'rgba(224,86,63,0.3)' : 'rgba(217,164,65,0.3)'}`,
-                  background: media.error.kind === 'denied' ? 'rgba(224,86,63,0.07)' : 'rgba(217,164,65,0.07)',
+                  margin: 'auto', width: '100%', maxWidth: 520,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 13,
                 },
               }, [
+                // **有错误时不画 monogram，也不写那句「摄像头未接通」的安慰话。**
+                //
+                // 窄面板下（比如真实宿主里 1000×700 的那块地方），
+                // 板子里同时塞着姓名章、说明、错误框和按钮，高度不够——
+                // 结果是姓名章被裁成半个圆，看着像坏了。
+                // 出错的时候，错误本身就是主角：姓名章让位，安慰话让位。
+                media.error === undefined
+                  ? h('div', {
+                    key: 'mono',
+                    style: {
+                      width: 68, height: 68, borderRadius: 999, display: 'flex',
+                      alignItems: 'center', justifyContent: 'center',
+                      border: `1px solid ${C.rule}`, background: C.ink850,
+                      fontFamily: F.voice, fontSize: 20, color: C.boneFaint, letterSpacing: '0.04em',
+                    },
+                  }, initialsOf(title))
+                  : null,
+                // 标题行：标题 + 计时器。
+                //
+                // 计时器在**没摄像头**的时候进标题行——原来它绝对定位在舞台
+                // 右上角，而板子的标题也是居中的，窄面板下两者正好撞在一起。
                 h('div', {
-                  key: 't',
-                  style: { fontSize: 12.5, color: media.error.kind === 'denied' ? C.tally : C.amber, marginBottom: 5 },
-                }, media.error.text),
-                h('div', { key: 'a', style: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.65 } }, media.error.action),
-              ])
-              : null,
-            h('div', { key: 'act', style: S.row }, [
-              h('button', {
-                key: 'ask',
-                style: S.btn('primary', media.busy),
-                onClick: () => { void media.start() },
-              }, media.busy ? '正在申请…' : '申请摄像头与麦克风'),
-              media.permission?.camera === 'denied' || media.permission?.microphone === 'denied'
-                ? h('button', {
-                  key: 'retry',
-                  style: S.btn(false, media.busy),
-                  onClick: () => { void media.probe().then(() => media.start()) },
-                }, '重新检测授权状态')
+                  key: 'hdr',
+                  style: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, width: '100%' },
+                }, [
+                  h('div', {
+                    key: 't',
+                    style: {
+                      fontFamily: F.voice, fontSize: 16, color: C.boneDim,
+                      // 窄的时候省略，不要把标题折成两行吃掉竖向空间。
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 240,
+                    },
+                  }, title),
+                  h(ClockBadge, { key: 'clock-plate', ...clockProps(false) }),
+                ]),
+                media.error === undefined
+                  ? h('div', { key: 's', style: { ...S.hint, marginTop: 6 } },
+                    '摄像头未接通——面试照常进行，键盘输入随时可用')
+                  : null,
+              ]),
+            ]),
+            // **错误说明和按钮钉在板子底部，不跟内容一起被顶走。**
+            //
+            // 这一块是整个「权限被拒」流程的出口：它说「在系统设置里放行」，
+            // 靠的就是下面的「重新检测授权状态」按钮。窄面板下板子一挤，
+            // 这两样要是被推出可视区，那句话就变成了一句空话。
+            h('div', {
+              key: 'foot',
+              style: { flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 13 },
+            }, [
+              // **桌面端：浏览器的摄像头是被宿主挡住的，改系统设置没用。**
+              //
+              // 所以桌面端要说清「还有一条路」——Host 侧用 ffmpeg 直接采。
+              // 这不是安慰话，是真的能出画面的路。
+              hostCamera.error !== undefined
+                ? h('div', {
+                  key: 'herr',
+                  style: {
+                    width: '100%', maxWidth: 460, textAlign: 'center', padding: '11px 15px', borderRadius: 10,
+                    border: `1px solid ${TONES.amber.edge}`, background: TONES.amber.wash,
+                  },
+                }, [
+                  h('div', {
+                    key: 't',
+                    style: { fontSize: 12.5, color: C.amber, marginBottom: 5 },
+                  }, hostCamera.error.text),
+                  h('div', { key: 'a', style: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.65 } }, hostCamera.error.action),
+                ])
                 : null,
+              media.error !== undefined
+                ? h('div', {
+                  key: 'err',
+                  style: {
+                    width: '100%', maxWidth: 460, textAlign: 'center', padding: '11px 15px', borderRadius: 10,
+                    border: `1px solid ${media.error.kind === 'denied' ? TONES.tally.edge : TONES.amber.edge}`,
+                    background: media.error.kind === 'denied' ? TONES.tally.wash : TONES.amber.wash,
+                  },
+                }, [
+                  h('div', {
+                    key: 't',
+                    style: { fontSize: 12.5, color: media.error.kind === 'denied' ? C.tally : C.amber, marginBottom: 5 },
+                  }, media.error.text),
+                  h('div', { key: 'a', style: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.65 } }, media.error.action),
+                ])
+                : null,
+              h('div', { key: 'act', style: S.row }, [
+                h('button', {
+                  key: 'ask',
+                  style: S.btn('primary', media.busy),
+                  onClick: () => { void media.start() },
+                }, media.busy
+                  ? '正在申请…'
+                  // 麦克风已经通了的时候，这按钮是去**补摄像头**的，
+                  // 别再写「申请摄像头与麦克风」——麦克风不需要再申请了。
+                  : (media.stream !== undefined && !hasVideo ? '补上摄像头' : '申请摄像头与麦克风')),
+                // **桌面端的第二条路：让 Host 侧采。**
+                //
+                // 浏览器的摄像头在桌面端被宿主挡死了，但 Host 侧能直接开
+                // 设备。摄像头是独占的，所以这条按钮只在**浏览器没拿到画面**
+                // 的时候出现——两边不会同时开。
+                inDesktopHost() && !hasAnyVideo
+                  ? h('button', {
+                    key: 'host-cam',
+                    style: S.btn(false, hostCamera.busy),
+                    onClick: () => { void hostCamera.start() },
+                  }, hostCamera.busy ? '正在开摄像头…' : '用宿主摄像头')
+                  : null,
+                media.permission?.camera === 'denied' || media.permission?.microphone === 'denied'
+                  ? h('button', {
+                    key: 'retry',
+                    style: S.btn(false, media.busy),
+                    onClick: () => { void media.probe().then(() => media.start()) },
+                  }, '重新检测授权状态')
+                  : null,
+              ]),
             ]),
           ]),
         // 录制指示灯：只有真正在录的时候才亮。
-        recorder.recording
+        //
+        // 两边都算：浏览器的 MediaRecorder，和 Host 侧的录像。
+        (recorder.recording || hostCamera.recording)
           ? h('div', {
             key: 'rec',
             style: { position: 'absolute', top: 16, left: 16 },
           }, h(Tally, { on: true }))
           : null,
         // 计时器：右上角，等宽数字。
-        h('div', {
-          key: 'clock',
-          style: {
-            position: 'absolute', top: 14, right: 16, display: 'flex', alignItems: 'center', gap: 12,
-            padding: '5px 11px', borderRadius: 8, background: 'rgba(10,13,17,0.72)',
-            border: `1px solid ${C.rule}`,
-          },
-        }, [
-          h('span', { key: 't', style: { ...S.mono, fontSize: 12, color: C.boneDim, letterSpacing: '0.06em' } },
-            formatClock(session?.stats?.durationMs ?? 0)),
-          h(Tally, { key: 'r', on: recorder.recording }),
-        ]),
+        // **只在有摄像头时压在画面上**——没摄像头时它进板子的标题行，
+        // 否则窄面板下会跟标题撞在一起。
+        hasAnyVideo ? h(ClockBadge, { key: 'clock-stage', ...clockProps(true) }) : null,
         lowerThird,
       ])
 
-      return h('div', { style: { display: 'flex', gap: 16, flex: '1 1 auto', minHeight: 0 } }, [
+      return h('div', {
+        ref: liveRef,
+        'data-iv-live': '1',
+        style: stacked
+          // 窄：一列，舞台在上、控件在下，整页内部滚。
+          ? { display: 'flex', flexDirection: 'column', gap: 14, flex: '1 1 auto', minHeight: 0, overflowY: 'auto' }
+          : { display: 'flex', gap: 16, flex: '1 1 auto', minHeight: 0 },
+      }, [
         // ── 左：舞台 + 回答 ────────────────────────────────────────────
         h('div', {
           key: 'left',
-          style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 },
+          style: {
+            flex: stacked ? '0 0 auto' : '1 1 auto',
+            minWidth: 0,
+            display: 'flex', flexDirection: 'column', gap: 14,
+          },
         }, [
           stage,
           h('div', {
@@ -1972,7 +3007,21 @@ window.__ModuleLoader__.load({
         // ── 右：控件 + 速记 ────────────────────────────────────────────
         h('div', {
           key: 'rail',
-          style: { flex: '0 0 396px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 },
+          'data-iv-rail': '1',
+          style: stacked
+            // 窄：整宽，排在舞台下面。
+            ? { flex: '0 0 auto', width: '100%', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }
+            // 宽：右栏固定一栏。
+            //
+            // **它不许收缩**——右栏里的按钮（「开摄像头」「开始录制」
+            // 「录一段」「语音识别」「朗读问题」）和「识别链路」那段说明
+            // 都是按 396px 排的，挤到 255px 就得折行，功能反而更难找。
+            //
+            // 之前这里写的是「可以收缩」，结果右栏被压成 255px、
+            // 舞台撑到 448px——主次正好反了。现在舞台是那个「让出空间」的一方
+            // （flex: 1 1 auto），右栏保底 396px；
+            // 而窄到放不下时早就切成纵向堆叠了，不会再把舞台挤没。
+            : { flex: '0 0 396px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 },
         }, [
           h('div', {
             key: 'ctrl',
@@ -1984,20 +3033,61 @@ window.__ModuleLoader__.load({
           }, [
             // 画面这一组：摄像头 + 录像。
             h('div', { key: 'g1' }, [
-              h('div', { key: 'gh', style: { ...S.eyebrow, marginBottom: 8 } }, '画面'),
+              // **组名跟着实际情况走。** 只有麦克风的时候，这组里根本没有画面，
+              // 还叫「画面」就是骗人。
+              h('div', { key: 'gh', style: { ...S.eyebrow, marginBottom: 8 } }, hasAnyVideo ? '画面' : '设备'),
               h('div', { key: 'gr', style: S.row }, [
+                // **浏览器摄像头**：能用就用它，它更省事（不用 ffmpeg）。
                 h('button', {
                   key: 'cam',
                   style: S.btn(false, false),
                   onClick: () => (media.stream === undefined ? void media.start() : media.stop()),
-                }, media.stream === undefined ? '开摄像头' : '关摄像头'),
-                h('button', {
-                  key: 'rec',
-                  style: S.btn(recorder.recording ? 'tally' : false, media.stream === undefined),
-                  onClick: () => (recorder.recording ? recorder.stop() : recorder.start()),
-                }, recorder.recording ? '停止录制' : '开始录制'),
+                  // 麦克风通了、摄像头没通的时候，关掉的其实是麦克风——
+                  // 按钮得说它真正会关掉什么。
+                }, media.stream === undefined
+                  ? '开摄像头与麦克风'
+                  : (hasVideo ? '关摄像头' : '关麦克风')),
+                // **Host 摄像头**：桌面端的第二条路。
+                //
+                // 摄像头是独占设备，两边不能同时开——所以只在浏览器的摄像头
+                // 没拿到画面时才亮这个按钮。
+                inDesktopHost()
+                  ? h('button', {
+                    key: 'host-cam',
+                    style: S.btn(hasHostVideo ? 'primary' : false, hostCamera.busy),
+                    onClick: () => (hasHostVideo ? void hostCamera.stop() : void hostCamera.start()),
+                  }, hasHostVideo ? '关宿主摄像头' : '开宿主摄像头')
+                  : null,
+                // **录像走哪一边，取决于画面在哪一边。**
+                //
+                // 画面在 Host（桌面端），录像就该由 Host 写盘——它手里本来
+                // 就握着一帧帧的图像，转成 mp4 是最短的路。浏览器那边的
+                // MediaRecorder 只能录到麦克风。
+                hasHostVideo
+                  ? h('button', {
+                    key: 'host-rec',
+                    style: S.btn(hostCamera.recording ? 'tally' : false, false),
+                    onClick: () => {
+                      const sessionId = session?.session?.id ?? ''
+                      if (hostCamera.recording) {
+                        void hostCamera.stopRecording(sessionId).then(result => {
+                          if (result !== undefined) {
+                            notify('录像已存到本机', `${result.name} 留在本场面试的卷宗目录里。`, 'ok')
+                            onChanged?.()
+                          }
+                        })
+                      } else {
+                        void hostCamera.startRecording(sessionId)
+                      }
+                    },
+                  }, hostCamera.recording ? '停止录制' : '开始录制')
+                  : h('button', {
+                    key: 'rec',
+                    style: S.btn(recorder.recording ? 'tally' : false, media.stream === undefined),
+                    onClick: () => (recorder.recording ? recorder.stop() : recorder.start()),
+                  }, recorder.recording ? '停止录制' : (hasVideo ? '开始录制' : '开始录音')),
                 recorder.clip !== undefined
-                  ? h('button', { key: 'save', style: S.btn('primary', false), onClick: saveClip }, '保存录像')
+                  ? h('button', { key: 'save', style: S.btn('primary', false), onClick: saveClip }, hasVideo ? '保存录像' : '保存录音')
                   : null,
               ]),
             ]),
@@ -2097,7 +3187,7 @@ window.__ModuleLoader__.load({
                 }, formatTime(row.ts)),
                 h('span', {
                   key: 'r',
-                  style: S.pill(row.role === 'interviewer' ? C.amber : row.role === 'candidate' ? C.jade : C.boneFaint),
+                  style: S.pill(row.role === 'interviewer' ? 'amber' : row.role === 'candidate' ? 'jade' : 'faint'),
                 }, row.role === 'interviewer' ? '问' : row.role === 'candidate' ? '答' : '系统'),
                 h('span', { key: 'x', style: { fontSize: 12.5, color: C.boneDim, lineHeight: 1.65 } }, row.text),
               ]))),
@@ -2149,7 +3239,7 @@ window.__ModuleLoader__.load({
               key: item.name,
               style: { display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.ruleSoft}` },
             }, [
-              h('span', { key: 'k', style: S.pill(item.kind === 'video' ? C.amber : C.jade) }, item.kind === 'video' ? '录像' : '录音'),
+              h('span', { key: 'k', style: S.pill(item.kind === 'video' ? 'amber' : 'jade') }, item.kind === 'video' ? '录像' : '录音'),
               h('span', { key: 'n', style: { flex: '1 1 auto', color: C.boneDim, fontSize: 12 } }, item.name),
               h('span', { key: 's', style: { ...S.mono, color: C.boneFaint, fontSize: 11 } }, formatBytes(item.bytes)),
             ]))),
@@ -2161,11 +3251,52 @@ window.__ModuleLoader__.load({
 
     // ── panel ─────────────────────────────────────────────────────────────
 
+    /**
+     * 按岗位给场次分组。
+     *
+     * **为什么按岗位，不按标题。** 标题是给人看的（随时能改），
+     * 岗位是给列表分组的——同一个岗位投了三家、或者同一家面了两轮，
+     * 聚在一起才看得出「我在跟谁谈」。认不出岗位的场次单独归到
+     * 「未整理」，放在最后，而不是混在有名字的组里。
+     *
+     * @param {Array<object>} rows
+     * @returns {Array<{key: string, label: string, items: Array<object>}>}
+     */
+    function groupSessions(rows) {
+      const buckets = new Map()
+      for (const row of rows) {
+        const company = typeof row.company === 'string' ? row.company.trim() : ''
+        const position = typeof row.position === 'string' ? row.position.trim() : ''
+        const key = `${company}\u0000${position}`
+        if (!buckets.has(key)) {
+          buckets.set(key, {
+            key,
+            label: company !== '' && position !== ''
+              ? `${company} · ${position}`
+              : (position !== '' ? position : (company !== '' ? company : '未整理')),
+            items: [],
+          })
+        }
+        buckets.get(key).items.push(row)
+      }
+      const groups = [...buckets.values()]
+      // 有名字的组按最近一场的时间排前面；「未整理」永远垫底。
+      groups.sort((a, b) => {
+        const aLoose = a.label === '未整理'
+        const bLoose = b.label === '未整理'
+        if (aLoose !== bLoose) return aLoose ? 1 : -1
+        return (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0)
+      })
+      return groups
+    }
+
     /** The whole panel. */
     function Interviewer() {
       const [tab, setTab] = useState('prepare')
       const [selected, setSelected] = useState(undefined)
       const [notice, setNotice] = useState(undefined)
+      // 主题：暗色是原来的样子，亮色是纸面。用户的选择会被记住。
+      const [theme, setTheme] = useState(readTheme)
 
       const notify = useCallback((title, detail, kind = 'info') => {
         setNotice({ title, detail, kind, at: Date.now() })
@@ -2180,6 +3311,39 @@ window.__ModuleLoader__.load({
       const configPoll = usePoll(() => apiGet('config'), undefined, [])
 
       const config = configPoll.data
+      /** The session list; declared early because the header and the workspace picker both read it. */
+      const rows = sessionsPoll.data?.sessions ?? []
+
+      // ── 归档 ────────────────────────────────────────────────────────
+      //
+      // **归档不是删除。** 它只是把老的场次从日常列表里收起来，
+      // 内容、报告、底稿一样都在，随时能翻出来——所以它是「整理」，
+      // 不是「丢东西」。
+      const [showArchived, setShowArchived] = useState(false)
+      const archivedRows = useMemo(() => rows.filter(row => row.archived === true), [rows])
+      const visibleRows = useMemo(
+        () => (showArchived ? rows : rows.filter(row => row.archived !== true)),
+        [rows, showArchived],
+      )
+      /** 按岗位分组：同一岗位的几场聚在一起。 */
+      const groups = useMemo(() => groupSessions(visibleRows), [visibleRows])
+
+      /**
+       * 一行下面的那串小字。
+       *
+       * 窄布局没有组头，所以公司 · 岗位得写在这一行里；
+       * 宽布局有组头，就不重复写了。
+       */
+      const rowMeta = (row, withPosition) => {
+        const base = `${row.status} · 考点 ${row.probedCount}/${row.checklistCount}`
+        if (!withPosition) return base
+        const company = (row.company ?? '').trim()
+        const position = (row.position ?? '').trim()
+        const label = company !== '' && position !== ''
+          ? `${company} · ${position}`
+          : (position !== '' ? position : company)
+        return label === '' ? base : `${label} · ${base}`
+      }
 
       // 默认选中最近一场。
       useEffect(() => {
@@ -2198,44 +3362,223 @@ window.__ModuleLoader__.load({
 
       const session = sessionPoll.data
 
+      /**
+       * 会话不见了 —— 多半是**换了卷宗库**，原来那一场不在新目录里了。
+       *
+       * 这时候正确做法是取消选中（列表会自己落到新目录的第一场），
+       * 而不是一直挂着「读不到会话状态」——用户什么都没做错，
+       * 不该让他面对一条他无法消除的红字。
+       */
+      const sessionGone = sessionPoll.error !== undefined && /会话不存在/.test(sessionPoll.error)
+      useEffect(() => {
+        if (sessionGone) setSelected(undefined)
+      }, [sessionGone])
+
       const refreshAll = useCallback(() => {
         void sessionsPoll.refresh()
         void sessionPoll.refresh()
       }, [sessionsPoll, sessionPoll])
+
+      /** 归档/取回一场面试。 */
+      const archiveRow = useCallback(async row => {
+        const archived = row.archived === true
+        try {
+          await apiPost(`sessions/${row.id}/archive`, { archived: !archived })
+          notify(
+            archived ? '取回来了' : '归档了',
+            archived
+              ? '它又回到日常列表里。'
+              : '内容、报告、底稿都还在，只是收起来了。',
+            'ok',
+          )
+          refreshAll()
+        } catch (failure) {
+          notify('归档失败', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [notify, refreshAll])
+
+      /**
+       * 换卷宗库之后，标题里的路径要**立刻**跟上。
+       *
+       * 配置是启动时取一次就放着的（它很少变）；换目录是唯一会让它变的事件，
+       * 所以专门在切根之后刷一次，而不是让配置也跟着每 6 秒轮询。
+       */
+      const refreshConfig = useCallback(() => {
+        void configPoll.refresh()
+      }, [configPoll])
 
       const createSession = useCallback(async () => {
         try {
           const result = await apiPost('sessions', {})
           setSelected(result.session.id)
           setTab('prepare')
-          notify('新面试已建好', '先放简历和 JD，再让助手做底稿调研。', 'ok')
+          notify('新面试已建好', '先从简历库挑一份（或上传新的），再放 JD。', 'ok')
           refreshAll()
         } catch (failure) {
           notify('建不了', failure instanceof Error ? failure.message : String(failure), 'error')
         }
       }, [notify, refreshAll])
 
-      const rows = sessionsPoll.data?.sessions ?? []
+      // ── 卷宗库目录 ────────────────────────────────────────────────────
+      //
+      // **两步走：先选，再切。**
+      //
+      // 选目录是宿主的事（原生对话框），切目录是插件的事（写设置、搬数据）。
+      // 混在一起就会出现「对话框都还没关，设置已经改了」这种半途而废的状态。
+      const [picking, setPicking] = useState(false)
 
-      return h('div', { style: S.page }, [
-        h('div', {key: 'k17',  style: S.head }, [
-          h('div', {key: 'k19',  style: { minWidth: 0 } }, [
+      /** 把旧根里的卷宗复制到新根。复制，不是移动。 */
+      const migrateWorkspace = useCallback(async (from, to) => {
+        try {
+          const result = await apiPost('config/workspace-root', { path: to, migrateFrom: from })
+          setSelected(undefined)
+          refreshAll()
+          refreshConfig()
+          const migrated = result?.migrated ?? {}
+          if (migrated.error !== undefined) {
+            notify('没搬成', migrated.error, 'error')
+            return
+          }
+          notify(
+            '搬完了',
+            `${migrated.sessions ?? 0} 场面试、${migrated.profiles ?? 0} 份档案已复制到新目录。`
+            + '老目录原样还在，确认无误后可以自己删。',
+            'ok',
+          )
+        } catch (failure) {
+          notify('没搬成', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [notify, refreshAll, refreshConfig])
+
+      /** 弹宿主原生目录选择器，把卷宗库换到用户选的地方。 */
+      const pickWorkspaceRoot = useCallback(async () => {
+        if (picking) return
+        setPicking(true)
+        const previous = config?.workspaceRoot?.path
+        const previousCount = rows.length
+        try {
+          const result = await apiPost('config/workspace-root/pick', {})
+          const picker = result?.picker ?? {}
+          if (picker.available !== true) {
+            notify('弹不出目录选择器', picker.reason ?? '这个宿主没有提供目录选择器。', 'error')
+            return
+          }
+          // 用户在系统对话框里点了「取消」——那不是错误，是「不改」。
+          if (typeof picker.picked !== 'string' || picker.picked === '') return
+          if (picker.picked === previous) {
+            notify('没换地方', '选的还是当前这个目录。', 'info')
+            return
+          }
+          const applied = await apiPost('config/workspace-root', { path: picker.picked })
+          setSelected(undefined)
+          refreshAll()
+          refreshConfig()
+          if (applied?.warning !== undefined) {
+            notify('换了，但不生效', applied.warning, 'error')
+            return
+          }
+          if (previousCount > 0 && previous !== undefined) {
+            setNotice({
+              title: `卷宗库已换到 ${picker.picked}`,
+              detail: `旧目录 ${previous} 里还有 ${previousCount} 场面试。`,
+              kind: 'info',
+              action: { label: '搬过去', run: () => { void migrateWorkspace(previous, picker.picked) } },
+            })
+            return
+          }
+          notify('卷宗库已换', `现在存在 ${picker.picked}`, 'ok')
+        } catch (failure) {
+          notify('换不了', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setPicking(false)
+        }
+      }, [config?.workspaceRoot?.path, migrateWorkspace, notify, picking, refreshAll, refreshConfig, rows.length])
+
+      // 面板实际有多宽，由**宿主**说了算：桌面版 DSH 里是 1200px，
+      // 网页版侧栏里可能只有 250px。窄到一定程度，场次列表就从左边一栏
+      // 变成顶部一条横向的场次带——不然它会吃掉一半宽度，
+      // 把「面试中」那一页挤到连舞台都放不下。
+      const [pageRef, pageWidth] = useContainerWidth()
+      const narrow = pageWidth > 0 && pageWidth < 760
+
+      return h('div', {
+        ref: pageRef,
+        'data-iv-page': '1',
+        'data-iv-theme': theme,
+        className: 'iv-root',
+        // **主题变量挂在根节点上。**
+        // 自定义属性会被后代继承，所以下面所有 `var(--iv-*)` 都跟着变；
+        // 切换主题只需要根节点换一套值，其余元素一个都不用重渲染。
+        style: { ...S.page, ...THEMES[theme] },
+      }, [
+        h('div', {key: 'k17',  style: narrow
+          // 窄：页头允许换行，页签和按钮不缩成竖排的字。
+          ? { ...S.head, flexWrap: 'wrap', gap: 10, padding: '12px 16px' }
+          : S.head }, [
+          h('div', {
+            key: 'k19',
+            style: narrow
+              // 窄：标题独占一行，页签和「新建面试」并排第二行——
+              // 否则「新建面试」会被挤到第三行，白白吃掉一屏高度。
+              ? { minWidth: 0, flex: '1 1 100%' }
+              : { minWidth: 0, flex: '1 1 auto' },
+          }, [
             h('div', {key: 'k21',  style: S.title }, '模拟面试间'),
             h('div', {key: 'k22',  style: S.sub }, '简历 + JD → 一场有准备的面试'),
             config?.workspaceRoot !== undefined
               ? h('div', {
                 key: 'w',
-                style: S.workspace,
-                title: `${config.workspaceRoot.path}\n${config.workspaceRoot.reason ?? ''}`,
-              }, `卷宗库 · ${config.workspaceRoot.path}`)
+                style: { ...S.workspace, display: 'flex', alignItems: 'center', gap: 10 },
+              }, [
+                h('span', {
+                  key: 'p',
+                  style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                  title: `${config.workspaceRoot.path}\n${config.workspaceRoot.reason ?? ''}`,
+                }, `卷宗库 · ${config.workspaceRoot.path}`),
+                // 「浏览…」：换成宿主的原生目录选择器。
+                //
+                // **为什么不让用户手打路径。** 路径是机器上的事实，
+                // 让用户手打就是让他凭记忆写一个自己也不确定存在的路径；
+                // 而系统对话框里选出来的路径，是用户**看着**选出来的。
+                h('button', {
+                  key: 'b',
+                  title: '换一个卷宗库目录（用系统目录选择器）',
+                  'aria-label': '换一个卷宗库目录',
+                  style: {
+                    flex: '0 0 auto', padding: '1px 8px', borderRadius: 6, cursor: picking ? 'progress' : 'pointer',
+                    fontFamily: F.ui, fontSize: 10.5, lineHeight: 1.7,
+                    color: C.boneDim, background: 'transparent',
+                    border: `1px solid ${C.rule}`,
+                  },
+                  disabled: picking,
+                  onClick: pickWorkspaceRoot,
+                }, picking ? '正在打开…' : '浏览…'),
+              ])
               : null,
           ]),
-          h('div', {key: 'k20',  style: S.tabs }, [
+          h('div', {key: 'k20',  style: narrow ? { ...S.tabs, marginLeft: 0, flex: '0 0 auto' } : S.tabs }, [
             h('div', { key: 'a', style: S.tab(tab === 'prepare'), onClick: () => setTab('prepare') }, '准备'),
             h('div', { key: 'b', style: S.tab(tab === 'live'), onClick: () => setTab('live') }, '面试中'),
             h('div', { key: 'c', style: S.tab(tab === 'report'), onClick: () => setTab('report') }, '报告'),
           ]),
-          h('button', { key: 'n', style: { ...S.btn('primary', false), marginLeft: 16 }, onClick: createSession }, '新建面试'),
+          h('button', {
+            key: 'theme',
+            // 按钮上写的是**切过去之后**的样子：「亮色」= 点一下变亮色。
+            // 当前是什么主题，写在 title 里（鼠标悬停可见）。
+            title: theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题',
+            'aria-label': theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题',
+            style: { ...S.btn(false, false), marginLeft: narrow ? 0 : 10, padding: '8px 13px' },
+            onClick: () => setTheme(previous => {
+              const next = previous === 'dark' ? 'light' : 'dark'
+              saveTheme(next)
+              return next
+            }),
+          }, theme === 'dark' ? '亮色' : '暗色'),
+          h('button', {
+            key: 'n',
+            style: { ...S.btn('primary', false), marginLeft: narrow ? 0 : 16 },
+            onClick: createSession,
+          }, '新建面试'),
         ]),
 
         notice !== undefined
@@ -2243,54 +3586,193 @@ window.__ModuleLoader__.load({
             key: 'notice',
             style: {
               padding: '10px 22px', fontSize: 12, display: 'flex', gap: 12, alignItems: 'center',
-              background: notice.kind === 'error' ? 'rgba(224,86,63,0.10)' : notice.kind === 'ok' ? 'rgba(79,169,140,0.09)' : C.ink850,
+              background: notice.kind === 'error' ? TONES.tally.wash : notice.kind === 'ok' ? TONES.jade.wash : C.ink850,
               borderBottom: `1px solid ${C.rule}`,
               color: notice.kind === 'error' ? C.tally : notice.kind === 'ok' ? C.jade : C.boneDim,
             },
           }, [
             h('span', { key: 't', style: { fontWeight: 600 } }, notice.title),
             notice.detail !== undefined ? h('span', { key: 'd', style: { color: C.boneFaint } }, notice.detail) : null,
+            // 通知条也能带一个动作（比如「把旧卷宗搬过去」）。
+            //
+            // **为什么动作在通知条里，而不是弹一个模态框。** 通知条已经在
+            // 面板最上面了，用户的眼睛本来就在那儿；而模态框会挡住
+            // 面试页——面试进行中弹模态框，是最不该做的事。
+            notice.action !== undefined
+              ? h('button', {
+                key: 'a',
+                style: {
+                  flex: '0 0 auto', padding: '4px 12px', borderRadius: 8, cursor: 'pointer',
+                  fontFamily: F.ui, fontSize: 11.5,
+                  color: C.bone, background: C.ink700,
+                  border: `1px solid ${C.rule}`,
+                },
+                onClick: () => {
+                  const action = notice.action
+                  setNotice(undefined)
+                  action.run()
+                },
+              }, notice.action.label)
+              : null,
             h('span', { key: 'x', style: { marginLeft: 'auto', cursor: 'pointer', color: C.boneFaint }, onClick: () => setNotice(undefined) }, '×'),
           ])
           : null,
 
-        h('div', {key: 'k18',  style: S.body }, [
+        h('div', {key: 'k18',  style: narrow ? { ...S.body, flexDirection: 'column' } : S.body }, [
           // 会话列表
-          h('div', {key: 'k23',  style: S.rail }, [
-            h('div', { key: 'h', style: { ...S.eyebrow, padding: '4px 8px 12px' } }, '面试场次'),
-            rows.length === 0
+          h('div', {
+            key: 'k23',
+            'data-iv-sessions': '1',
+            style: narrow
+              // 窄：从左边一栏变成顶部一条**横向**的场次带。
+              // 竖排的 216px 一栏在 400px 宽的面板里会吃掉一半，
+              // 剩下的宽度连舞台都放不下。
+              //
+              // `boxSizing: border-box` 不能省：这个面板跑在别人的页面里，
+              // 宿主不一定做过 `* { box-sizing: border-box }` 全局重置，
+              // 于是 `width: 100%` 加上左右内边距就会把面板撑宽 24px。
+              ? {
+                boxSizing: 'border-box',
+                width: '100%', flex: '0 0 auto', display: 'flex', alignItems: 'stretch', gap: 8,
+                overflowX: 'auto', overflowY: 'hidden', padding: '10px 12px',
+                borderRight: 'none', borderBottom: `1px solid ${C.rule}`, background: C.ink850,
+              }
+              : S.rail,
+          }, [
+            h('div', {
+              key: 'h',
+              style: narrow
+                ? { ...S.eyebrow, padding: '4px 6px', alignSelf: 'center', flex: '0 0 auto' }
+                : { ...S.eyebrow, padding: '4px 8px 12px', display: 'flex', alignItems: 'center', gap: 8 },
+            }, [
+              h('span', { key: 'l' }, '面试场次'),
+              // 归档藏起来之后，得有个地方把它再翻出来。
+              archivedRows.length > 0
+                ? h('span', {
+                  key: 'a',
+                  role: 'button',
+                  tabIndex: 0,
+                  title: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
+                  style: {
+                    marginLeft: 'auto', cursor: 'pointer', fontSize: 10.5, color: C.boneFaint,
+                    border: `1px solid ${C.rule}`, borderRadius: 6, padding: '1px 6px',
+                  },
+                  onClick: () => setShowArchived(value => !value),
+                }, showArchived ? '收起归档' : `归档 ${archivedRows.length}`)
+                : null,
+            ]),
+            visibleRows.length === 0
               ? h('div', { key: 'e', style: { ...S.hint, padding: '0 8px' } }, '还没有面试会话。')
-              : rows.map(row => h('button', {
-                key: row.id,
-                style: {
-                  display: 'block', width: '100%', textAlign: 'left',
-                  padding: '10px 11px', borderRadius: 10, cursor: 'pointer', marginBottom: 4,
-                  background: row.id === selected ? C.ink750 : 'transparent',
-                  border: `1px solid ${row.id === selected ? C.rule : 'transparent'}`,
-                  fontFamily: F.ui, color: row.id === selected ? C.bone : C.boneDim,
-                  transition: 'background 140ms ease',
-                },
-                onClick: () => setSelected(row.id),
-              }, [
-                h('div', {
-                  key: 't',
-                  style: { fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-                }, row.title),
-                h('div', {
-                  key: 'm',
-                  style: { ...S.mono, fontSize: 10, color: C.boneFaint, marginTop: 4 },
-                }, `${row.status} · 考点 ${row.probedCount}/${row.checklistCount}`),
-              ])),
+              : narrow
+                // 窄：一条横向的场次带。分组在这种形态里没有意义
+                // （一行放不下一个组头），所以只平铺。
+                ? visibleRows.map(row => h('div', {
+                  key: row.id,
+                  style: {
+                    flex: '0 0 176px', width: 176, display: 'flex', alignItems: 'stretch',
+                    borderRadius: 10, overflow: 'hidden',
+                    background: row.id === selected ? C.ink750 : 'transparent',
+                    border: `1px solid ${row.id === selected ? C.rule : 'transparent'}`,
+                  },
+                }, [
+                  h('button', {
+                    key: 'b',
+                    style: {
+                      flex: '1 1 auto', minWidth: 0, textAlign: 'left', cursor: 'pointer',
+                      padding: '8px 10px', border: 'none', background: 'transparent',
+                      fontFamily: F.ui, color: row.id === selected ? C.bone : C.boneDim,
+                    },
+                    onClick: () => setSelected(row.id),
+                  }, [
+                    h('div', {
+                      key: 't',
+                      style: { fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+                    }, row.title),
+                    h('div', {
+                      key: 'm',
+                      style: { ...S.mono, fontSize: 10, color: C.boneFaint, marginTop: 4 },
+                    }, rowMeta(row, true)),
+                  ]),
+                  h('button', {
+                    key: 'x',
+                    title: row.archived ? '取消归档' : '归档这场面试',
+                    'aria-label': row.archived ? '取消归档' : '归档这场面试',
+                    style: {
+                      flex: '0 0 auto', cursor: 'pointer', border: 'none', background: 'transparent',
+                      color: C.boneFaint, fontSize: 10, padding: '0 6px',
+                    },
+                    onClick: () => archiveRow(row),
+                  }, row.archived ? '取出' : '归档'),
+                ]))
+                // 宽：按岗位分组。同一岗位的几场聚在一起，
+                // 这才是「整理」——一列平铺的「面试 2026-11-16」谁也认不出来。
+                : groups.map(group => h('div', { key: group.key, style: { marginBottom: 12 } }, [
+                  h('div', {
+                    key: 'gh',
+                    style: {
+                      ...S.eyebrow, fontSize: 10, padding: '2px 8px 6px', display: 'flex', gap: 8,
+                      color: C.boneFaint,
+                    },
+                  }, [
+                    h('span', { key: 'n', style: { color: C.boneDim } }, group.label),
+                    h('span', { key: 'c' }, `${group.items.length} 场`),
+                  ]),
+                  group.items.map(row => h('div', {
+                    key: row.id,
+                    style: {
+                      display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4,
+                      borderRadius: 10,
+                      background: row.id === selected ? C.ink750 : 'transparent',
+                      border: `1px solid ${row.id === selected ? C.rule : 'transparent'}`,
+                    },
+                  }, [
+                    h('button', {
+                      key: 'b',
+                      style: {
+                        flex: '1 1 auto', minWidth: 0, textAlign: 'left', cursor: 'pointer',
+                        padding: '10px 11px', border: 'none', background: 'transparent',
+                        fontFamily: F.ui, color: row.id === selected ? C.bone : C.boneDim,
+                      },
+                      onClick: () => setSelected(row.id),
+                    }, [
+                      h('div', {
+                        key: 't',
+                        style: { fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+                      }, row.title),
+                      h('div', {
+                        key: 'm',
+                        style: { ...S.mono, fontSize: 10, color: C.boneFaint, marginTop: 4 },
+                      }, rowMeta(row, false)),
+                    ]),
+                    h('button', {
+                      key: 'x',
+                      title: row.archived ? '取消归档' : '归档这场面试',
+                      'aria-label': row.archived ? '取消归档' : '归档这场面试',
+                      style: {
+                        flex: '0 0 auto', cursor: 'pointer', border: 'none', background: 'transparent',
+                        color: C.boneFaint, fontSize: 10, padding: '0 8px',
+                      },
+                      onClick: () => archiveRow(row),
+                    }, row.archived ? '取出' : '归档'),
+                  ])),
+                ])),
           ]),
 
           // 主区
           h('div', {
             key: 'k24',
-            style: tab === 'live'
+            style: {
+              ...S.main,
+              // 窄：内边距收一点，把宽度还给舞台。
+              ...(narrow ? { padding: 14 } : {}),
               // 面试页**吃满视口**：舞台撑开，速记在右栏内部滚。
               // 整页滚动会把视频区缩成一条——那正是这一版要消灭的。
-              ? { ...S.main, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
-              : S.main,
+              //
+              // 这里必须用 `overflowY` 长写，**不能**再叠一个 `overflow` 简写：
+              // 简写和长写同时出现在一个 style 里，React 每次重渲染都要
+              // 报一条 warning——而「React 警告 0 条」是这一版的红线。
+              ...(tab === 'live' ? { display: 'flex', flexDirection: 'column', overflowY: 'hidden' } : {}),
+            },
           }, [
             session === undefined
               ? h('div', {key: 'k25',  style: { ...S.hint, padding: 60, textAlign: 'center' } }, '还没有面试。先新建一场，或者从左边选一场。')
@@ -2299,7 +3781,7 @@ window.__ModuleLoader__.load({
                 : tab === 'live'
                   ? h(LiveView, { key: 'live', session, config, onChanged: refreshAll, notify })
                   : h(ReportView, { key: 'report', session, config, onChanged: refreshAll, notify }),
-            sessionPoll.error !== undefined
+            sessionPoll.error !== undefined && !sessionGone
               ? h('div', {key: 'k26',  style: { ...S.hint, color: C.amber, marginTop: 12 } }, `读不到会话状态：${sessionPoll.error}`)
               : null,
           ]),
@@ -2318,6 +3800,10 @@ window.__ModuleLoader__.load({
         h('rect', { key: 'a', x: 2, y: 3, width: 16, height: 14, rx: 2.5, stroke: 'currentColor', strokeWidth: 1.5 }),
         h('circle', { key: 'b', cx: 7.5, cy: 12, r: 2.6, fill: 'currentColor', opacity: 0.85 }),
         h('circle', { key: 'c', cx: 12.5, cy: 12, r: 2.6, stroke: 'currentColor', strokeWidth: 1.5 }),
+        // 这个红点是**宿主侧边栏**里的图标，不是面板的一部分——
+        // 它不在面板根节点里，拿不到主题变量；而且 SVG 的 fill 是
+        // 表现属性，不认 var()。所以这里只能是字面值，
+        // 也因此**不随主题变化**（侧边栏归宿主管）。
         h('circle', { key: 'd', cx: 10, cy: 5.4, r: 1.3, fill: '#E0563F' }),
       ])
     }

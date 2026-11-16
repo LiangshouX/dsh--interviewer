@@ -99,6 +99,35 @@ target: <仓库绝对路径>/release/dsh-interviewer-<version>.tgz
 
 助手调 `interview_finish` 写报告，面板「报告」页显示。
 
+## 桌面端的摄像头：为什么需要 ffmpeg
+
+DSH 桌面端（Electron）**只放行纯音频的媒体请求**，摄像头在主进程就被拒了——
+请求压根没走到 Windows 的隐私设置，所以**改系统设置没用**。
+
+插件的 Host 半边跑在 Node 宿主进程里，那里没有这道闸门。于是桌面端的摄像头
+改成 **Host 侧用 ffmpeg 直采**：Host 打开设备，把画面以 MJPEG 流推给面板，
+`<img>` 直接吃；录像在 Host 侧直接落盘到这场面试的卷宗目录。
+
+**ffmpeg 不是系统自带，也不是 DSH 自带**——它是独立的第三方程序，新机器上大概率没有。
+
+```bash
+winget install Gyan.FFmpeg      # Windows
+brew install ffmpeg             # macOS
+```
+
+没装也能继续：插件会如实说「这台机器没有摄像头采集程序」并告诉用户怎么装，
+**不会**说成「摄像头坏了」。麦克风、键盘提问、文字回答、报告全都照常。
+
+装完有三种指定方式（按优先级）：
+
+| 方式 | 怎么做 |
+|---|---|
+| 配置 | 在 `cordis.patch.yml` 里写 `config.ffmpegPath: 'D:\\ProgramFils\\ffmpeg\\bin\\ffmpeg.exe'` |
+| 环境变量 | `DSH_FFMPEG_PATH` 指向 `ffmpeg.exe` |
+| 放常见位置 | `D:\ProgramFils\ffmpeg\bin\`、`C:\ffmpeg\bin\` 等，插件会自己认 |
+
+> 改完 `config.ffmpegPath` 或装完 ffmpeg，要**重启 DSH**——Host 半边不热重载。
+
 ## 语音识别怎么配
 
 插件的识别链路是**三级继承**，逐级向下：
@@ -279,6 +308,9 @@ node scripts/pack.mjs       # 打包 release/*.tgz
 - **PDF 解析是尽力而为**。扫描件（图片型简历）读不出文字，插件会明说并要求粘贴。
 - **JD 抓取不做反爬**。登录墙、验证码、前端渲染的站点会抓不到——此时走手动兜底。
 - **摄像头/麦克风需要权限**，且页面要在安全上下文里（Electron 或 localhost）。
+- **桌面端的摄像头要额外装 ffmpeg**（Electron 的权限闸门只放行音频，摄像头走 Host 侧
+  ffmpeg 直采）。没装时面试照常，只是没有画面和录像——见上文「桌面端的摄像头」。
+- **摄像头是独占设备**：浏览器的摄像头和 Host 的摄像头不能同时开。
 
 ## License
 

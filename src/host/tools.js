@@ -252,6 +252,110 @@ export function registerTools(ctx, service) {
       async () => ({ sessions: await service.listSessions() }),
     ),
     tool(
+      'interview_save_jd',
+      '把岗位描述（JD）正文写进一场面试。抓网页抓到正文后调它——正文会落到这场面试的卷内，标题也会按公司·岗位重新提炼。',
+      {
+        sessionId: { type: 'string', description: '面试会话 id；省略则用最近一场。' },
+        text: { type: 'string', description: 'JD 正文全文。', required: true },
+        url: { type: 'string', description: '这个 JD 的来源链接（可选）。' },
+      },
+      async args => {
+        const sessionId = args.sessionId ?? service.selectedSessionId
+        if (typeof sessionId !== 'string' || sessionId === '') {
+          throw new Error('没指定是哪一场面试——先调用 interview_list_sessions 看看有哪些场次')
+        }
+        const saved = await service.setJd(sessionId, { text: args.text, url: args.url })
+        const state = await service.getState(sessionId)
+        return {
+          sessionId,
+          chars: saved.chars,
+          title: state.session.title,
+          position: state.session.position ?? '',
+          company: state.session.company ?? '',
+        }
+      },
+    ),
+    tool(
+      'interview_archive_session',
+      '归档（或取消归档）一场面试。归档只是把它从日常列表里收起来，内容、报告、底稿都还在。',
+      {
+        sessionId: { type: 'string', description: '面试会话 id；省略则用最近一场。' },
+        archived: { type: 'boolean', description: 'true 归档，false 取消归档。', required: true },
+      },
+      async args => {
+        const sessionId = args.sessionId ?? service.selectedSessionId
+        if (typeof sessionId !== 'string' || sessionId === '') {
+          throw new Error('没指定是哪一场面试——先调用 interview_list_sessions 看看有哪些场次')
+        }
+        const session = await service.setArchived(sessionId, args.archived === true)
+        return { sessionId, archived: session.archived === true, title: session.title }
+      },
+    ),
+    tool(
+      'interview_list_resumes',
+      '列出简历库里的简历。简历不用每场面试都重传——存一次，之后直接选用。',
+      {},
+      async () => ({ resumes: await service.listResumes() }),
+    ),
+    tool(
+      'interview_save_resume',
+      '把一份简历存进简历库，或者把某场面试里的简历存进库。存的是可复用的模板——选用到某场面试时会另存一份快照进卷内。',
+      {
+        text: { type: 'string', description: '简历正文；省略时从 sessionId 那场面试里取。' },
+        sessionId: { type: 'string', description: '要从哪场面试里取简历（可选）。' },
+        title: { type: 'string', description: '这份简历的标题（可选）。' },
+      },
+      async args => {
+        if (typeof args.text === 'string' && args.text.trim() !== '') {
+          return { resume: await service.saveResume({ text: args.text, title: args.title }) }
+        }
+        const sessionId = args.sessionId ?? service.selectedSessionId
+        if (typeof sessionId !== 'string' || sessionId === '') {
+          throw new Error('既没给简历正文，也没指定从哪场面试取——两边都得有一个')
+        }
+        return { resume: await service.saveResumeFromSession(sessionId, args.title) }
+      },
+    ),
+    tool(
+      'interview_apply_resume',
+      '把简历库里的一份简历用到某场面试上（会在卷内留一份快照）。',
+      {
+        resumeId: { type: 'string', description: '简历库里的简历 id。', required: true },
+        sessionId: { type: 'string', description: '面试会话 id；省略则用最近一场。' },
+      },
+      async args => {
+        const sessionId = args.sessionId ?? service.selectedSessionId
+        if (typeof sessionId !== 'string' || sessionId === '') {
+          throw new Error('没指定是哪一场面试——先调用 interview_list_sessions 看看有哪些场次')
+        }
+        const applied = await service.applyResume(sessionId, args.resumeId)
+        return { sessionId, resumeId: args.resumeId, chars: applied.chars }
+      },
+    ),
+    tool(
+      'interview_delete_resume',
+      '从简历库里删掉一份简历。已经建好的面试不受影响——它们各自存着快照。',
+      {
+        resumeId: { type: 'string', description: '简历 id。', required: true },
+      },
+      async args => await service.deleteResume(args.resumeId),
+    ),
+    tool(
+      'interview_workspace_root',
+      '查看卷宗库（工作区根）在哪儿、为什么是它：路径、来源（配置 / 面板里选的 / 默认）与理由。',
+      {},
+      async () => ({ workspaceRoot: await service.location() }),
+    ),
+    tool(
+      'interview_set_workspace_root',
+      '把卷宗库（工作区根）换到另一个目录。给 migrateFrom 时会把那个目录里的会话与档案**复制**过去（复制，不是移动，老目录原样保留）。',
+      {
+        path: { type: 'string', description: '新的工作区根绝对路径。', required: true },
+        migrateFrom: { type: 'string', description: '要搬过来的旧工作区根绝对路径（可选）。' },
+      },
+      async args => await service.setWorkspaceRoot(args.path, args.migrateFrom),
+    ),
+    tool(
       'interview_list_profiles',
       '列出所有岗位档案（考点基线）。同一个岗位第二次面试时，先看看这里有没有现成的清单可以继承。',
       {},

@@ -290,10 +290,46 @@ async function checkPerformance() {
   }
 }
 
+/**
+ * 布局闸门。
+ *
+ * **为什么要有它。** 面板被塞进**别人的**应用里，宿主给多宽不由我们决定：
+ * 桌面版 DSH 里能分到 1200px，网页版侧栏里可能只有 250px。以前截图预设
+ * 全是 1600px 的宽屏，于是「舞台被压成 0 宽、按钮点不到」这种事
+ * 只能在真机上撞见。
+ *
+ * 这个闸门在 8 个宽度下渲染面板，断言「没横向溢出、舞台够宽、
+ * 权限按钮点得到、提问条不压住按钮」——全是**用户能不能用**，
+ * 不是 DOM 长什么样。没装 playwright 时跳过而不是失败。
+ */
+async function checkLayout() {
+  const path = join(ROOT, 'scripts', 'layout-check.mjs')
+  if (!existsSync(path)) {
+    note('scripts/layout-check.mjs 不存在：布局闸门无法运行')
+    return
+  }
+  const result = spawnSync(process.execPath, [path, '--check'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    timeout: 600000,
+  })
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
+  if (/跳过：/.test(output) && result.status === 0) {
+    console.log('· 布局闸门跳过')
+    return
+  }
+  if (result.status !== 0) {
+    note(`布局闸门未通过：\n${output.split('\n').filter(line => line.trim() !== '').slice(-12).join('\n')}`)
+    return
+  }
+  console.log(output.trim())
+}
+
 await checkPluginHalf()
 await checkSyntax()
 await checkClient()
 await checkPerformance()
+await checkLayout()
 
 // ── 5. 构建或校验 ──────────────────────────────────────────────────────────
 if (!onlyCheck) {

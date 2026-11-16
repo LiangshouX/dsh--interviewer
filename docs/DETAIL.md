@@ -5,7 +5,7 @@
 ```
 <workspaceRoot>/                        ← 一个总根，例如 D:\DSH-INTERVIEW-ROOT
   workspaces/<session-id>/              ← 一场面试 = 一个子目录
-    session.json       元信息：标题、角色、状态、时间戳
+    session.json       元信息：标题、角色、状态、时间戳、岗位/公司、归档标记
     resume.txt         简历正文（纯文本）
     jd.txt             JD 正文（纯文本）
     jd.json            JD 来源：链接、抓取时间、分段、告警
@@ -14,11 +14,45 @@
     report.md          事后分析报告
     recordings/        录像与录音
   profiles/<profile-id>/profile.json    ← 岗位档案
+  resumes/<resume-id>/                  ← 简历库（可复用的模板）
+    resume.txt        简历正文
+    meta.json         标题、字数、创建/更新时间
 ```
 
-**一个总根，不要散落。** `workspaceRoot` 留空则自动（用户主目录下的
-`DSH-INTERVIEWER/`），也可以指到 D 盘这类大盘。面板顶部显示当前根路径，
-悬停能看到**为什么是这个目录**（`describeWorkspaceRoot()` 返回来源与理由）。
+**一个总根，不要散落。** 面板顶部显示当前根路径，悬停能看到**为什么是这个目录**
+（`describeWorkspaceRoot()` 返回来源与理由）。
+
+根目录的来源有三种，优先级从高到低：
+
+| 来源 | 含义 | 怎么来的 |
+|---|---|---|
+| `config` | 插件配置写死了 | `cordis.patch.yml` 的 `workspaceRoot`（用户的 layer 也算） |
+| `settings` | 面板里用「浏览…」选过 | 存到 profile 目录的 `dsh-interviewer.json`（`DSH_PROFILE_DIR` → `<profile>/dsh-interviewer.json`，否则 `~/.dsh/dsh-interviewer/settings.json`） |
+| `default` | 两处都没说 | 自动挑：Windows 上**优先非系统盘**（遍历 D…Z，跳过系统盘，取 `D:\DSH-INTERVIEWER`）；没有别的盘才退回家目录下的 `DSH-INTERVIEWER/` |
+
+**面板里的「浏览…」** 走宿主原生目录选择器，不自造文件对话框。
+宿主的能力 seam 是 `ctx.directoryPicker`：
+
+```js
+const cap = ctx.get('directoryPicker').capability()
+// {kind: 'native', pick(signal)}  → 弹系统对话框，返回绝对路径或 null（取消）
+// {kind: 'browse', list, createDirectory} → 只能逐级列目录，没有「一次弹窗」
+const path = await cap.pick(new AbortController().signal)
+```
+
+两个必须记住的坑：
+
+- **服务名不是 `directoryPickerController`。** 那只是宿主给「远程调用者」用的
+  远端控制器名，宿主自己调它会走远端通道，拿到 undefined。
+- **`pick(signal)` 必须传 AbortSignal。** 宿主 native 后端第一件事就是读
+  `signal.aborted`；不传就会以 `Cannot read properties of undefined` 失败，
+  看起来像「选择器坏了」，其实是调用姿势不对。传了还能顺手兜底：
+  用户走开时把对话框关掉，不让它永远挂着。
+
+宿主只有 `browse` 能力时如实回报，并给出手动填绝对路径的出路。
+选完立刻生效——有效根每次重算，不缓存。切根时如果旧根里有卷宗，通知条给一个
+「搬过去」动作：迁移是**复制**不是移动（`fs.cp`），旧目录原样保留。
+配置里写死了 `workspaceRoot` 时，面板改动只给 warning，不偷偷改配置。
 
 会话 id 形如 `iv-20261116053012-a3f1`，只允许 `[A-Za-z0-9_-]`——
 它是路径片段，必须挡住路径穿越。
@@ -239,18 +273,28 @@ fetch(url, {redirect: follow, UA: 桌面 Chrome, Accept-Language: zh-CN})
    的画面框**，换成有设计的「未接通」状态（暗场径向渐变 + 姓名 monogram +
    仍在跳的电平表 / REC / 计时），不塌成黑框。
 
-### 9.2 权限：主动申请，不是甩错误
+### 9.2 权限：分开申请，如实说是谁挡的
 
-拿不到摄像头是常事。客户端的契约：
+**宿主的实情**（已从 `app.asar` 读实）：DSH 桌面端的 `installMicrophonePermissions`
+只放行 `mediaTypes === ['audio']` 的**纯音频**请求；`setPermissionCheckHandler`
+对 `mediaType !== 'audio'` 一律返回 false。所以：
 
-1. `navigator.permissions.query({name:'camera'|'microphone'})` 先探状态；
-2. `prompt` → `getUserMedia` 弹系统对话框（**这就是申请**）；
-3. `denied` → 明说「系统已记住拒绝」，指出「在系统设置里放行后会自动接上」，
-   并给「重新检测授权状态」按钮；
-4. `permissions.query()` 的 `onchange` 变到 `granted` → **自动重连**，
-   用户在系统设置里放行后不用再点一次；
-5. 四种原因分开说：`NotAllowedError`（被拒）/ `NotFoundError`（没设备）/
-   `NotReadableError`（被占用）/ `SecurityError`（页面不安全）。
+- 「摄像头 + 麦克风」**一起**申请 → 直接被拒，**而且不弹系统窗口**；
+- `navigator.permissions.query({name:'camera'})` 恒为 `denied`。
+
+客户端的做法：
+
+1. **先一起请，再分开请。** 浏览器里一次弹窗就够；桌面端一起请会被拒，
+   于是再**分开**试：先 audio-only（能过），再 video-only（会被挡）。
+2. **按轨合并，别重建流。** 合并流用 `new MediaStream(tracks)`，构造失败
+   退回 `audio ?? video`；**补摄像头时用 `existing.addTrack()`**——
+   重建整条流会把在用的麦克风打断。
+3. **分开报错。** 桌面端说「麦克风已接上；摄像头被 DSH 桌面端挡下了，
+   改 Windows 设置也没用」；浏览器端才提示地址栏权限图标 / 隐私设置。
+   **旧文案「系统已记住拒绝……去系统设置里放行」在桌面端是无效指引。**
+4. **舞台不许塌成黑框**：`hasVideo` 按 `getVideoTracks().length > 0` 判断，
+   只看流存在的话，只有麦克风时舞台是黑的。
+5. **录音格式跟着轨走**：有视频轨 `video/webm`，纯音频 `audio/webm`。
 
 摄像头与麦克风**分开**处理——一方被拒不该拖垮另一方。
 
@@ -259,3 +303,62 @@ fetch(url, {redirect: follow, UA: 桌面 Chrome, Accept-Language: zh-CN})
 `getState` 只回传字数（`resumeChars` / `jdChars`），正文走单独的
 `GET sessions/<id>/documents`。原因：面板在面试中每 1.5 秒轮询一次，
 简历几十 KB，每次传一遍就是持续的反序列化开销；而正文只有「准备」页用得上。
+
+**正文回来时怎么发现**：会话状态里的字数变化就是指纹——变了才去取一次正文
+（`lastDocFingerprint`），而不是每 6 秒白拉几十 KB。
+
+---
+
+## 10. 简历库：存一次，不是每场都传
+
+简历不会每场面试都变。所以简历单独存在工作区里（`resumes/<id>/`），
+每场面试只**引用**它。
+
+**库里那份是「可复用的模板」，卷内那份是「这一场的事实」。**
+选用时把正文**快照**进会话目录（`setResume`），并把 `resumeId` 记到
+`session.json`——简历后来改了，历史面试的复盘依据也不能跟着变。
+删库里的原件，**不影响**已经用过的场次。
+
+简历 id 形如 `rs-20261116120000-1a2b`，只允许 `[A-Za-z0-9]`——
+它和会话 id 一样是路径片段，必须挡住路径穿越。
+
+列表接口只回元信息（标题、字数、时间），正文单独取——
+`GET resumes` 每 15 秒轮询一次，带上正文就是白拉几十 KB。
+
+## 11. 场次整理：归档与分组
+
+列表是**追加**的历史，所以要给用户整理的办法：
+
+- **归档是「收起来」，不是「删掉」。** 只改 `session.json` 里的 `archived`
+  标记，内容、报告、底稿一样都在；取消归档时把 `archivedAt` 一起抹掉，
+  别留一个「归档过但没归档」的时间戳。
+- **分组按岗位，不按标题。** 标题是给人看的（随时能改），岗位是给列表
+  分组的：同一岗位的几场要聚在一起；认不出岗位的归到「未整理」垫底。
+  列表接口因此多返回 `position` / `company`。
+- **标题提炼**（`deriveJobTitle`）是**本地启发式**：先找「公司：」「岗位：」
+  这种明写，再找已知大厂名与岗位词。认不出就**留空**，让用户手填——
+  硬猜出来的岗位名比空着更糟。而且只覆盖**还没被用户改过**的默认标题
+  （`/^面试 \d{4}-\d{2}-\d{2}$/`），用户改过的标题不许被覆盖。
+
+## 12. JD 抓不到：请助手去拿
+
+直连抓网页最常挂在三件事上：登录墙、验证码、前端渲染的正文。
+宿主里的助手**有浏览器**，能把页面真的打开、看完、把正文抄下来。
+
+派单走宿主的会话接口：
+
+```js
+const controller = ctx.get('sessionController')
+await controller.prompt({
+  requestId: `jd-${sessionId}-${Date.now()}`,
+  sessionId: hostSessionId,           // 默认最近活跃的那个对话
+  mode: 'queue',
+  content: [{ type: 'text', text: '请帮我抓取这个岗位 JD：… 然后调用 interview_save_jd …' }],
+})
+```
+
+请求发在**当前 DSH 对话**里——用户看得见、也能插话，不是后台偷偷跑。
+助手拿到正文后调 `interview_save_jd` 写回这场面试，面板靠字数指纹发现它。
+
+宿主没有 `sessionController` 时，接口要**如实说**并给出下一步
+（手动粘贴正文），不能静默失败。

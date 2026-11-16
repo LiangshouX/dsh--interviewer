@@ -5,6 +5,7 @@ build/
 release/
 .tmp-smoke/
 .tmp-test/
+.tmp-camtest/
 *.log
 .DS_Store
 Thumbs.db

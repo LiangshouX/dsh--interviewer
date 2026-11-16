@@ -17,9 +17,13 @@
  */
 import { API_PREFIX } from './paths.js'
 import { resolveAsrConfig, transcribe } from './asr.js'
+import { FRAME_BOUNDARY } from './camera.js'
 
 /** Largest JSON body the plugin accepts (resume + JD + a few fields). */
 const MAX_BODY_BYTES = 8 * 1024 * 1024
+
+/** The route the camera preview is streamed on. */
+const CAMERA_STREAM_PATH = '/interviewer/camera/stream'
 
 /** Read one request header. */
 function header(headers, name) {
@@ -123,6 +127,23 @@ export function registerApi(ctx, service) {
         return
       }
       const url = new URL(req.url ?? '/', 'http://dsh.internal')
+
+      // 相机预览流：**不是 JSON**，所以在 JSON 解析之前拦下来。
+      //
+      // 它是 multipart/x-mixed-replace 的长连接，浏览器 `<img src>` 直接吃。
+      // 响应**不能带 content-length**——DSH 桌面端转发请求到宿主时会剥掉
+      // content-length/transfer-encoding，带了长度反而会让浏览器等一个
+      // 永远不会到来的结尾。逐帧 write 就是 chunked。
+      if (url.pathname === CAMERA_STREAM_PATH) {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('method not allowed')
+          return
+        }
+        service.camera.attach(res)
+        return
+      }
+
       const prefix = `${API_PREFIX}/api/`
       if (!url.pathname.startsWith(prefix)) {
         sendJson(res, 404, { ok: false, error: '未知接口' })
@@ -194,11 +215,23 @@ async function readResource(service, segments, query) {
     if (rest.length === 0) return { profiles: await service.listProfiles() }
     return { profile: await service.getProfile(rest[0]) }
   }
+  if (head === 'resumes') {
+    if (rest.length === 0) return { resumes: await service.listResumes() }
+    return { resume: await service.getResume(rest[0]) }
+  }
+  if (head === 'host-sessions') {
+    return { sessions: await service.listHostSessions() }
+  }
   if (head === 'asr') {
     return resolveAsrConfig(service)
   }
   if (head === 'transcript') {
     return { transcript: await service.getTranscript(query.session ?? '') }
+  }
+  if (head === 'camera') {
+    if (rest.length === 0) return service.cameraStatus()
+    if (rest[0] === 'devices') return service.cameraDevices()
+    throw new Error(`未知的相机读取操作：${rest.join('/')}`)
   }
   throw new Error(`未知的读取资源：${segments.join('/')}`)
 }
@@ -214,6 +247,50 @@ async function runAction(service, segments, body) {
   const [head, ...rest] = segments
 
   switch (head) {
+    case 'config': {
+      // 工作区根：面板上「浏览…」走的两步。
+      //
+      //   POST /config/workspace-root/pick  弹宿主原生目录选择器
+      //   POST /config/workspace-root       切到某个目录（可选带旧根来搬数据）
+      if (rest[0] === 'workspace-root') {
+        if (rest[1] === 'pick') {
+          return { picker: await service.pickWorkspaceRoot() }
+        }
+        if (rest[1] === undefined) {
+          return await service.setWorkspaceRoot(body.path, body.migrateFrom)
+        }
+      }
+      throw new Error(`未知的配置操作：${rest.join('/')}`)
+    }
+    case 'camera': {
+      // 相机的四个动作：开机、关机、开始录、停录。
+      //
+      // **为什么录像在这里落盘，而不是像浏览器录像那样上传。**
+      // 画面是 Host 采的，Host 写文件是最短的路——没有 base64、没有
+      // 几十兆的 JSON 传输，录完直接就在这场面试的卷宗目录里。
+      const action = rest[0]
+      if (action === 'start') {
+        const started = await service.startCamera({ device: body.device })
+        if (!started.ok) throw new Error(started.error ?? '摄像头起不来')
+        return started
+      }
+      if (action === 'stop') {
+        return service.stopCamera()
+      }
+      if (action === 'record') {
+        const sessionId = String(body.sessionId ?? '')
+        if (sessionId === '') throw new Error('录像要先指定是哪一场面试。')
+        if (rest[1] === 'start') {
+          const started = await service.startCameraRecording(sessionId)
+          if (!started.ok) throw new Error(started.error ?? '录像开不了')
+          return started
+        }
+        if (rest[1] === 'stop') {
+          return await service.stopCameraRecording(sessionId)
+        }
+      }
+      throw new Error(`未知的相机操作：${rest.join('/')}`)
+    }
     case 'sessions': {
       if (rest.length === 0) {
         return { session: await service.createSession(body) }
@@ -241,6 +318,8 @@ async function runAction(service, segments, body) {
           return { session: await service.updateSession(sessionId, { status: 'running', startedAt: Date.now() }) }
         case 'finish':
           return { session: await service.updateSession(sessionId, { status: 'done', endedAt: Date.now() }) }
+        case 'archive':
+          return { session: await service.setArchived(sessionId, body.archived === true) }
         default:
           throw new Error(`未知的会话操作：${action}`)
       }
@@ -249,7 +328,36 @@ async function runAction(service, segments, body) {
       if (rest[0] === 'fetch') {
         return await service.fetchJd(String(body.url ?? ''))
       }
+      if (rest[0] === 'request-agent') {
+        return await service.requestAgentJd(
+          String(body.sessionId ?? ''),
+          String(body.url ?? ''),
+          body.hostSessionId,
+        )
+      }
+      if (rest[0] === 'save') {
+        return await service.setJd(String(body.sessionId ?? ''), body)
+      }
       throw new Error(`未知的 JD 操作：${rest.join('/')}`)
+    case 'resumes': {
+      if (rest.length === 0) {
+        if (body.id === undefined && body.text === undefined && body.sessionId !== undefined) {
+          // 把这场面试里的简历存进库
+          return { resume: await service.saveResumeFromSession(String(body.sessionId), body.title) }
+        }
+        return { resume: await service.saveResume(body) }
+      }
+      const resumeId = rest[0]
+      const action = rest[1]
+      if (action === undefined) {
+        // 把库里的简历用到某场面试上（存快照）
+        return await service.applyResume(String(body.sessionId ?? ''), resumeId)
+      }
+      if (action === 'delete') {
+        return await service.deleteResume(resumeId)
+      }
+      throw new Error(`未知的简历库操作：${action}`)
+    }
     case 'resume':
       if (rest[0] === 'extract') {
         return service.extractResume({

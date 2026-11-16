@@ -23,14 +23,15 @@
  * 失效。这样界面、agent 工具、报告三边永远看到同一份事实。
  */
 import { join, resolve } from 'node:path'
-import { mkdir, stat, writeFile } from 'node:fs/promises'
-import { ensureDataRoot, resolveConfig } from './paths.js'
+import { cp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
+import { describeWorkspaceRoot, ensureDataRoot, defaultWorkspaceRoot, readSettings, writeSettings, resolveConfig } from './paths.js'
 import {
   appendJsonl, isDirectory, isFile, listDirIfExists, readJsonIfExists, readJsonl,
   readTextIfExists, resolveWithin, writeJsonAtomic, writeTextAtomic,
 } from './fsx.js'
 import { fetchJobDescription } from './jd.js'
 import { extractTextFromUpload } from './extract.js'
+import { CameraService } from './camera.js'
 
 /** Session lifecycle. */
 export const SESSION_STATUS = {
@@ -56,8 +57,43 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
  */
 const PROFILE_ID_PATTERN = /^[A-Za-z0-9一-鿿][A-Za-z0-9_一-鿿-]{0,80}$/
 
+/**
+ * A resume id is a path segment too, so it gets the same treatment.
+ */
+const RESUME_ID_PATTERN = /^rs-[A-Za-z0-9]{1,32}-[A-Za-z0-9]{1,8}$/
+
 /** Maximum accepted resume / JD size (characters). */
 const MAX_DOC_CHARS = 200000
+
+/**
+ * How long the native directory chooser may stay open (milliseconds).
+ *
+ * The dialog waits for a human. Someone who walks away must not leave a
+ * child process and a modal window parked forever, so the pick is aborted
+ * after this long and the caller is told what happened.
+ */
+const PICK_TIMEOUT_MS = 5 * 60 * 1000
+
+/**
+ * Read the path out of whatever the host's picker returned.
+ *
+ * **为什么要这么啰嗦。** 宿主的远端接口把结果包成 `{ ok, value }`，
+ * 而进程内的服务直接返回路径本身；用户取消时又可能是 `null`。
+ * 三种形状都见过，所以三种都认——认错了就会把 `undefined` 当成路径存进去。
+ *
+ * @param {any} result
+ * @returns {string|null}
+ */
+function unwrapPickedPath(result) {
+  if (result === null || result === undefined) return null
+  if (typeof result === 'string') return result.trim() === '' ? null : result.trim()
+  if (typeof result === 'object') {
+    if (result.ok === false) return null
+    const value = result.value
+    if (typeof value === 'string') return value.trim() === '' ? null : value.trim()
+  }
+  return null
+}
 
 /**
  * How many transcript rows the panel gets in one poll.
@@ -80,9 +116,43 @@ export class InterviewService {
     this.ctx = deps.ctx
     /** Session id the UI last touched; used as the default for agent calls. */
     this.selectedSessionId = undefined
+    /**
+     * The Host-side camera.
+     *
+     * **为什么在 Host 侧采摄像头。** DSH 桌面端的 Electron 权限处理器只放行
+     * 纯音频请求，摄像头在主进程就被拒了——改 Windows 设置也没用。但 Host
+     * 半边跑在 Node 宿主进程里，没有那道闸门。
+     *
+     * **它只负责摄像头。** 麦克风仍然走浏览器的 `getUserMedia`——那条路在
+     * 桌面端是通的，没必要重造。
+     */
+    this.camera = new CameraService({ ffmpegPath: this.config.ffmpegPath })
   }
 
   // ── paths ────────────────────────────────────────────────────────────────
+
+  /**
+   * The workspace root in force right now.
+   *
+   * **优先级：配置 > 面板里选的 > 默认。**
+   *
+   * 为什么配置最高：配置文件是「这个环境就该这么放」的硬性约定
+   * （比如一台机器上所有插件共用一个数据盘）；面板里选的是「这台机器上
+   * 我想放哪儿」的用户选择。两者冲突时，按约定来。
+   *
+   * 每次都重新算，而不是在构造时定死——面板改了目录要**立刻**生效，
+   * 不该要求用户重启 DSH。
+   *
+   * @returns {Promise<string>}
+   */
+  async effectiveRoot() {
+    if (this.config.workspaceRootExplicit) return this.config.workspaceRoot
+    const saved = await readSettings()
+    if (typeof saved.workspaceRoot === 'string' && saved.workspaceRoot.trim() !== '') {
+      return saved.workspaceRoot.trim()
+    }
+    return defaultWorkspaceRoot()
+  }
 
   /**
    * The workspace root — the one place all interview data lives.
@@ -90,21 +160,166 @@ export class InterviewService {
    * @returns {Promise<{path: string, source: string, reason: string, exists: boolean, error?: string}>}
    */
   async location() {
-    return describeWorkspaceRoot(this.config.workspaceRoot)
+    const saved = await readSettings()
+    return describeWorkspaceRoot(
+      this.config.workspaceRoot,
+      this.config.workspaceRootExplicit,
+      saved.workspaceRoot,
+    )
   }
 
   /** The directory holding every session — one interview, one subdirectory. */
   async sessionsDir() {
-    const root = await ensureDataRoot(this.config.workspaceRoot)
+    const root = await ensureDataRoot(await this.effectiveRoot())
     if (root.error !== undefined) throw new Error(root.error)
     return join(root.path, 'workspaces')
   }
 
   /** The directory holding every job profile (岗位档案). */
   async profilesDir() {
-    const root = await ensureDataRoot(this.config.workspaceRoot)
+    const root = await ensureDataRoot(await this.effectiveRoot())
     if (root.error !== undefined) throw new Error(root.error)
     return join(root.path, 'profiles')
+  }
+
+  /**
+   * Ask the **host** to show its own directory picker.
+   *
+   * **为什么用宿主的，而不是自己拼一个。** 宿主是 GUI host，它手里有
+   * 原生的目录选择器（Windows 上是 `IFileOpenDialog` 那个「浏览文件夹」）。
+   * 插件自己再造一个（拉起 PowerShell、或者用浏览器的目录选择 API）
+   * 只会得到一个「样子像、但没有权限感」的替代品——用户在系统对话框里
+   * 选路径，才知道这个路径会被写进哪。
+   *
+   * **宿主的服务名是 `ctx.directoryPicker`，不是一个叫
+   * `directoryPickerController` 的东西。** 后者只是宿主给「远程调用者」
+   * 用的远端控制器名字，宿主自己调它会走远端通道，拿到 undefined。
+   * 真正的 seam 是个能力型服务：`capability()` 告诉你它能干什么——
+   *
+   *   - `{kind: 'native', pick(signal)}` → 弹系统选择器，返回绝对路径或 null（取消）
+   *   - `{kind: 'browse', list, createDirectory}` → 只能逐级列目录，没有「一次弹窗」
+   *
+   * 宿主没有这个能力时**如实说没有**，并给出下一步（手动填路径），
+   * 而不是假装成功。
+   *
+   * @returns {Promise<{available: boolean, picked: string|null, reason?: string}>}
+   */
+  async pickWorkspaceRoot() {
+    const seam = this.ctx?.get?.('directoryPicker')
+    if (seam === undefined || seam === null || typeof seam.capability !== 'function') {
+      return { available: false, picked: null, reason: '这个宿主没有提供目录选择器' }
+    }
+    let capability
+    try {
+      capability = seam.capability()
+    } catch (error) {
+      return {
+        available: false,
+        picked: null,
+        reason: error && error.message ? error.message : String(error),
+      }
+    }
+    if (capability === undefined || capability === null) {
+      return { available: false, picked: null, reason: '这个宿主没有提供目录选择器' }
+    }
+    if (capability.kind !== 'native' || typeof capability.pick !== 'function') {
+      // browse 后端只能逐级列目录，没有「一次弹窗选一个」的接口。
+      // 与其做个半吊子，不如说清楚，并给出手动填路径的出路。
+      return {
+        available: false,
+        picked: null,
+        reason: `宿主只提供浏览式目录树（${capability.kind ?? '未知'}），没有系统选择器；请直接把绝对路径填进卷宗库那一栏。`,
+      }
+    }
+    try {
+      // **必须传 signal。** 宿主 native 后端第一件事就是读 `signal.aborted`，
+      // 不传的话它会直接抛 "Cannot read properties of undefined"，
+      // 看起来像选择器坏了，其实是调用姿势不对。
+      //
+      // 这个 signal 是给「对话框一直开着、用户不选」的兜底：
+      // 超时就把子进程里的对话框关掉，不让它永远挂着。
+      const controller = new AbortController()
+      const timer = setTimeout(() => { controller.abort() }, PICK_TIMEOUT_MS)
+      try {
+        const result = await capability.pick(controller.signal)
+        return { available: true, picked: unwrapPickedPath(result) }
+      } finally {
+        clearTimeout(timer)
+      }
+    } catch (error) {
+      return {
+        available: false,
+        picked: null,
+        reason: error && error.message ? error.message : String(error),
+      }
+    }
+  }
+
+  /**
+   * Move the workspace root to another directory.
+   *
+   * **切根之前先确认新目录能用。** 建不出 `workspaces/` 的目录，
+   * 切过去之后整个插件都会瘫——所以先建好再建，再落设置。
+   *
+   * @param {string} path the new absolute root
+   * @param {string} [migrateFrom] copy the data of this root into the new one
+   * @returns {Promise<{workspaceRoot: object, migrated: object, warning?: string}>}
+   */
+  async setWorkspaceRoot(path, migrateFrom = undefined) {
+    const target = String(path ?? '').trim()
+    if (target === '') throw new Error('没给目录')
+    const absolute = resolve(target)
+    const ensured = await ensureDataRoot(absolute)
+    if (ensured.error !== undefined) throw new Error(ensured.error)
+
+    let migrated = { copied: false, sessions: 0, profiles: 0, from: undefined }
+    if (typeof migrateFrom === 'string' && migrateFrom.trim() !== '') {
+      migrated = await this.migrateWorkspaceData(migrateFrom.trim(), absolute)
+    }
+
+    await writeSettings({ workspaceRoot: absolute })
+
+    // 配置里写死了的话，面板这次的选择**不生效**——必须说出来，
+    // 否则用户会以为改好了，结果数据还在老地方。
+    const warning = this.config.workspaceRootExplicit
+      ? '配置文件里写死了工作区根，面板里选的这次不生效：改配置才作数。'
+      : undefined
+    return { workspaceRoot: await this.location(), migrated, ...(warning !== undefined ? { warning } : {}) }
+  }
+
+  /**
+   * Copy a root's data (sessions + profiles) into another root.
+   *
+   * **是复制，不是移动。** 复制完老目录还在，用户确认新目录没问题之后
+   * 自己删；万一复制到一半出问题，老数据还完整地在那儿。
+   *
+   * @param {string} from the old root
+   * @param {string} to the new root
+   * @returns {Promise<{copied: boolean, sessions: number, profiles: number, from: string, error?: string}>}
+   */
+  async migrateWorkspaceData(from, to) {
+    const source = resolve(from)
+    const target = resolve(to)
+    const result = { copied: false, sessions: 0, profiles: 0, from: source }
+    if (source === target) return { ...result, copied: true }
+    try {
+      const ensured = await ensureDataRoot(target)
+      if (ensured.error !== undefined) return { ...result, error: ensured.error }
+      for (const folder of ['workspaces', 'profiles']) {
+        const sourcePath = join(source, folder)
+        if (!isDirectory(sourcePath)) continue
+        await cp(sourcePath, join(target, folder), { recursive: true, force: false })
+        const copied = (await listDirIfExists(join(target, folder))).length
+        if (folder === 'workspaces') result.sessions = copied
+        else result.profiles = copied
+      }
+      return { ...result, copied: true }
+    } catch (error) {
+      return {
+        ...result,
+        error: error && error.message ? error.message : String(error),
+      }
+    }
   }
 
   /**
@@ -145,6 +360,12 @@ export class InterviewService {
         status: meta.status ?? SESSION_STATUS.DRAFT,
         createdAt: meta.createdAt ?? 0,
         updatedAt: meta.updatedAt ?? 0,
+        // **分组靠的是岗位，不是标题。** 标题是给人看的（可以随时改），
+        // 岗位是给列表分组的（同一岗位的几场要聚在一起）。
+        position: meta.position ?? '',
+        company: meta.company ?? '',
+        archived: meta.archived === true,
+        archivedAt: meta.archivedAt ?? 0,
         // **只判断存不存在，不要读内容。** 简历/报告可能有几十 KB，
         // 一次列表读二十场就是白读几 MB——而列表每 6 秒轮询一次。
         hasResume: await isFile(join(dir, 'resume.txt')),
@@ -216,13 +437,142 @@ export class InterviewService {
     const dir = await this.sessionDir(sessionId)
     const meta = await readJsonIfExists(join(dir, 'session.json'))
     if (meta === undefined) throw new Error(`会话不存在：${sessionId}`)
-    const allowed = ['title', 'role', 'status', 'jdUrl', 'startedAt', 'endedAt', 'notes']
+    const allowed = [
+      'title', 'role', 'status', 'jdUrl', 'startedAt', 'endedAt', 'notes',
+      'position', 'company', 'archived', 'archivedAt', 'resumeId',
+    ]
     for (const key of allowed) {
       if (patch[key] !== undefined) meta[key] = patch[key]
     }
+    // 取消归档：把归档时间也抹掉，别留一个「归档过但没归档」的时间戳。
+    if (patch.archived === false) delete meta.archivedAt
     meta.updatedAt = Date.now()
     await writeJsonAtomic(join(dir, 'session.json'), meta)
     return { ...meta, dir }
+  }
+
+  // ── 简历库 ──────────────────────────────────────────────────────────────
+
+  /**
+   * The resume library directory.
+   *
+   * **简历不是每场面试都变的。** 让用户每一场都重新上传同一份简历，
+   * 是把「一次录入」变成「N 次录入」——所以简历单独存在工作区里，
+   * 每场面试只引用它。
+   *
+   * @returns {Promise<string>}
+   */
+  async resumesDir() {
+    const root = await ensureDataRoot(await this.effectiveRoot())
+    if (root.error !== undefined) throw new Error(root.error)
+    return join(root.path, 'resumes')
+  }
+
+  /**
+   * List the saved resumes, newest first.
+   *
+   * @returns {Promise<Array<{id: string, title: string, chars: number, createdAt: number, updatedAt: number}>>}
+   */
+  async listResumes() {
+    const root = await this.resumesDir()
+    const names = await listDirIfExists(root)
+    const rows = []
+    for (const name of names) {
+      if (!RESUME_ID_PATTERN.test(name)) continue
+      const meta = await readJsonIfExists(join(root, name, 'meta.json'))
+      if (meta === undefined) continue
+      rows.push({
+        id: name,
+        title: typeof meta.title === 'string' && meta.title !== '' ? meta.title : name,
+        chars: typeof meta.chars === 'number' ? meta.chars : 0,
+        createdAt: typeof meta.createdAt === 'number' ? meta.createdAt : 0,
+        updatedAt: typeof meta.updatedAt === 'number' ? meta.updatedAt : 0,
+      })
+    }
+    rows.sort((a, b) => b.updatedAt - a.updatedAt)
+    return rows
+  }
+
+  /**
+   * Read one saved resume, with its text.
+   *
+   * @param {string} id
+   * @returns {Promise<{id: string, title: string, text: string, chars: number, createdAt: number, updatedAt: number}>}
+   */
+  async getResume(id) {
+    const dir = await this.resumeDir(id)
+    const meta = await readJsonIfExists(join(dir, 'meta.json'))
+    if (meta === undefined) throw new Error(`简历不存在：${id}`)
+    const text = await readTextIfExists(join(dir, 'resume.txt'))
+    return {
+      id,
+      title: typeof meta.title === 'string' && meta.title !== '' ? meta.title : id,
+      text,
+      chars: typeof meta.chars === 'number' ? meta.chars : text.length,
+      createdAt: typeof meta.createdAt === 'number' ? meta.createdAt : 0,
+      updatedAt: typeof meta.updatedAt === 'number' ? meta.updatedAt : 0,
+    }
+  }
+
+  /**
+   * Save a resume into the library (create or update).
+   *
+   * @param {{id?: string, title?: string, text: string}} input
+   */
+  async saveResume(input = {}) {
+    const text = String(input.text ?? '')
+    if (text.trim() === '') throw new Error('简历是空的，没什么可存')
+    if (text.length > MAX_DOC_CHARS) {
+      throw new Error(`简历太长了（${text.length} 字，上限 ${MAX_DOC_CHARS}）`)
+    }
+    const root = await this.resumesDir()
+    const id = typeof input.id === 'string' && RESUME_ID_PATTERN.test(input.id)
+      ? input.id
+      : makeResumeId()
+    const dir = join(root, id)
+    await mkdir(dir, { recursive: true })
+    const existing = await readJsonIfExists(join(dir, 'meta.json'))
+    const now = Date.now()
+    const meta = {
+      id,
+      title: typeof input.title === 'string' && input.title.trim() !== ''
+        ? input.title.trim()
+        : (existing?.title ?? `简历 ${formatDate(now)}`),
+      chars: text.length,
+      createdAt: typeof existing?.createdAt === 'number' ? existing.createdAt : now,
+      updatedAt: now,
+    }
+    await writeTextAtomic(join(dir, 'resume.txt'), text)
+    await writeJsonAtomic(join(dir, 'meta.json'), meta)
+    return { ...meta }
+  }
+
+  /**
+   * Delete one resume from the library.
+   *
+   * **只删库里的那一份。** 已经建好的面试各自存着**快照**
+   * （会话目录下的 resume.txt），不受影响——历史面试的复盘依据
+   * 不能因为用户清理简历库而消失。
+   *
+   * @param {string} id
+   */
+  async deleteResume(id) {
+    const dir = await this.resumeDir(id)
+    await rm(dir, { recursive: true, force: true })
+    return { deleted: true, id }
+  }
+
+  /**
+   * The directory of one resume, with the id checked.
+   *
+   * @param {string} id
+   * @returns {Promise<string>}
+   */
+  async resumeDir(id) {
+    const key = String(id ?? '').trim()
+    if (!RESUME_ID_PATTERN.test(key)) throw new Error(`简历 id 不合法：${id}`)
+    const root = await this.resumesDir()
+    return join(root, key)
   }
 
   // ── documents ────────────────────────────────────────────────────────────
@@ -239,6 +589,12 @@ export class InterviewService {
     if (trimmed.length > MAX_DOC_CHARS) {
       throw new Error(`简历太长了（${trimmed.length} 字，上限 ${MAX_DOC_CHARS}）`)
     }
+    // 空正文 = 没有简历（同 setJd：别留下「0 字的简历」）。
+    if (trimmed.trim() === '') {
+      await rm(join(dir, 'resume.txt'), { force: true })
+      await this.touch(sessionId)
+      return { chars: 0 }
+    }
     await writeTextAtomic(join(dir, 'resume.txt'), trimmed)
     await this.touch(sessionId)
     return { chars: trimmed.length }
@@ -246,6 +602,9 @@ export class InterviewService {
 
   /**
    * Store the job description text (and where it came from).
+   *
+   * **顺带把标题提炼出来。** JD 一落盘，标题就不该还是「面试 2026-11-16」——
+   * 那行字是给「还没准备」的场次占位的。用户手改过的标题不动。
    *
    * @param {string} sessionId
    * @param {{text: string, url?: string, meta?: object}} input
@@ -256,6 +615,16 @@ export class InterviewService {
     if (trimmed.length > MAX_DOC_CHARS) {
       throw new Error(`JD 太长了（${trimmed.length} 字，上限 ${MAX_DOC_CHARS}）`)
     }
+    // **空正文 = 没有 JD。**
+    //
+    // 写一个空文件会留下「hasJd: true、0 字」的假象——列表里看着有 JD，
+    // 打开却是空白。清空就该真的清空。
+    if (trimmed.trim() === '') {
+      await rm(join(dir, 'jd.txt'), { force: true })
+      await rm(join(dir, 'jd.json'), { force: true })
+      await this.touch(sessionId)
+      return { chars: 0, position: '', company: '', title: '' }
+    }
     await writeTextAtomic(join(dir, 'jd.txt'), trimmed)
     await writeJsonAtomic(join(dir, 'jd.json'), {
       url: typeof input.url === 'string' ? input.url : '',
@@ -264,8 +633,38 @@ export class InterviewService {
       title: input.meta?.title ?? '',
       warnings: input.meta?.warnings ?? [],
     })
+
+    // 标题提炼：只动**还没被用户改过**的标题。
+    const meta = await readJsonIfExists(join(dir, 'session.json'))
+    const derived = deriveJobTitle(trimmed)
+    if (meta !== undefined) {
+      const untouched = typeof meta.title === 'string' && /^面试 \d{4}-\d{2}-\d{2}$/.test(meta.title)
+      const patch = {}
+      if (derived.position !== '') patch.position = derived.position
+      if (derived.company !== '') patch.company = derived.company
+      if (untouched && derived.title !== '') patch.title = derived.title
+      if (Object.keys(patch).length > 0) await this.updateSession(sessionId, patch)
+    }
+
     await this.touch(sessionId)
-    return { chars: trimmed.length }
+    return { chars: trimmed.length, ...derived }
+  }
+
+  /**
+   * Archive or unarchive one session.
+   *
+   * **归档不是删除。** 归档只是把它从日常列表里收起来，内容、
+   * 报告、底稿一样都在，随时能翻出来。
+   *
+   * @param {string} sessionId
+   * @param {boolean} archived
+   */
+  async setArchived(sessionId, archived) {
+    const value = archived === true
+    return this.updateSession(sessionId, {
+      archived: value,
+      archivedAt: value ? Date.now() : undefined,
+    })
   }
 
   /**
@@ -281,6 +680,111 @@ export class InterviewService {
       timeoutMs: this.config.jdFetchTimeoutMs,
       maxChars: this.config.jdMaxChars,
     })
+  }
+
+  /**
+   * The host's own conversations, newest first — the place a JD-fetch
+   * request can be handed to the assistant.
+   *
+   * @returns {Promise<Array<{id: string, title: string, updatedAt: number}>>}
+   */
+  async listHostSessions() {
+    const controller = this.ctx?.get?.('sessionController')
+    if (controller === undefined || controller === null || typeof controller.list !== 'function') {
+      throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
+    }
+    const result = await controller.list({})
+    const items = Array.isArray(result?.items) ? result.items : []
+    return items.map(item => ({
+      id: item.sessionId ?? item.id ?? '',
+      title: item.title ?? '',
+      updatedAt: item.updatedAt ?? 0,
+    }))
+  }
+
+  /**
+   * Hand a JD link to the host's assistant and let **it** fetch the page.
+   *
+   * **为什么要有这条路。** 直接抓网页看着简单，实际最常挂在三件事上：
+   * 登录墙、验证码、前端渲染的正文。宿主里的助手有浏览器，
+   * 能把页面真的打开、看完、把正文抄下来——所以抓不到的时候，
+   * 正确的做法不是让用户复制粘贴，而是**请助手去拿**。
+   *
+   * 请求发在**当前 DSH 对话**里（用户看得见、也能插话），
+   * 助手拿到正文后调 `interview_save_jd` 写回这场面试。
+   *
+   * @param {string} sessionId the interview session the JD belongs to
+   * @param {string} url
+   * @param {string} [hostSessionId] which host conversation to use
+   */
+  async requestAgentJd(sessionId, url, hostSessionId = undefined) {
+    const target = String(url ?? '').trim()
+    if (target === '') throw new Error('没给链接')
+    const controller = this.ctx?.get?.('sessionController')
+    if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
+      throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
+    }
+    let hostSession = undefined
+    if (typeof hostSessionId === 'string' && hostSessionId.trim() !== '') {
+      hostSession = { id: hostSessionId.trim(), title: '' }
+    } else {
+      const sessions = await this.listHostSessions()
+      hostSession = sessions[0]
+    }
+    if (hostSession === undefined || hostSession.id === '') {
+      throw new Error('宿主里还没有任何会话——先在 DSH 里开一个对话，助手才有地方接这个活')
+    }
+    const text = [
+      `请帮我抓取这个岗位 JD：${target}`,
+      '用浏览器打开它（这个页面可能需要登录或前端渲染），把岗位描述的正文完整抄下来，',
+      `然后调用 interview_save_jd 工具，把正文写入面试会话 ${sessionId}（url 填 ${target}）。`,
+      '如果实在拿不到正文，如实说明卡在哪一步。',
+    ].join('\n')
+    await controller.prompt({
+      requestId: `jd-${sessionId}-${Date.now()}`,
+      sessionId: hostSession.id,
+      mode: 'queue',
+      content: [{ type: 'text', text }],
+      // **signal 是必填的第二个参数。** 宿主实现的第一句就是
+      // `signal.throwIfAborted()`——不传就是
+      // 「Cannot read properties of undefined (reading 'throwIfAborted')」，
+      // 看起来像「派单坏了」，其实是调用姿势不对（和目录选择器同源的问题）。
+    }, new AbortController().signal)
+    return {
+      dispatched: true,
+      hostSession: { id: hostSession.id, title: hostSession.title },
+      message: '请求已经发给助手了。在 DSH 对话里能看到它跑，抓到后正文会自动回到这一场面试。',
+    }
+  }
+
+  /**
+   * Put a resume from the library into one session.
+   *
+   * **存的是快照。** 会话目录里留一份当时的正文——简历后来改了，
+   * 历史面试的复盘依据也不能跟着变。库里那份是「可复用的模板」，
+   * 卷内那份是「这一场的事实」。
+   *
+   * @param {string} sessionId
+   * @param {string} resumeId
+   */
+  async applyResume(sessionId, resumeId) {
+    const resume = await this.getResume(resumeId)
+    await this.setResume(sessionId, resume.text)
+    await this.updateSession(sessionId, { resumeId: resume.id })
+    return { resume, chars: resume.text.length }
+  }
+
+  /**
+   * Copy a session's resume into the library.
+   *
+   * @param {string} sessionId
+   * @param {string} [title]
+   */
+  async saveResumeFromSession(sessionId, title = undefined) {
+    const dir = await this.sessionDir(sessionId)
+    const text = await readTextIfExists(join(dir, 'resume.txt'))
+    if (text.trim() === '') throw new Error('这场面试还没有简历，没什么可存')
+    return this.saveResume({ title, text })
   }
 
   /**
@@ -455,6 +959,86 @@ export class InterviewService {
   // ── recordings ───────────────────────────────────────────────────────────
 
   /**
+   * The camera devices this machine has, and whether ffmpeg is there to use them.
+   *
+   * @returns {Promise<object>}
+   */
+  async cameraDevices() {
+    return this.camera.devices()
+  }
+
+  /**
+   * Start the Host-side camera capture.
+   *
+   * @param {{device?: object}} [input]
+   * @returns {Promise<object>}
+   */
+  async startCamera(input = {}) {
+    return this.camera.start(input)
+  }
+
+  /**
+   * Stop the Host-side camera capture.
+   *
+   * @returns {object}
+   */
+  stopCamera() {
+    this.camera.stop()
+    return { ok: true }
+  }
+
+  /**
+   * The camera service state, for the panel.
+   *
+   * @returns {object}
+   */
+  cameraStatus() {
+    return this.camera.status()
+  }
+
+  /**
+   * Start recording the camera into a session's recording folder.
+   *
+   * The file is written by the Host, so the panel's "保存录像" button is not
+   * involved — the recording is already on disk, in the session's dossier.
+   *
+   * @param {string} sessionId
+   * @returns {Promise<object>}
+   */
+  async startCameraRecording(sessionId) {
+    const dir = await this.sessionDir(sessionId)
+    const folder = join(dir, 'recordings')
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const result = this.camera.startRecording(folder, `video-${stamp}`)
+    if (!result.ok) return result
+    await this.touch(sessionId)
+    return result
+  }
+
+  /**
+   * Stop the camera recording and hand back the finished file.
+   *
+   * @param {string} sessionId
+   * @returns {Promise<object>}
+   */
+  async stopCameraRecording(sessionId) {
+    const result = await this.camera.stopRecording()
+    if (!result.ok) return result
+    const dir = await this.sessionDir(sessionId)
+    const name = result.path.split(/[\\/]/u).pop() ?? ''
+    const info = await stat(result.path).catch(() => undefined)
+    await this.touch(sessionId)
+    return {
+      ok: true,
+      name,
+      kind: 'video',
+      bytes: info?.size ?? 0,
+      path: result.path,
+      folder: join(dir, 'recordings'),
+    }
+  }
+
+  /**
    * Store a recording that the browser uploaded.
    *
    * The blob arrives base64-encoded; the file is written verbatim.
@@ -575,6 +1159,13 @@ export class InterviewService {
         endedAt: meta.endedAt ?? 0,
         updatedAt: meta.updatedAt,
         profileId: meta.profileId ?? '',
+        // 岗位与公司：列表靠它们分组，准备页靠它们显示「公司 · 岗位」。
+        position: meta.position ?? '',
+        company: meta.company ?? '',
+        // 这场面试的简历是从库里哪一份拿来的（卷内存的是快照）。
+        resumeId: meta.resumeId ?? '',
+        // 归档标记：主区要能告诉用户「这场已经收起来了」。
+        archived: meta.archived === true,
         dir: meta.dir,
       },
       // revision：内容没变就**不要重新渲染**。
@@ -882,6 +1473,97 @@ function makeSessionId() {
   return `iv-${stamp}-${suffix}`
 }
 
+/** Make a short, sortable resume id. */
+function makeResumeId() {
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
+  const suffix = Math.random().toString(36).slice(2, 6)
+  return `rs-${stamp}-${suffix}`
+}
+
+/**
+ * 岗位词表：从一段 JD 里认出「这是在招什么」。
+ *
+ * **为什么要词表。** JD 正文五花八门，但岗位名几乎总是落在这些词上。
+ * 与其猜结构，不如认词——认不出的就老实说「没提炼出来」。
+ */
+const POSITION_WORDS = [
+  '前端工程师', '后端工程师', '全栈工程师', '客户端工程师', '服务端工程师', '测试开发工程师',
+  '算法工程师', '数据工程师', '运维工程师', '解决方案工程师', '硬件工程师', '嵌入式工程师',
+  '安全工程师', '网络工程师', '软件工程师', '系统工程师', '测试工程师', '安卓工程师', 'iOS工程师',
+  '产品经理', '产品运营', '项目经理', '项目专员', '数据分析师', '数据科学家', '商业分析师',
+  '运营专员', '运营经理', '内容运营', '用户运营', '活动运营', '社群运营',
+  'UI设计师', 'UX设计师', '交互设计师', '视觉设计师', '产品设计师', '平面设计师', '设计负责人',
+  '测试', '人力资源', '招聘', '财务', '法务', '行政', '销售', '商务', '市场', '品牌', '公关',
+  '架构师', '技术经理', '研发经理', '实习生', '管培生', '顾问', '专家',
+  '工程师', '开发', '经理', '总监', '主管', '专员', '负责人', '助理',
+]
+
+/** 常见公司名后缀：中文 JD 里公司名几乎都长这样。 */
+const COMPANY_SUFFIX = /(?:[一-鿿A-Za-z0-9（）()]{2,14})(科技|集团|网络|有限公司|股份|通信|信息|软件|技术|传媒|银行|证券|研究院|事业部|实验室|工作室)/
+
+/** 常见大厂名：认出来就直接用，比从后缀猜准。 */
+const KNOWN_COMPANIES = [
+  '字节跳动', '腾讯', '阿里巴巴', '美团', '百度', '京东', '小米', '网易', '滴滴', '快手', '拼多多',
+  '华为', '蚂蚁集团', '哔哩哔哩', '携程', '蔚来', '理想汽车', '小鹏', '大疆', '商汤',
+  '旷视', '寒武纪', '同花顺', '贝壳', '小红书', '知乎', '微博', '淘宝',
+]
+
+/**
+ * 从 JD 正文里提炼「公司 · 岗位」。
+ *
+ * **为什么本地做，不叫模型。** 标题每场面试都要有，模型一跑就是钱和秒；
+ * 而 JD 里的岗位名和公司名其实有固定的写法，认词比认语义更稳。
+ * 认不出来就**不猜**——留空，让用户自己写。
+ *
+ * @param {string} text JD 正文
+ * @returns {{position: string, company: string, title: string}}
+ */
+export function deriveJobTitle(text) {
+  const body = String(text ?? '')
+  const head = body.slice(0, 4000)
+  const lines = head.split(/\r?\n/).map(line => line.trim()).filter(line => line !== '')
+
+  // 公司：先找「公司：」这种明写，再找已知大厂，最后才从后缀猜。
+  let company = ''
+  const companyLabel = head.match(/公司(?:名称)?\s*[:：]\s*([^\n，。；;]{2,20})/)
+  if (companyLabel !== null) company = companyLabel[1].trim()
+  if (company === '') {
+    for (const name of KNOWN_COMPANIES) {
+      if (head.includes(name)) { company = name; break }
+    }
+  }
+  if (company === '') {
+    const suffix = head.match(COMPANY_SUFFIX)
+    if (suffix !== null) company = suffix[0]
+  }
+  company = company.replace(/[（(].*?[)）]/g, '').replace(/[\s、,，。;；:：]+$/g, '').slice(0, 20)
+
+  // 岗位：先找明写的「岗位：」，再扫前 30 行里带岗位词的短行。
+  let position = ''
+  const positionLabel = head.match(/(?:招聘)?(?:岗位|职位|岗位名称|职位名称)\s*[:：]\s*([^\n，。；;]{2,20})/)
+  if (positionLabel !== null) position = positionLabel[1].trim()
+  if (position === '') {
+    for (const line of lines.slice(0, 30)) {
+      if (line.length > 24) continue
+      if (POSITION_WORDS.some(word => line.includes(word))) { position = line; break }
+    }
+  }
+  if (position === '') {
+    for (const word of POSITION_WORDS) {
+      if (head.includes(word)) { position = word; break }
+    }
+  }
+  position = position
+    .replace(/^(招聘|岗位|职位)[:：]?\s*/, '')
+    .replace(/[\s、,，。;；:：()（）【】\[\]]+$/g, '')
+    .slice(0, 20)
+
+  const title = company !== '' && position !== ''
+    ? `${company} · ${position}`
+    : (position !== '' ? position : company)
+  return { position, company, title }
+}
+
 /** `2026-11-16` for a timestamp. */
 function formatDate(ts) {
   const date = new Date(ts)
@@ -922,7 +1604,7 @@ function sanitizeName(name) {
     .slice(0, 120)
 }
 
-/** The absolute workspace root, for display. */
-export function workspaceRootOf(service) {
-  return resolve(service.config.workspaceRoot)
+/** The absolute workspace root in force, for display. */
+export async function workspaceRootOf(service) {
+  return resolve(await service.effectiveRoot())
 }
