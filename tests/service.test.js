@@ -2,9 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { InterviewService } from '../src/host/service.js'
 
-const ROOT = new URL('..', import.meta.url).pathname
+// **不要用 `new URL(...).pathname`。** Windows 上它会给出 `/D:/Code/...`，
+// 后面 `resolve()` 会把它拼成 `D:\D:\Code\...`——目录凭空多出一层盘符。
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /** A service rooted in a throwaway directory. */
 async function makeService() {

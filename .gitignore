@@ -4,6 +4,7 @@ package-lock.json
 build/
 release/
 .tmp-smoke/
+.tmp-test/
 *.log
 .DS_Store
 Thumbs.db
