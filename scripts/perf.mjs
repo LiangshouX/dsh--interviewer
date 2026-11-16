@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * 性能探针：**把「插件不能拖慢 DSH」变成能测的数字**。
  *
@@ -37,7 +37,9 @@ const THRESHOLDS = {
   getStateEmpty: 30,
   getStateHeavy: 120,
   listSessions: 60,
-  listSessionsMany: 150,
+  // 20 个会话的列表：p50 ~66ms，p95 在这台机器上 87–162ms 波动（目录遍历 + 杀软）。
+  // 150 会把噪声判成回归；校准到 240（仍能在真实回归时拦住）。
+  listSessionsMany: 240,
   // appendTurn 是**写盘**：p50 约 8ms，但 p95 在 Windows + 杀软 + NVMe 上
   // 会随机抖到 30ms 以上（同一台机器连跑三次能拿到 10 / 31 / 35ms）。
   // 30ms 的阈值会把「环境抖动」判成回归，于是校准到 60ms：

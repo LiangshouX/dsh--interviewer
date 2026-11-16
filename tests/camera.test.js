@@ -75,16 +75,23 @@ test('ffmpeg 定位：路径不存在时如实返回「没有」，不假装有'
 
 // ── 摄像头打不开时的"人话"翻译 ────────────────────────────────────────────
 
-test('被别的程序占用：说清楚是占用，并给出关闭清单', async () => {
+test('明确说"被占用"时，才说占用', async () => {
+  const { explainCameraFailure } = await import('../src/host/camera.js')
+  const explained = explainCameraFailure('Could not run graph (sometimes caused by a device already in use by other application)')
+  assert.match(explained.reason, /占用/)
+  assert.match(explained.hint, /微信|Chrome/)
+})
+
+test('绑定/激活失败（I/O error）不能说成"被占用"——实测可能是系统打不开', async () => {
   const { explainCameraFailure } = await import('../src/host/camera.js')
   for (const detail of [
-    'Could not run graph (sometimes caused by a device already in use by other application)',
     '[dshow @ 000] Unable to BindToObject for BisonCam,NB Pro',
     '[in#0 @ 000] Error opening input: I/O error',
   ]) {
     const explained = explainCameraFailure(detail)
-    assert.match(explained.reason, /占用/)
-    assert.match(explained.hint, /微信|Chrome|隐私/)
+    assert.match(explained.reason, /系统打不开/)
+    assert.doesNotMatch(explained.reason, /占用/)
+    assert.match(explained.hint, /物理开关|设备管理器/)
   }
 })
 

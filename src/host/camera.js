@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Host-side camera capture — the way out of the desktop host's camera block.
  *
  * ## 为什么需要这一层
@@ -142,7 +142,7 @@ export function parseDeviceList(text) {
     // 按视频保留，让后面的抓帧去报告真正的原因。
     const device = /"(.+)"\s+\((video|audio|none)\)/.exec(line)
     if (device === null) continue
-    const entry = { name: device[1], alt: '' }
+    const entry = { name: device[1], alt: '', kind: device[2] }
     if (device[2] === 'audio') audio.push(entry)
     else video.push(entry)
     current = entry
@@ -233,10 +233,18 @@ async function whereFfmpeg() {
  */
 export function explainCameraFailure(detail) {
   const text = String(detail ?? '')
-  if (/Could not run graph|already in use|Unable to BindToObject|I\/O error/i.test(text)) {
+  if (/already in use by other application/i.test(text)) {
     return {
-      reason: '摄像头被别的程序占用（或驱动未就绪）',
-      hint: '先关掉可能占用摄像头的程序（微信、Chrome/Edge 的网页会议、钉钉、飞书、OBS 等）再点重试。Windows 的隐私开关如果是「关」，也会表现为打不开。',
+      reason: '摄像头被别的程序占用',
+      hint: '关掉可能占用摄像头的程序（微信、Chrome/Edge 的网页会议、钉钉、飞书、OBS）再点重试。',
+    }
+  }
+  if (/Could not run graph|Unable to BindToObject|I\/O error/i.test(text)) {
+    return {
+      reason: '系统打不开这个摄像头（设备在、驱动正常，但激活失败）',
+      hint: '按顺序试：① 笔记本的摄像头物理开关 / Fn 热键（HASEE、联想等机型常见）；'
+        + '② 设备管理器里把摄像头「禁用」再「启用」；③ 拔插外置摄像头或重启；④ 更新摄像头驱动。'
+        + '如果 Windows「相机」应用也打不开，那就是系统/硬件层的问题，用户态的插件修不了。',
     }
   }
   if (/Could not find video device|among source devices/i.test(text)) {
@@ -493,10 +501,14 @@ export class CameraService {
     const probes = []
     for (const device of wanted.slice(0, 3)) {
       const probe = await probeCamera(this.ffmpeg, device, 6000)
-      probes.push({ name: device.name, alt: device.alt, ...probe })
+      // kind === 'none' 是强信号：ffmpeg 连设备能力都问不出来，
+      // 说明系统激活不了它，而不是"设备不存在"。
+      probes.push({ name: device.name, alt: device.alt, kind: device.kind, ...probe })
     }
     const ok = probes.some(item => item.ok)
     const failure = probes.find(item => item.ok !== true)
+    const explained = explainCameraFailure(failure?.detail ?? '')
+    const unqueryable = wanted.length > 0 && wanted.every(item => item.kind === 'none')
     return {
       ok,
       ffmpeg: { path: this.ffmpeg, source: this.ffmpegSource },
@@ -504,7 +516,11 @@ export class CameraService {
       probes,
       ...(ok
         ? { reason: '摄像头可以打开', hint: '' }
-        : explainCameraFailure(failure?.detail ?? '')),
+        : {
+          reason: unqueryable ? '系统打不开这个摄像头（ffmpeg 连设备能力都问不出来）' : explained.reason,
+          hint: explained.hint,
+          detail: failure?.detail ?? '',
+        }),
     }
   }
 

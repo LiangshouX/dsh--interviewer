@@ -482,14 +482,22 @@
           setState({ active: true, busy: false, error: undefined, recording: false })
           return true
         } catch (error) {
+          const text = error instanceof Error ? error.message : String(error)
+          // Host 已经把「为什么打不开」和「下一步怎么办」写在 message 里了。
+          // 这里只补一句不影响面试的兜底，**不要**再猜一个原因——上一版
+          // 无论什么错都提示「装一个 ffmpeg」，而 ffmpeg 明明已经找到了，
+          // 那种自相矛盾的提示比不给提示更糟。
+          const needsFfmpeg = /ffmpeg|采集程序/i.test(text)
           setState({
             active: false,
             busy: false,
             error: {
               kind: 'host-camera',
-              text: error instanceof Error ? error.message : String(error),
-              action: 'Host 侧的摄像头通路没起来。装一个 ffmpeg（或在插件配置里写上它的路径）就能用；'
-                + '面试照常进行，语音提问、文字回答、录音都不受影响。',
+              text,
+              action: needsFfmpeg
+                ? '宿主侧没有找到 ffmpeg：在「设置」里填它的路径，或让插件帮你装一个。'
+                  + '面试照常进行，语音提问、文字回答、录音都不受影响。'
+                : '原因与下一步见上一条。面试照常进行，语音提问、文字回答、录音都不受影响。',
             },
           })
           return false
