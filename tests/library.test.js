@@ -146,19 +146,16 @@ test('清空 JD / 简历 = 真的删掉，不是留个 0 字的文件', async ()
   }
 })
 
-test('助手派单：请求发到宿主会话，用户看得见', async () => {
+test('助手派单：默认落在面试工作区，用户看得见', async () => {
   const prompts = []
+  const creates = []
   const ctx = {
     get(name) {
       if (name !== 'sessionController') return undefined
       return {
-        async list() {
-          return {
-            items: [
-              { sessionId: 'host-2', title: '最近的对话', updatedAt: 20 },
-              { sessionId: 'host-1', title: '更早的对话', updatedAt: 10 },
-            ],
-          }
+        async create(request) {
+          creates.push(request)
+          return { sessionId: 'host-created' }
         },
         async prompt(input, signal) {
           prompts.push(input)
@@ -175,10 +172,15 @@ test('助手派单：请求发到宿主会话，用户看得见', async () => {
     const session = await service.createSession({})
     const result = await service.requestAgentJd(session.id, 'https://example.com/job/9')
     assert.equal(result.dispatched, true)
-    assert.equal(result.hostSession.id, 'host-2', '默认派给最近活跃的对话')
+    // **默认落在面试工作区**：请求里必须带 cwd = 工作区根，
+    // 而不是"宿主里最近的那个对话"（那会把活派到别的项目去）。
+    assert.equal(result.hostSession.id, 'host-created')
+    assert.equal(creates.length, 1)
+    assert.equal(creates[0].cwd, workspaceRoot)
+    assert.equal(result.hostSession.workspace, workspaceRoot)
     assert.equal(prompts.length, 1)
     const [prompt] = prompts
-    assert.equal(prompt.sessionId, 'host-2')
+    assert.equal(prompt.sessionId, 'host-created')
     assert.equal(prompt.mode, 'queue')
     assert.match(prompt.content[0].text, /example\.com\/job\/9/)
     assert.match(prompt.content[0].text, /interview_save_jd/)
