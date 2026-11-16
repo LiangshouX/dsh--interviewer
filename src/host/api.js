@@ -167,7 +167,7 @@ export function registerApi(ctx, service) {
         sendJson(res, 400, { ok: false, error: message })
       }
     },
-  }), 'dsh-interviewer: API routes')
+  }), 'dsh-realtime-interview: API routes')
 }
 
 /**

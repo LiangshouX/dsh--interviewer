@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>dsh-interviewer 预览</title>
+  <title>dsh-realtime-interview 预览</title>
   <style>
     html, body { margin: 0; padding: 0; background: #0b0b0d; }
     #root { height: 100vh; }
@@ -27,7 +27,7 @@
     // 于是同一批截图里混着两套主题，看起来像主题自己会变。
     try {
       window.localStorage.setItem(
-        'dsh-interviewer.theme',
+        'dsh-realtime-interview.theme',
         (window.__PRESET__ && window.__PRESET__.theme) || 'dark',
       )
     } catch (error) {

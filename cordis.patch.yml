@@ -1,8 +1,8 @@
-# dsh-interviewer bundle patch
+# dsh-realtime-interview bundle patch
 #
 # One Host row. The row id is the plugin id the Plugin Manager shows;
 # `name` must equal the package name so the client-modules scan resolves this
-# package's ./client bundle and serves it at /plugins/dsh-interviewer/client.js.
+# package's ./client bundle and serves it at /plugins/dsh-realtime-interview/client.js.
 #
 # `config` is replaced wholesale by any later patch layer, so every field the
 # plugin needs is restated here. The user edits their own layer
@@ -13,10 +13,10 @@
 #                     <root>/workspaces/<session-id>/   一场面试
 #                     <root>/profiles/<profile-id>/     岗位档案
 #                   留空 = 自动。Windows 上自动挑**非系统盘**（D 盘优先，
-#                   目录名 DSH-INTERVIEWER）；没有别的盘才用用户主目录。
-#                   想指到别处，就写绝对路径，例如 D:\DSH-INTERVIEW-ROOT。
+#                   目录名 DSH-REALTIME-INTERVIEW）；没有别的盘才用用户主目录。
+#                   想指到别处，就写绝对路径，例如 D:\DSH-REALTIME-INTERVIEW-ROOT。
 #                   也可以在插件面板里点「浏览…」用系统目录选择器来选——
-#                   那个选择存在 profile 的 dsh-interviewer.json 里，不动本文件，
+#                   那个选择存在 profile 的 dsh-realtime-interview.json 里，不动本文件，
 #                   且本文件写死时以本文件为准（面板改动只会给出提示）。
 #                   （dataRoot 是旧名，仍然认，但请换用 workspaceRoot。）
 #   jdFetchTimeoutMs  JD 链接抓取超时（毫秒）。超时即视为失败，交给手动兜底。
@@ -47,7 +47,7 @@
 #                   影响（麦克风、键盘、报告照常）。
 - insert:
     - id: interviewer
-      name: 'dsh-interviewer'
+      name: 'dsh-realtime-interview'
       config:
         workspaceRoot: ''
         jdFetchTimeoutMs: 15000

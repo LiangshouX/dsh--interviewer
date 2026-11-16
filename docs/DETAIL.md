@@ -27,8 +27,8 @@
 | 来源 | 含义 | 怎么来的 |
 |---|---|---|
 | `config` | 插件配置写死了 | `cordis.patch.yml` 的 `workspaceRoot`（用户的 layer 也算） |
-| `settings` | 面板里用「浏览…」选过 | 存到 profile 目录的 `dsh-interviewer.json`（`DSH_PROFILE_DIR` → `<profile>/dsh-interviewer.json`，否则 `~/.dsh/dsh-interviewer/settings.json`） |
-| `default` | 两处都没说 | 自动挑：Windows 上**优先非系统盘**（遍历 D…Z，跳过系统盘，取 `D:\DSH-INTERVIEWER`）；没有别的盘才退回家目录下的 `DSH-INTERVIEWER/` |
+| `settings` | 面板里用「浏览…」选过 | 存到 profile 目录的 `dsh-realtime-interview.json`（`DSH_PROFILE_DIR` → `<profile>/dsh-realtime-interview.json`，否则 `~/.dsh/dsh-realtime-interview/settings.json`） |
+| `default` | 两处都没说 | 自动挑：Windows 上**优先非系统盘**（遍历 D…Z，跳过系统盘，取 `D:\DSH-REALTIME-INTERVIEW`）；没有别的盘才退回家目录下的 `DSH-REALTIME-INTERVIEW/` |
 
 **面板里的「浏览…」** 走宿主原生目录选择器，不自造文件对话框。
 宿主的能力 seam 是 `ctx.directoryPicker`：

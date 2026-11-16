@@ -116,7 +116,7 @@ async function checkPluginHalf() {
     note(`package.json 不是合法 JSON：${error instanceof Error ? error.message : String(error)}`)
     return
   }
-  if (manifest.name !== 'dsh-interviewer') note(`包名应为 dsh-interviewer，当前是 ${manifest.name}`)
+  if (manifest.name !== 'dsh-realtime-interview') note(`包名应为 dsh-realtime-interview，当前是 ${manifest.name}`)
   if (manifest.type !== 'module') note('package.json 的 type 必须是 module（Host 半边是 ESM）')
   const exportsField = manifest.exports ?? {}
   for (const key of ['.', './client', './locale/*.json', './icon']) {

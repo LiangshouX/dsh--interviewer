@@ -1,5 +1,5 @@
 /**
- * dsh-interviewer — Host half.
+ * dsh-realtime-interview — Host half.
  *
  * 一个**模拟面试**的工作台：把「简历 + 目标岗位 JD」变成一场有准备的面试。
  *
@@ -29,7 +29,7 @@ import { registerTools } from './src/host/tools.js'
 import { registerInterviewSkills } from './src/host/skills.js'
 
 /** Plugin identity for cordis rows and client-modules keying. */
-export const name = 'dsh-interviewer'
+export const name = 'dsh-realtime-interview'
 
 /** Services required before mounting: the tool registry and the HTTP carrier. */
 export const inject = ['tools', 'webServer']
@@ -47,14 +47,14 @@ export function apply(ctx, config) {
   // 必须在 apply 期间**同步**注册（宿主的要求）。
   const skills = registerInterviewSkills(ctx)
   if (skills !== undefined) {
-    ctx.effect(() => skills, 'dsh-interviewer: bundled skills')
+    ctx.effect(() => skills, 'dsh-realtime-interview: bundled skills')
   }
 
   // The HTTP surface: one prefix, read model + write model + recording upload.
-  ctx.effect(() => registerApi(ctx, service), 'dsh-interviewer: API routes')
+  ctx.effect(() => registerApi(ctx, service), 'dsh-realtime-interview: API routes')
 
   // The agent tools: the same service methods, under model-facing names.
-  ctx.effect(() => registerTools(ctx, service), 'dsh-interviewer: agent tools')
+  ctx.effect(() => registerTools(ctx, service), 'dsh-realtime-interview: agent tools')
 
   // Expose the service for other plugins on the same context. Cordis warns
   // about unknown context members in some builds; the tools and the HTTP route

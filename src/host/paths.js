@@ -19,7 +19,7 @@
  *
  * **不要散落。** 散落的会话目录是治理灾难：谁也说不清哪份是最新的、
  * 哪场面试属于哪个岗位。根目录由 `workspaceRoot` 决定，留空则自动
- * （用户主目录下的 `DSH-INTERVIEWER`）。
+ * （用户主目录下的 `DSH-REALTIME-INTERVIEW`）。
  */
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
@@ -64,10 +64,10 @@ export function defaultWorkspaceRoot() {
     for (let code = 66; code <= 90; code += 1) {
       const drive = `${String.fromCharCode(code)}:`
       if (drive === system) continue
-      if (existsSync(`${drive}\\`)) return join(`${drive}\\`, 'DSH-INTERVIEWER')
+      if (existsSync(`${drive}\\`)) return join(`${drive}\\`, 'DSH-REALTIME-INTERVIEW')
     }
   }
-  return join(homedir(), 'DSH-INTERVIEWER')
+  return join(homedir(), 'DSH-REALTIME-INTERVIEW')
 }
 
 /**
@@ -85,7 +85,7 @@ export function defaultWorkspaceRootReason(root = defaultWorkspaceRoot()) {
     return `默认工作区根（${root}：优先选非系统盘，${systemDrive()} 盘装的是系统和用户目录）。`
       + '面板顶部的「浏览…」可以改到别的位置。'
   }
-  return `默认工作区根（用户主目录下的 DSH-INTERVIEWER：这台机器上没有别的可用盘）。`
+  return `默认工作区根（用户主目录下的 DSH-REALTIME-INTERVIEW：这台机器上没有别的可用盘）。`
     + '面板顶部的「浏览…」可以改到别的位置。'
 }
 
@@ -93,14 +93,14 @@ export function defaultWorkspaceRootReason(root = defaultWorkspaceRoot()) {
 export function settingsPath() {
   const profileDir = process.env.DSH_PROFILE_DIR
   if (typeof profileDir === 'string' && profileDir.trim() !== '') {
-    return join(profileDir.trim(), 'dsh-interviewer.json')
+    return join(profileDir.trim(), 'dsh-realtime-interview.json')
   }
   const home = (process.env.DSH_HOME ?? '').trim() !== ''
     ? process.env.DSH_HOME.trim()
     : join(homedir(), '.dsh')
   const profile = (process.env.DSH_PROFILE ?? '').trim()
-  if (profile !== '') return join(home, 'profiles', profile, 'dsh-interviewer.json')
-  return join(home, 'dsh-interviewer', 'settings.json')
+  if (profile !== '') return join(home, 'profiles', profile, 'dsh-realtime-interview.json')
+  return join(home, 'dsh-realtime-interview', 'settings.json')
 }
 
 /**

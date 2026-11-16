@@ -61,7 +61,7 @@
   "checklistCount": 12,
   "probedCount": 5,
   "hasReport": false,
-  "dir": "/home/me/DSH-INTERVIEWER/sessions/iv-..."
+  "dir": "/home/me/DSH-REALTIME-INTERVIEW/sessions/iv-..."
 }
 ```
 
@@ -263,13 +263,13 @@ POST /interviewer/api/asr/transcribe  { "dataBase64": "…", "mimeType": "audio/
 
 ```
 POST /interviewer/api/config/workspace-root/pick   {}
-POST /interviewer/api/config/workspace-root        { "path": "D:\\DSH-INTERVIEWER", "migrateFrom": "C:\\Users\\me\\DSH-INTERVIEWER" }
+POST /interviewer/api/config/workspace-root        { "path": "D:\\DSH-REALTIME-INTERVIEW", "migrateFrom": "C:\\Users\\me\\DSH-REALTIME-INTERVIEW" }
 ```
 
 `pick`（弹宿主原生目录选择器）：
 
 ```jsonc
-{ "picker": { "available": true, "picked": "D:\\DSH-INTERVIEWER" } }
+{ "picker": { "available": true, "picked": "D:\\DSH-REALTIME-INTERVIEW" } }
 ```
 
 宿主没有目录选择器，或用户取消了：
@@ -283,8 +283,8 @@ POST /interviewer/api/config/workspace-root        { "path": "D:\\DSH-INTERVIEWE
 `workspace-root`（切根，`migrateFrom` 可选）：
 
 ```jsonc
-{ "workspaceRoot": { "path": "D:\\DSH-INTERVIEWER", "source": "settings", "reason": "面板里选的" },
-  "migrated": { "copied": true, "sessions": 1, "profiles": 0, "from": "C:\\Users\\me\\DSH-INTERVIEWER" } }
+{ "workspaceRoot": { "path": "D:\\DSH-REALTIME-INTERVIEW", "source": "settings", "reason": "面板里选的" },
+  "migrated": { "copied": true, "sessions": 1, "profiles": 0, "from": "C:\\Users\\me\\DSH-REALTIME-INTERVIEW" } }
 ```
 
 - 迁移是**复制**，不是移动——老目录原样保留（`migrated.copied`）。

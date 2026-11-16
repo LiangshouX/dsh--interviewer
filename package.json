@@ -1,7 +1,7 @@
 {
-  "name": "dsh-interviewer",
+  "name": "dsh-realtime-interview",
   "version": "0.1.0",
-  "description": "DSH 模拟面试插件：简历/JD 入场 → 考点清单调研 → 逐轮提问 → 录像录音 → 面试后分析报告",
+  "description": "DSH 实时模拟面试插件：简历/JD 入场 → 考点清单调研 → 逐轮追问 → 实时摄像头与语音 → 面试后分析报告",
   "type": "module",
   "main": "index.js",
   "license": "MIT",
@@ -10,11 +10,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LiangshouX/dsh--interviewer.git"
+    "url": "git+https://github.com/LiangshouX/dsh-realtime-interview.git"
   },
-  "homepage": "https://github.com/LiangshouX/dsh--interviewer#readme",
+  "homepage": "https://github.com/LiangshouX/dsh-realtime-interview#readme",
   "bugs": {
-    "url": "https://github.com/LiangshouX/dsh--interviewer/issues"
+    "url": "https://github.com/LiangshouX/dsh-realtime-interview/issues"
   },
   "publishConfig": {
     "access": "public"
@@ -64,6 +64,9 @@
     "deepseek-harness",
     "interview",
     "mock-interview",
+    "realtime",
+    "voice",
+    "camera",
     "career"
   ],
   "dsh": {

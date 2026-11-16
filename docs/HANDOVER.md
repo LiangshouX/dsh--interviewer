@@ -1,4 +1,4 @@
-# 交接说明 —— dsh-interviewer（模拟面试间）
+# 交接说明 —— dsh-realtime-interview（模拟面试间）
 
 > 写给**接手这个仓库的开发者或 AI 编码器**。
 > 目标：你读完这一份，就能独立改功能、改界面、跑通自检，不用来回问人。
@@ -9,19 +9,19 @@
 
 | | |
 |---|---|
-| 仓库 | `git@github.com:LiangshouX/dsh--interviewer.git`（公开） |
+| 仓库 | `git@github.com:LiangshouX/dsh-realtime-interview.git`（公开） |
 | 主分支 | `main` |
 | 交接时的提交 | `298719c` feat(client): 界面重做 —— 面试卷宗、放大舞台、主动申请权限、底稿默认收起 |
 | 这是什么 | 一个 **DSH（DeepSeek Harness）插件**：把「简历 + 目标岗位 JD」变成一场有准备的模拟面试 |
 | 两半 | **Host 半边**（Node，服务端，存盘 + 工具 + API）/ **浏览器半边**（`client.js`，单文件零构建） |
 | 运行时依赖 | **零**。React 从宿主的模块表取（`require('react')`） |
-| 数据 | **全在本机**，一个总根（默认 `~/DSH-INTERVIEWER/`），只对用户自己给的 JD 链接发请求 |
+| 数据 | **全在本机**，一个总根（默认 `~/DSH-REALTIME-INTERVIEW/`），只对用户自己给的 JD 链接发请求 |
 
 克隆：
 
 ```bash
-git clone git@github.com:LiangshouX/dsh--interviewer.git
-cd dsh--interviewer
+git clone git@github.com:LiangshouX/dsh-realtime-interview.git
+cd dsh-realtime-interview
 npm install
 ```
 
@@ -51,7 +51,7 @@ npm install
         └───────────────┬───────────────────┘
                         │  interview_* 工具
                         ▼
-   ┌─────────── 插件（dsh-interviewer）───────────┐
+   ┌─────────── 插件（dsh-realtime-interview）───────────┐
    │  · 会话状态机（草稿→进行中→结束）            │
    │  · 考点清单的结构、持久化、动态调整（留痕）    │
    │  · 转录、录像录音落盘、报告落盘                │
@@ -74,7 +74,7 @@ npm install
 ## 3. 代码地图
 
 ```
-dsh--interviewer/
+dsh-realtime-interview/
 ├── index.js                  # 插件入口：建 service、挂 API、注册工具、注册技能
 ├── client.js                 # ★ 浏览器半边（单文件，~100 KB，零构建）
 ├── src/host/
@@ -130,13 +130,13 @@ Node ≥ 20。依赖只有 devDependencies：`acorn`（key 闸门用）、`react
 
 ```bash
 node scripts/pack.mjs
-# → release/dsh-interviewer-0.1.0.tgz
+# → release/dsh-realtime-interview-0.1.0.tgz
 ```
 
 然后在 DSH 里：
 
 ```
-plugin_manager install_bundle  target: <绝对路径>/release/dsh-interviewer-0.1.0.tgz
+plugin_manager install_bundle  target: <绝对路径>/release/dsh-realtime-interview-0.1.0.tgz
 ```
 
 > **装 tarball，不要装源码目录。** 装源码目录会在 profile 里留下指向仓库的软链，
@@ -292,7 +292,7 @@ npm install && node scripts/build.mjs && node --test tests/*.test.js
 | **权限弹窗的真实行为** | ❌ **未验证** | 「被拒后自动接上」依赖浏览器标准 `permissions.onchange`。宿主是否装了自己的 permission handler **没查到**（`@deepseek-ai/dsh-remote` 不存在，`dsh-web-app` 里也没搜到 permission handler）。在 Electron 下必须实测一次。 |
 | **摄像头/麦克风** | ❌ 未验证 | 沙箱里没有真设备。 |
 | **真实 ASR** | ❌ 未验证 | 沙箱里没有可用的 ASR key。minimax / openai 兼容两条路都只有单测覆盖。 |
-| **npm 发布** | ❌ 未做 | `package.json` 已去掉 `private`、`publishConfig.access=public`、包名 `dsh-interviewer` 已确认未被占用。**发布需要账号**：`npm login` 或提供 npm token，然后 `npm publish`。发布前跑 `node scripts/build.mjs` + `node --test`。 |
+| **npm 发布** | ❌ 未做 | `package.json` 已去掉 `private`、`publishConfig.access=public`、包名 `dsh-realtime-interview` 已确认未被占用。**发布需要账号**：`npm login` 或提供 npm token，然后 `npm publish`。发布前跑 `node scripts/build.mjs` + `node --test`。 |
 | **DSH 插件市场** | ❌ 未做 | 有 `JB_MARKETPLACE_TOKEN` 环境变量可用，但没做过上架流程。 |
 
 **已知的产品限制**（不是 bug，是设计取舍）：
@@ -313,7 +313,7 @@ Web Speech API 在不少网络环境里不可达（插件会明说并保留键�
 2. **装进真实 DSH 跑一遍端到端**（沙箱做不了的那部分）：
    ```bash
    node scripts/pack.mjs
-   # plugin_manager install_bundle target: <绝对路径>/release/dsh-interviewer-0.1.0.tgz
+   # plugin_manager install_bundle target: <绝对路径>/release/dsh-realtime-interview-0.1.0.tgz
    ```
    按 `README.md` §用法 走一遍：新建面试 → 归档简历/JD → 让 agent 用
    `interview-prep` 出底稿 → 进「面试中」→ 提问 → 回答 → 报告页出分析。

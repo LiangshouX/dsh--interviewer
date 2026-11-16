@@ -2,7 +2,7 @@
 /**
  * 打包发布物。
  *
- *   node scripts/pack.mjs          # 构建 + 打包 → release/dsh-interviewer-<version>.tgz
+ *   node scripts/pack.mjs          # 构建 + 打包 → release/dsh-realtime-interview-<version>.tgz
  *   node scripts/pack.mjs --pack   # 只打包（不重新构建）
  *
  * **为什么要有这一步**（AGENTS.md §安装纪律）：

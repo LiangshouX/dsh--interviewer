@@ -1,4 +1,4 @@
-# dsh-interviewer — 模拟面试间
+# dsh-realtime-interview — 模拟面试间
 
 > 一个 DeepSeek Harness（DSH）插件：把「简历 + 目标岗位 JD」变成**一场有准备的面试**。
 
@@ -43,13 +43,13 @@
 
 ```bash
 node scripts/pack.mjs
-# → release/dsh-interviewer-<version>.tgz
+# → release/dsh-realtime-interview-<version>.tgz
 ```
 
 然后用 `plugin_manager` 的 `install_bundle`，`target` 指向那个 `.tgz`：
 
 ```
-target: <仓库绝对路径>/release/dsh-interviewer-<version>.tgz
+target: <仓库绝对路径>/release/dsh-realtime-interview-<version>.tgz
 ```
 
 刷新 DSH 页面。**Host 半边不会热重载**——改 `src/host/**` 要等 DSH 重启；
@@ -204,14 +204,14 @@ config:
   workspaceRoot: 'D:\DSH-INTERVIEW-ROOT'
 ```
 
-留空则自动用用户主目录下的 `DSH-INTERVIEWER/`。
+留空则自动用用户主目录下的 `DSH-REALTIME-INTERVIEW/`。
 面板顶部会显示当前总根路径，悬停可看**为什么是这个目录**。
 
 **全部留在本机，不上传。**
 
 ## 发到 npm / 安装
 
-包名 `dsh-interviewer`（仓库名是 `dsh--interviewer`，npm 上不能用连续连字符）。
+包名 `dsh-realtime-interview`（仓库名是 `dsh-realtime-interview`，npm 上不能用连续连字符）。
 
 发布（需要 npm 账号）：
 
@@ -225,13 +225,13 @@ npm publish --access public
 
 ```bash
 # 从 npm 公共市场
-dsh plugin --profile web add dsh-interviewer
+dsh plugin --profile web add dsh-realtime-interview
 
 # 从 GitHub 仓库
-dsh plugin --profile web add github:LiangshouX/dsh--interviewer
+dsh plugin --profile web add github:LiangshouX/dsh-realtime-interview
 
 # 本地 tarball（开发时最常用）
-plugin_manager install_bundle  target: <仓库绝对路径>/release/dsh-interviewer-<version>.tgz
+plugin_manager install_bundle  target: <仓库绝对路径>/release/dsh-realtime-interview-<version>.tgz
 ```
 
 装完**重启 DSH**（Host 半边不热重载），然后在侧边栏点「模拟面试间」。

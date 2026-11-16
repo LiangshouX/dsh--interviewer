@@ -1,5 +1,5 @@
 /*!
- * dsh-interviewer — client half (browser bundle).
+ * dsh-realtime-interview — client half (browser bundle).
  *
  * 模拟面试间 —— 把「简历 + 目标岗位 JD」变成**一场有准备的面试**。
  *
@@ -27,14 +27,14 @@
  * plugin carries no build step and no runtime dependency.
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-interviewer',
+  id: 'dsh-realtime-interview',
   factory: (require) => {
     const React = require('react')
     const h = React.createElement
     const { useState, useEffect, useCallback, useMemo, useRef } = React
 
     // ── locale ────────────────────────────────────────────────────────────
-    const LOCALE_NS = 'dsh-interviewer'
+    const LOCALE_NS = 'dsh-realtime-interview'
     /** The panel id: the sidebar entry's id and the `main` slot's key. */
     const PANEL_ID = 'interviewer'
     /** How often the interview view refreshes from the host. */
@@ -278,7 +278,7 @@ window.__ModuleLoader__.load({
     }
 
     /** 主题在 localStorage 里的键。存的是用户的**选择**，不是系统设置。 */
-    const THEME_KEY = 'dsh-interviewer.theme'
+    const THEME_KEY = 'dsh-realtime-interview.theme'
 
     /**
      * 读用户上次选的主题。

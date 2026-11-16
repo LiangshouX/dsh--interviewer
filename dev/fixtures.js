@@ -93,7 +93,7 @@
     endedAt: 0,
     updatedAt: now,
     profileId: 'pf-2026111-a2c9',
-    dir: 'D:\\DSH-INTERVIEWER-ROOT\\workspaces\\iv-20261116-a3f1',
+    dir: 'D:\\DSH-REALTIME-INTERVIEW-ROOT\\workspaces\\iv-20261116-a3f1',
   }
 
   const state = {
@@ -248,7 +248,7 @@ Nginx、Prometheus / Grafana、Kubernetes`
         return {
           asrProvider: 'auto', ttsProvider: 'auto', ttsRate: 1, ttsVoice: '',
           recordVideo: true, recordAudio: true, jdFetchTimeoutMs: 15000,
-          workspaceRoot: { path: 'D:\\DSH-INTERVIEWER-ROOT', source: 'config', reason: '配置里指定的工作区根', exists: true },
+          workspaceRoot: { path: 'D:\\DSH-REALTIME-INTERVIEW-ROOT', source: 'config', reason: '配置里指定的工作区根', exists: true },
         }
       }
       if (path.startsWith('/asr')) {

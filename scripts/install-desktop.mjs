@@ -6,7 +6,7 @@
  *   "profile desktop is managed exclusively by the Electron application"），
  *   而 `plugin_manager` 那个工具只在 DSH 自己的会话里可用。
  *   但 profile 的 package.json 里已经写着
- *     "dsh-interviewer": "file:D:/.../release/dsh-interviewer-0.1.0.tgz"
+ *     "dsh-realtime-interview": "file:D:/.../release/dsh-realtime-interview-0.1.0.tgz"
  *   —— 指向的就是我们打出来的这个 tarball，profile 已经「认」它了，
  *   缺的只是让 node_modules 里的内容跟这个 tarball 一致。
  *   所以这里做的正是 install_bundle 落地的那一步。
@@ -27,7 +27,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const profile = process.argv[2] ?? 'desktop'
 // DSH_HOME 是 DSH 自己的数据根；没设就用 ~/.dsh（与 DSH 的默认一致）。
 const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh')
-const TARGET = join(DSH_HOME, 'profiles', profile, 'node_modules', 'dsh-interviewer')
+const TARGET = join(DSH_HOME, 'profiles', profile, 'node_modules', 'dsh-realtime-interview')
 const RELEASE = join(ROOT, 'release')
 
 if (!existsSync(RELEASE)) throw new Error(`没有发布物目录：${RELEASE}`)
@@ -35,7 +35,7 @@ const tarball = readdirSync(RELEASE).find(name => name.endsWith('.tgz'))
 if (tarball === undefined) throw new Error(`${RELEASE} 里没有 .tgz`)
 const TGZ = join(RELEASE, tarball)
 
-const STAGE = join(tmpdir(), 'dsh-interviewer-stage')
+const STAGE = join(tmpdir(), 'dsh-realtime-interview-stage')
 rmSync(STAGE, { recursive: true, force: true })
 mkdirSync(STAGE, { recursive: true })
 

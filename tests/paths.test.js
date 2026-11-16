@@ -31,7 +31,7 @@ test('默认工作区根：Windows 上优先非系统盘', () => {
 
   if (process.platform !== 'win32') {
     // 其他系统只有家目录这一处可去。
-    assert.equal(root, join(homedir(), 'DSH-INTERVIEWER'))
+    assert.equal(root, join(homedir(), 'DSH-REALTIME-INTERVIEW'))
     return
   }
 
@@ -45,7 +45,7 @@ test('默认工作区根：Windows 上优先非系统盘', () => {
     return
   }
   // 一块盘都没有的话，退回家目录——没得挑。
-  assert.equal(root, join(homedir(), 'DSH-INTERVIEWER'))
+  assert.equal(root, join(homedir(), 'DSH-REALTIME-INTERVIEW'))
 })
 
 test('默认工作区根：理由要说清「为什么是这个目录」', () => {
@@ -86,14 +86,14 @@ test('设置文件：写在 profile 目录里，读得回来', async () => {
   const previous = process.env.DSH_PROFILE_DIR
   process.env.DSH_PROFILE_DIR = profileDir
   try {
-    assert.equal(settingsPath(), join(profileDir, 'dsh-interviewer.json'))
+    assert.equal(settingsPath(), join(profileDir, 'dsh-realtime-interview.json'))
 
     // 写之前没有设置——读不到就是「还没选过」，不能当成错误。
     assert.deepEqual(await readSettings(), {})
 
-    await writeSettings({ workspaceRoot: 'D:\\DSH-INTERVIEWER' })
+    await writeSettings({ workspaceRoot: 'D:\\DSH-REALTIME-INTERVIEW' })
     const settings = await readSettings()
-    assert.equal(settings.workspaceRoot, 'D:\\DSH-INTERVIEWER')
+    assert.equal(settings.workspaceRoot, 'D:\\DSH-REALTIME-INTERVIEW')
 
     // 坏文件不能把插件搞挂。
     const { writeFile } = await import('node:fs/promises')

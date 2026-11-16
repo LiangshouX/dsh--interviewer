@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { SKILL_DIR } from './paths.js'
 
 /** 本 provider 的名字（出现在技能摘要的 `provider` 字段里）。 */
-export const PROVIDER_NAME = 'dsh-interviewer'
+export const PROVIDER_NAME = 'dsh-realtime-interview'
 
 /**
  * 拆出 `--- ... ---` 之间的 frontmatter。

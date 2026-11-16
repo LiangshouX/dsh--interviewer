@@ -1,4 +1,4 @@
-# AGENTS.md — dsh-interviewer 开发规范
+# AGENTS.md — dsh-realtime-interview 开发规范
 
 > 给在这个仓库里工作的 AI Agent 与人看的**操作纪律**。
 > 产品定义见 `docs/PRD.md`；接口契约见 `docs/API.md`；仓库说明见 `README.md`。
@@ -20,7 +20,7 @@
 
 ```bash
 node scripts/build.mjs      # 构建发布态：build/skills
-node scripts/pack.mjs       # 打包 → release/dsh-interviewer-<version>.tgz
+node scripts/pack.mjs       # 打包 → release/dsh-realtime-interview-<version>.tgz
 ```
 
 然后用 `plugin_manager` 的 `install_bundle`，`target` 指向刚打出来的那个 `.tgz`。
@@ -41,7 +41,7 @@ node scripts/pack.mjs       # 打包 → release/dsh-interviewer-<version>.tgz
 
 ```bash
 node scripts/pack.mjs
-plugin_manager remove_bundle  dsh-interviewer
+plugin_manager remove_bundle  dsh-realtime-interview
 plugin_manager install_bundle  <release/*.tgz>
 ```
 
@@ -80,13 +80,13 @@ release/   ← npm bundle tarball（gitignore）
   profiles/<profile-id>/      岗位档案
 ```
 
-- `workspaceRoot` 留空 = 自动：**Windows 上优先选非系统盘**（`D:\DSH-INTERVIEWER`），
+- `workspaceRoot` 留空 = 自动：**Windows 上优先选非系统盘**（`D:\DSH-REALTIME-INTERVIEW`），
   没有别的盘才退回家目录。系统盘装的是系统和用户目录，
   几十 MB 的简历、录像、录音塞进去是迟早要清的东西。
 - 用户也可以在面板顶部点「浏览…」改位置——走**宿主的原生目录选择器**
   （`ctx.directoryPicker` 的能力 seam：`capability()` 返回 `{kind:'native', pick(signal)}`，
   **必须传 AbortSignal**，否则宿主读 `signal.aborted` 会炸），不许让用户手打路径。
-  选完写进 profile 目录里的 `dsh-interviewer.json`。
+  选完写进 profile 目录里的 `dsh-realtime-interview.json`。
 - **优先级：配置文件 > 面板里选的 > 默认。** 配置文件是「这个环境就该这么放」的
   硬约定，面板里选的是「这台机器上我想放哪儿」的用户选择；
   配置文件写死了的时候，面板里的选择不生效，**而且必须说出来**。
@@ -438,7 +438,7 @@ node scripts/render-probe.mjs --check   # 客户端渲染开销 + 空闲轮询�
 
 ## 13. 数据与隐私
 
-- 简历、JD、转录、录像**全部留在本机**（默认 `~/DSH-INTERVIEWER/`，可配 `workspaceRoot`）。
+- 简历、JD、转录、录像**全部留在本机**（默认 `~/DSH-REALTIME-INTERVIEW/`，可配 `workspaceRoot`）。
 - 插件**不上传**任何东西。唯一的对外请求是用户自己给的 JD 链接。
 - 录像是**可选**功能，默认可关；它制造氛围，不承担举证责任。
 - 不要在代码或日志里打印简历/JD 的正文片段（`api.js` 的错误信息尤其注意）。

@@ -119,7 +119,7 @@ async function startServer(service) {
 
 async function main() {
   const check = process.argv.includes('--check')
-  const root = await mkdtemp(join(tmpdir(), 'dsh-interviewer-perf-'))
+  const root = await mkdtemp(join(tmpdir(), 'dsh-realtime-interview-perf-'))
   const results = []
   try {
     // ── 1. 空会话 ────────────────────────────────────────────────────────
