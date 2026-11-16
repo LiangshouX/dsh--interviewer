@@ -67,6 +67,7 @@ import { access } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { mkdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { BrowserCamera, locateChromium } from './camera-browser.js'
 
 /** MIME type of the streaming preview format. */
 export const MJPEG_CONTENT_TYPE = 'multipart/x-mixed-replace; boundary=--dshframe'
@@ -405,6 +406,12 @@ export class CameraService {
    */
   constructor(options = {}) {
     this.ffmpegPathOption = options.ffmpegPath ?? ''
+    /** Chromium 路径（浏览器采集通道用；留空 = 自动发现）。 */
+    this.chromiumPathOption = options.chromiumPath ?? ''
+    /** 当前采集后端：'ffmpeg' | 'chromium-mf'。 */
+    this.backend = undefined
+    /** 浏览器采集会话（按需创建）。 */
+    this.browserSession = undefined
     /** Resolved ffmpeg path, once probed. */
     this.ffmpeg = undefined
     /** Why ffmpeg was resolved that way (config | env | path | wellknown). */
@@ -506,26 +513,116 @@ export class CameraService {
       // 说明系统激活不了它，而不是"设备不存在"。
       probes.push({ name: device.name, alt: device.alt, kind: device.kind, ...probe })
     }
-    const ok = probes.some(item => item.ok)
+    const ffmpegOk = probes.some(item => item.ok)
     const failure = probes.find(item => item.ok !== true)
     const explained = explainCameraFailure(failure?.detail ?? '')
     const unqueryable = wanted.length > 0 && wanted.every(item => item.kind === 'none')
+    const chromium = locateChromium({ chromiumPath: this.chromiumPathOption })
+
+    // ffmpeg 不行时，顺手验一下浏览器采集通道——它走 Media Foundation，
+    // 在 DShow 坏掉的机器上通常还能出画面。诊断要回答"到底能不能用"，
+    // 而不是只回答"ffmpeg 为什么不行"。
+    const browserProbe = ffmpegOk ? undefined : await this.probeBrowserBackend()
+    const ok = ffmpegOk || browserProbe?.ok === true
     return {
       ok,
+      backend: ffmpegOk ? 'ffmpeg' : (browserProbe?.ok === true ? 'chromium-mf' : ''),
       ffmpeg: { path: this.ffmpeg, source: this.ffmpegSource },
+      chromium: chromium ?? { path: '', source: '' },
       devices: list,
       probes,
+      ...(browserProbe === undefined ? {} : { browserProbe }),
       ...(ok
-        ? { reason: '摄像头可以打开', hint: '' }
+        ? {
+          reason: ffmpegOk
+            ? '摄像头可以打开（ffmpeg / DirectShow）'
+            : 'ffmpeg 打不开，但浏览器采集（Media Foundation）可用 —— 启动时会自动走它',
+          hint: '',
+        }
         : {
           reason: unqueryable ? '系统打不开这个摄像头（ffmpeg 连设备能力都问不出来）' : explained.reason,
-          hint: explained.hint,
+          hint: `${explained.hint}${chromium === undefined ? ' 另外没有找到 Chrome / Edge，浏览器采集通道也不可用。' : ''}`,
           detail: failure?.detail ?? '',
         }),
     }
   }
 
+  /**
+   * 试一次浏览器采集通道（起 Chromium → 等第一帧 → 关掉）。
+   *
+   * @returns {Promise<{ok: boolean, browser?: string, error?: string}>}
+   */
+  async probeBrowserBackend() {
+    const session = new BrowserCamera({ chromiumPath: this.chromiumPathOption, onFrame: () => {} })
+    try {
+      const result = await session.start()
+      return result.ok
+        ? { ok: true, browser: session.status().browser }
+        : { ok: false, error: result.error ?? '' }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    } finally {
+      await session.stop()
+    }
+  }
+
+  /**
+   * 打开摄像头：**先试 ffmpeg（DirectShow），失败再试 Chromium（Media Foundation）**。
+   *
+   * 为什么是这个顺序：ffmpeg 更轻（一个进程、无浏览器冷启动）；但 Windows 11
+   * 24H2 上有一类机器 DShow 采集不可用（相机应用却正常），那时 Chromium 的
+   * MF 采集是唯一能出画面的路。两条都失败时把**两条各自的原因**都报出来。
+   */
   async start(options = {}) {
+    if (this.backend !== undefined) return { ok: true, device: this.device, backend: this.backend }
+    const viaFfmpeg = await this.startFfmpeg(options)
+    if (viaFfmpeg.ok) {
+      this.backend = 'ffmpeg'
+      return { ...viaFfmpeg, backend: 'ffmpeg' }
+    }
+    const viaBrowser = await this.startBrowser(options)
+    if (viaBrowser.ok) return viaBrowser
+    const ffmpegReason = viaFfmpeg.error ?? 'ffmpeg 采集失败'
+    const browserReason = viaBrowser.error ?? '浏览器采集失败'
+    // 两条都失败时，**两条原因都留着**——否则用户只知道"打不开"，不知道试过什么。
+    this.error = `${ffmpegReason}；${browserReason}`
+    return {
+      ok: false,
+      error: this.error,
+      detail: viaFfmpeg.detail ?? '',
+      reason: viaFfmpeg.reason,
+      hint: viaFfmpeg.hint,
+      browserError: browserReason,
+    }
+  }
+
+  /**
+   * 浏览器采集通道（Chromium + Media Foundation）。
+   *
+   * @param {{device?: string}} [options]
+   * @returns {Promise<{ok: boolean, error?: string, device?: object, backend?: string}>}
+   */
+  async startBrowser(options = {}) {
+    if (this.browserSession !== undefined && this.browserSession.started) {
+      return { ok: true, device: this.device, backend: 'chromium-mf' }
+    }
+    this.error = ''
+    if (this.browserSession === undefined) {
+      this.browserSession = new BrowserCamera({
+        chromiumPath: this.chromiumPathOption,
+        onFrame: frame => this.publishFrame(frame),
+        onError: message => { this.error = message },
+      })
+    }
+    const result = await this.browserSession.start()
+    if (!result.ok) return result
+    this.backend = 'chromium-mf'
+    this.device = { name: '浏览器采集（Media Foundation）', alt: '' }
+    this.hasFrame = true
+    return { ok: true, backend: 'chromium-mf', device: this.device }
+  }
+
+  async startFfmpeg(options = {}) {
     if (this.child !== undefined) return { ok: true, device: this.device }
     const ffmpeg = await this.ensureFfmpeg()
     if (!ffmpeg.ok) return { ok: false, error: ffmpeg.error }
@@ -703,7 +800,7 @@ export class CameraService {
    */
   startRecording(directory, basename) {
     if (this.recording !== undefined) return { ok: false, error: '已经在录像了。' }
-    if (this.child === undefined) return { ok: false, error: '摄像头还没接通，录不了。' }
+    if (this.backend === undefined) return { ok: false, error: '摄像头还没接通，录不了。' }
     try {
       mkdir(directory, { recursive: true })
     } catch (error) {
@@ -782,6 +879,10 @@ export class CameraService {
     if (child !== undefined) {
       try { child.kill() } catch { /* 已经退出了 */ }
     }
+    const browser = this.browserSession
+    this.browserSession = undefined
+    this.backend = undefined
+    if (browser !== undefined) void browser.stop()
     this.stopping = false
   }
 
@@ -792,12 +893,16 @@ export class CameraService {
    */
   status() {
     return {
-      running: this.child !== undefined,
+      running: this.child !== undefined || this.browserSession !== undefined,
+      // 采集后端：ffmpeg（DirectShow）还是 chromium-mf（Media Foundation）。
+      // 面板要显示它——同一个"摄像头已接通"，背后可能是两条完全不同的路。
+      backend: this.backend ?? '',
       hasFrame: this.hasFrame,
       device: this.device?.name ?? '',
       recording: this.recording !== undefined,
       ffmpeg: this.ffmpeg ?? '',
       ffmpegSource: this.ffmpegSource,
+      browser: this.browserSession?.status(),
       clients: this.clients.size,
       error: this.error,
     }

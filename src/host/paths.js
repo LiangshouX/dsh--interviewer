@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Plugin paths and resolved configuration.
  *
  * The plugin ships in two states:
@@ -209,6 +209,8 @@ export function resolveConfig(raw) {
     // 权限闸门只放行纯音频，摄像头在主进程就被拒了）。而 ffmpeg **不是**
     // 系统自带的——别的机器上未必有，所以必须能指路径。
     ffmpegPath: text(config.ffmpegPath) ?? '',
+    // 浏览器采集通道用的 Chromium（Chrome / Edge）路径；留空 = 自动发现。
+    chromiumPath: text(config.chromiumPath) ?? '',
   }
 }
 

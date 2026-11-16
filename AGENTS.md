@@ -238,6 +238,35 @@ DSH 桌面端的 `installMicrophonePermissions` 只放行
   没有 base64、没有几十兆的 JSON 传输。
 - 两边的摄像头按钮**互斥**：设备是独占的，同时开必然有一个失败。
 
+### 6.4.2 第二条采集通道：Chromium 的 Media Foundation
+
+**什么时候需要它（已实测，别再重复踩）：** Windows 11 24H2 上有一类机器，
+「相机」应用能出画面，但 **DirectShow 采集一律失败**——ffmpeg 7.1 报
+`Unable to BindToObject`、6.1 报 `Could not run graph`；换微软通用 UVC 驱动
+（`USB Video Device` / `usbvideo`）、重启、禁用再启用设备，**全都不解决**。
+ffmpeg 枚举时会把该设备标成 `(none)`（连能力都问不出来），而同一进程抓
+麦克风是好的。
+
+**为什么 Chromium 行**：它在 Windows 上的 `getUserMedia` 走 **Media Foundation**，
+和「相机」应用同一条栈，因此不受 DShow 故障影响。
+
+**实现（`src/host/camera-browser.js`）：**
+
+- 宿主起一个**只监听 127.0.0.1** 的小 HTTP 服务：`GET /` 返回采集页，
+  `POST /frame` 收一帧 JPEG；
+- 页面用 `getUserMedia` → canvas → JPEG，按帧率 POST 回来；
+- 宿主把每帧交给 `CameraService.publishFrame()`——**预览、录像、首帧检测全部复用**，
+  下游一行都不用改；
+- 无头 Chromium 用独立的临时 `--user-data-dir`（退出即删），加
+  `--use-fake-ui-for-media-stream` 自动授权（这是插件自己的采集实例，不碰用户浏览器）。
+
+**顺序与代价**：`start()` 先试 ffmpeg，失败才回落它；代价是多一个进程、
+冷启动 ~2–5 秒。`status().backend` 会写明 `ffmpeg` 还是 `chromium-mf`，
+面板必须显示——用户有权知道画面是从哪条路来的。
+
+**不要做的**：不要用 `gdigrab` 抓「相机」应用窗口当画面。那会把窗口边框、
+UI 一起拍进去，且要求窗口可见——是演示 hack，不是产品路径。
+
 ### 6.5 语音链路：宿主优先，但说清继承的边界
 
 **识别**：宿主的 `ctx.speechToText` → 插件自己的 HTTP 端点 → 浏览器 Web Speech → 键盘。

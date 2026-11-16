@@ -111,3 +111,19 @@ test('不认识的报错保留原文，不编造原因', async () => {
   assert.equal(explained.reason, 'something weird happened')
   assert.ok(explained.hint.length > 0)
 })
+
+test('浏览器采集通道：显式配置优先，配置错时不偷偷换成别的', async () => {
+  const { locateChromium } = await import('../src/host/camera-browser.js')
+  const found = locateChromium({ chromiumPath: process.execPath })
+  assert.equal(found?.source, 'config')
+  assert.equal(found?.path, process.execPath)
+  assert.equal(locateChromium({ chromiumPath: 'D:/definitely/not/here/chrome.exe' }), undefined)
+})
+
+test('浏览器采集通道的页面包含 getUserMedia 与回传帧的地址', async () => {
+  const { capturePage } = await import('../src/host/camera-browser.js')
+  const page = capturePage({ width: 1280, height: 720, fps: 10 })
+  assert.match(page, /getUserMedia/)
+  assert.match(page, /\/frame/)
+  assert.match(page, /1280/)
+})

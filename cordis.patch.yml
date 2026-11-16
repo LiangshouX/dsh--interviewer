@@ -1,4 +1,4 @@
-# dsh-realtime-interview bundle patch
+﻿# dsh-realtime-interview bundle patch
 #
 # One Host row. The row id is the plugin id the Plugin Manager shows;
 # `name` must equal the package name so the client-modules scan resolves this
@@ -44,6 +44,10 @@
 #   ttsReferenceAudio 声音复刻用的本机音频样本（mp3/wav，≤10 MB，仅在合成时读取）
 #   ttsFormat       输出格式：mp3 | wav
 #   ttsRate         语速（0.5 ~ 2）
+#   chromiumPath    浏览器采集通道用的 Chrome/Edge 路径（留空=自动发现）。
+#                   **为什么有第二条通道**：Windows 11 24H2 上有些机器 DirectShow 采集坏了
+#                   （相机应用正常），而 Chromium 的 Media Foundation 采集还能用。启动时先试
+#                   ffmpeg，失败自动回落浏览器采集。
 #   recordVideo     是否默认开启摄像头录像（true/false）。
 #   recordAudio     是否默认开启录音（true/false）。
 #   ffmpegPath      ffmpeg 的可执行文件路径。
@@ -83,3 +87,4 @@
         recordVideo: true
         recordAudio: true
         ffmpegPath: ''
+        chromiumPath: ''

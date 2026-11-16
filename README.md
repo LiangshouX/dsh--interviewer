@@ -1,4 +1,4 @@
-# dsh-realtime-interview — 模拟面试间
+﻿# dsh-realtime-interview — 模拟面试间
 
 > 一个 DeepSeek Harness（DSH）插件：把「简历 + 目标岗位 JD」变成**一场有准备的面试**。
 
@@ -100,7 +100,20 @@ target: <仓库绝对路径>/release/dsh-realtime-interview-<version>.tgz
 
 助手调 `interview_finish` 写报告，面板「报告」页显示。
 
-## 桌面端的摄像头：为什么需要 ffmpeg
+## 桌面端的摄像头：两条采集通道
+
+DSH 桌面端的 Electron 权限处理器只放行纯音频请求，所以**浏览器里的摄像头被挡**。
+Host 侧有两条采集通道，启动时自动选：
+
+1. **ffmpeg（DirectShow）** —— 更快、更轻，绝大多数机器走这条；
+2. **Chromium（Media Foundation）** —— ffmpeg 打不开时自动回落。
+   Windows 11 24H2 上有一类机器 DShow 采集坏了（「相机」应用正常、ffmpeg 报
+   Unable to BindToObject），而 Chromium 的 MF 采集还能用。
+
+面板会显示当前用的是哪条（fmpeg / chromium-mf）。两条都需要**本机**有对应程序：
+ffmpeg 由你指定路径或走 PATH；Chromium 通道用本机的 Chrome / Edge（也可在设置里指定）。
+
+### ffmpeg 为什么需要它
 
 DSH 桌面端（Electron）**只放行纯音频的媒体请求**，摄像头在主进程就被拒了——
 请求压根没走到 Windows 的隐私设置，所以**改系统设置没用**。

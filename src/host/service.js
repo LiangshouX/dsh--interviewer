@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The interview session — the one implementation behind every caller.
  *
  * **The shape of one session on disk**
@@ -128,7 +128,7 @@ export class InterviewService {
      * **它只负责摄像头。** 麦克风仍然走浏览器的 `getUserMedia`——那条路在
      * 桌面端是通的，没必要重造。
      */
-    this.camera = new CameraService({ ffmpegPath: this.config.ffmpegPath })
+    this.camera = new CameraService({ ffmpegPath: this.config.ffmpegPath, chromiumPath: this.config.chromiumPath })
     /**
      * 语音能力的门面（识别链路 + 合成链路）。
      *
