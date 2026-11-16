@@ -339,7 +339,8 @@
       [data-iv-page] * { box-sizing: border-box; }
       /* 背景氛围层：三团极淡的光斑，42s 缓慢漂移。 */
       [data-iv-page]::before {
-        content: ''; position: absolute; inset: -10% -10% -10% -10%; z-index: 0; pointer-events: none;
+        content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+        background-size: 165% 165%; background-position: 12% 0%;
         background:
           radial-gradient(40% 40% at 18% 12%, color-mix(in srgb, var(--iv-accent) 10%, transparent), transparent 70%),
           radial-gradient(36% 36% at 88% 18%, color-mix(in srgb, var(--iv-tone-tally-text) 5%, transparent), transparent 70%),
@@ -349,8 +350,8 @@
       }
       [data-iv-page] > * { position: relative; z-index: 1; }
       @keyframes ivDrift {
-        from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
-        to { transform: translate3d(1.5%, 1.5%, 0) scale(1.04); }
+        from { background-position: 6% 0%; }
+        to { background-position: 94% 100%; }
       }
       [data-iv-page] button { transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 200ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease; }
       [data-iv-page] button:hover { transform: translateY(-1px); }

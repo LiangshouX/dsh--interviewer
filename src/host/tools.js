@@ -105,6 +105,26 @@ export function registerTools(ctx, service) {
       async () => service.purgeEmptySessions(),
     ),
     tool(
+      'interview_request_agent',
+      '把一件活派给面试工作区的助手会话：fetch-jd（抓 JD）或 checklist（出面试官底稿）。默认在面试工作区里复用/新建会话，不再用"最近会话"。',
+      {
+        sessionId: sessionProperty,
+        task: { type: 'string', description: 'fetch-jd 或 checklist' },
+        url: { type: 'string', description: 'fetch-jd 时的岗位链接。' },
+        hostSessionId: { type: 'string', description: '指定宿主会话（可选；省略则用面试工作区的助手会话）。' },
+      },
+      async args => {
+        const task = String(args.task ?? '')
+        if (task === 'fetch-jd') {
+          return service.requestAgentJd(String(args.sessionId ?? ''), String(args.url ?? ''), args.hostSessionId)
+        }
+        if (task === 'checklist') {
+          return service.requestAgentChecklist(String(args.sessionId ?? ''), args.hostSessionId)
+        }
+        throw new Error('task 只能是 fetch-jd 或 checklist')
+      },
+    ),
+    tool(
       'interview_prepare',
       '开一场模拟面试：落盘简历与 JD，建好会话。给 jdUrl 时会先尝试抓取该链接（抓不到会如实说，并让你改用粘贴文本兜底）。',
       {

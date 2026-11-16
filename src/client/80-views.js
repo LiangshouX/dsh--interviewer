@@ -437,7 +437,7 @@
           })
           notify(
             '交给助手了',
-            `发到 DSH 对话「${host.title || host.id || '当前对话'}」，在那边能看着它跑。抓到正文会自动回到这一场。`,
+            `${result?.message ?? '已经交给助手了。'}（会话 id：${host.id ?? '未知'}）在 DSH 那边能看着它跑，抓到正文会自动回到这一场。`,
             'ok',
           )
         } catch (failure) {
@@ -447,6 +447,28 @@
           setBusy(false)
         }
       }, [jdUrl, sessionId, notify])
+
+      // ── 让助手出底稿 ──────────────────────────────────────────────
+      //
+      // 填完简历和 JD 之后，如果没有这一步，用户就卡在"底稿怎么办"上。
+      // 派活同样落在面试工作区，产出由 interview_save_checklist 写回。
+      const askChecklist = useCallback(async () => {
+        setBusy(true)
+        try {
+          const result = await apiPost('agent/checklist', { sessionId })
+          const host = result?.hostSession ?? {}
+          notify(
+            '已让助手出底稿',
+            `${result?.message ?? ''}。产出后会自动出现在这张卡里。`,
+            'ok',
+          )
+          void host
+        } catch (failure) {
+          notify('派不出去', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setBusy(false)
+        }
+      }, [sessionId, notify])
 
       const checklist = session?.checklist?.items ?? []
       const probed = checklist.filter(item => item.probed === true).length
@@ -763,8 +785,19 @@
               // 收起状态也得有话说，否则这张卡是空的。
               h('div', { key: 'status', style: { ...S.hint, marginTop: 12, lineHeight: 1.7 } },
                 checklist.length === 0
-                  ? '还没有底稿。在 DSH 对话里让助手用 interview-prep 技能基于简历与 JD 做调研，产出后用 interview_save_checklist 落盘。'
+                  ? '还没有底稿。底稿由助手按简历与 JD 调研产出，写回这一场。'
                   : `底稿共 ${checklist.length} 项，已问 ${probed} 项。面试中助手按它动态深挖——具体题目你看不到，那才是真实面试的样子。`),
+              checklist.length === 0
+                ? h('div', { key: 'ask', style: { marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 } }, [
+                  h('div', { key: 'w', style: { ...S.hint, fontFamily: F.mono, fontSize: 10.5, wordBreak: 'break-all' } },
+                    `助手会话工作区：${config?.workspaceRoot?.path ?? ''}`),
+                  h('button', {
+                    key: 'b',
+                    style: S.btn('primary', busy),
+                    onClick: askChecklist,
+                  }, busy ? '派活中…' : '让助手出底稿'),
+                ])
+                : null,
             ]),
 
             h(Section, {key: 'k9', 

@@ -369,6 +369,19 @@ async function runAction(service, segments, body) {
         return await service.setJd(String(body.sessionId ?? ''), body)
       }
       throw new Error(`未知的 JD 操作：${rest.join('/')}`)
+    case 'agent': {
+      // 派活给助手：底稿（考点清单）。JD 抓取的派活仍走 jd/request-agent。
+      if (rest[0] === 'checklist') {
+        return await service.requestAgentChecklist(
+          String(body.sessionId ?? ''),
+          body.hostSessionId,
+        )
+      }
+      if (rest[0] === 'session') {
+        return await service.ensureAgentSession()
+      }
+      throw new Error(`未知的助手操作：${rest.join('/')}`)
+    }
     case 'resumes': {
       if (rest.length === 0) {
         if (body.id === undefined && body.text === undefined && body.sessionId !== undefined) {

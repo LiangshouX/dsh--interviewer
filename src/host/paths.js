@@ -145,6 +145,8 @@ export const SETTING_SPECS = {
   // 面试间保护
   guardEnabled: { kind: 'boolean' },
   guardQuiet: { kind: 'boolean' },
+  // 上一次派活给助手时用的宿主会话（下次复用，避免刷屏）
+  agentSessionId: { kind: 'string' },
 }
 
 export const SETTING_KEYS = Object.keys(SETTING_SPECS)

@@ -824,6 +824,47 @@ export class InterviewService {
    * @param {string} url
    * @param {string} [hostSessionId] which host conversation to use
    */
+  /**
+   * 确保有一个**落在面试工作区**的宿主会话。
+   *
+   * **为什么必须落在那个目录。** 之前这里直接拿"宿主最近的会话"来派活，
+   * 结果请求被发到了别的项目（比如 Interview-Material）的会话里：
+   * 用户看到助手在别的对话里干活，面试卷宗与对话上下文完全对不上。
+   * 现在用 `sessionController.create({ cwd: 工作区根 })`：会话属于这场面试
+   * 的卷宗目录，助手读写的文件、日志都在同一个地方。
+   */
+  async ensureAgentSession() {
+    const controller = this.ctx?.get?.('sessionController')
+    if (controller === undefined || controller === null || typeof controller.create !== 'function') {
+      throw new Error('这个宿主没有提供建会话接口，不能把请求派给助手')
+    }
+    const root = await this.effectiveRoot()
+    const ensured = await ensureDataRoot(root)
+    if (ensured.error !== undefined) throw new Error(`面试工作区建不出来：${ensured.error}`)
+    const settings = await readSettings()
+    const request = { cwd: root }
+    if (typeof settings.agentSessionId === 'string' && settings.agentSessionId !== '') {
+      request.sessionId = settings.agentSessionId
+    }
+    const created = await controller.create(request)
+    const agentSessionId = String(created?.sessionId ?? '')
+    if (agentSessionId === '') throw new Error('宿主没有返回会话 id')
+    if (agentSessionId !== settings.agentSessionId) {
+      await writeSettings({ agentSessionId })
+    }
+    return { sessionId: agentSessionId, workspace: root }
+  }
+
+  /**
+   * Hand a JD link to the host's assistant and let **it** fetch the page.
+   *
+   * **发到哪里由我们决定：** 默认在面试工作区里新建/复用一个会话；
+   * 只有调用方明确给了 hostSessionId 才用那个会话，并在返回里说清楚。
+   *
+   * @param {string} sessionId the interview session the JD belongs to
+   * @param {string} url
+   * @param {string} [hostSessionId] which host conversation to use
+   */
   async requestAgentJd(sessionId, url, hostSessionId = undefined) {
     const target = String(url ?? '').trim()
     if (target === '') throw new Error('没给链接')
@@ -831,36 +872,69 @@ export class InterviewService {
     if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
       throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
     }
-    let hostSession = undefined
+    let hostSession
     if (typeof hostSessionId === 'string' && hostSessionId.trim() !== '') {
-      hostSession = { id: hostSessionId.trim(), title: '' }
+      hostSession = { sessionId: hostSessionId.trim(), workspace: undefined, explicit: true }
     } else {
-      const sessions = await this.listHostSessions()
-      hostSession = sessions[0]
-    }
-    if (hostSession === undefined || hostSession.id === '') {
-      throw new Error('宿主里还没有任何会话——先在 DSH 里开一个对话，助手才有地方接这个活')
+      hostSession = { ...(await this.ensureAgentSession()), explicit: false }
     }
     const text = [
       `请帮我抓取这个岗位 JD：${target}`,
       '用浏览器打开它（这个页面可能需要登录或前端渲染），把岗位描述的正文完整抄下来，',
       `然后调用 interview_save_jd 工具，把正文写入面试会话 ${sessionId}（url 填 ${target}）。`,
-      '如果实在拿不到正文，如实说明卡在哪一步。',
+      '写完之后再调用 interview_get_context 确认已落盘。如果实在拿不到正文，如实说明卡在哪一步。',
     ].join('\n')
     await controller.prompt({
       requestId: `jd-${sessionId}-${Date.now()}`,
-      sessionId: hostSession.id,
+      sessionId: hostSession.sessionId,
       mode: 'queue',
       content: [{ type: 'text', text }],
       // **signal 是必填的第二个参数。** 宿主实现的第一句就是
-      // `signal.throwIfAborted()`——不传就是
-      // 「Cannot read properties of undefined (reading 'throwIfAborted')」，
-      // 看起来像「派单坏了」，其实是调用姿势不对（和目录选择器同源的问题）。
+      // `signal.throwIfAborted()`——不传就炸。
     }, new AbortController().signal)
     return {
       dispatched: true,
-      hostSession: { id: hostSession.id, title: hostSession.title },
-      message: '请求已经发给助手了。在 DSH 对话里能看到它跑，抓到后正文会自动回到这一场面试。',
+      hostSession: { id: hostSession.sessionId, workspace: hostSession.workspace, explicit: hostSession.explicit },
+      message: hostSession.explicit
+        ? '请求已发到你指定的对话。'
+        : `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
+    }
+  }
+
+  /**
+   * 让助手产出「面试官底稿」（考点清单）。
+   *
+   * 底稿由模型写，插件只负责派活与落盘（interview_save_checklist）。
+   * 没有这个动作时，用户填完简历和 JD 就卡住了——面板必须给出下一步。
+   *
+   * @param {string} sessionId
+   * @param {string} [hostSessionId]
+   */
+  async requestAgentChecklist(sessionId, hostSessionId = undefined) {
+    const controller = this.ctx?.get?.('sessionController')
+    if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
+      throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
+    }
+    const hostSession = typeof hostSessionId === 'string' && hostSessionId.trim() !== ''
+      ? { sessionId: hostSessionId.trim(), workspace: undefined, explicit: true }
+      : { ...(await this.ensureAgentSession()), explicit: false }
+    const text = [
+      `请为面试会话 ${sessionId} 出一份「面试官底稿」（考点清单）。`,
+      '1. 先调用 interview_get_context 读简历、JD 与已有清单；',
+      '2. 按 JD 要求与候选人经历映射出考点，分 core / deep / bonus 三档，每项写清 source（jd/resume/research）与 why；',
+      '3. 调用 interview_save_checklist 写入这场面试（items 数组）。',
+      '如果简历或 JD 还缺，就别编造，直接说明缺哪一份。',
+    ].join('\n')
+    await controller.prompt({
+      requestId: `checklist-${sessionId}-${Date.now()}`,
+      sessionId: hostSession.sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text }],
+    }, new AbortController().signal)
+    return {
+      dispatched: true,
+      hostSession: { id: hostSession.sessionId, workspace: hostSession.workspace, explicit: hostSession.explicit },
+      message: hostSession.explicit ? '请求已发到你指定的对话。' : `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
     }
   }
 
@@ -1164,6 +1238,8 @@ export class InterviewService {
       speechModel: await this.speechModelFacts(),
       // 误触新建出来的空场次：设置页给"清理"入口，而不是让用户一场场删。
       emptySessions: await this.listEmptySessions(),
+      // 助手会话落在哪个工作区——面板要能说清楚请求会发到哪。
+      agent: { sessionId: settings.agentSessionId ?? '', workspace: await this.effectiveRoot() },
       session,
     }
   }
