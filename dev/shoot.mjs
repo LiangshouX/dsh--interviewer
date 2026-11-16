@@ -14,6 +14,7 @@
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { readFile, mkdir, rm, copyFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -79,6 +80,35 @@ async function ensureReact() {
   }
 }
 
+/**
+ * Chromium 的启动参数。
+ *
+ * **为什么要探路径。** node 版 playwright 期望 `chrome-linux64`，
+ * 实际装的可能是 `chrome-linux`；而 Windows 上路径又完全是另一套。
+ * 所以：先按已知路径试，都没有就用 playwright 自带的。
+ *
+ * `--use-fake-device-for-media-stream` 让 Chromium 生成一个假摄像头
+ * （那个绿球 + 时间戳的测试画面），这样「摄像头已接通」的状态
+ * 在截图里是可见的，不必真接一台设备。
+ */
+function launchOptions() {
+  const args = [
+    '--use-fake-ui-for-media-stream',
+    '--use-fake-device-for-media-stream',
+  ]
+  const candidates = [
+    '/root/.cache/ms-playwright/chromium-1243/chrome-linux/chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+  ]
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return { executablePath: candidate, args }
+  }
+  // Windows / macOS：交给 playwright 自己找。
+  return process.platform === 'linux' ? { args: [...args, '--no-sandbox'] } : { args }
+}
+
 async function main() {
   const wanted = process.argv.slice(2)
   const presets = wanted.length > 0 ? PRESETS.filter(p => wanted.includes(p.name)) : PRESETS
@@ -92,11 +122,7 @@ async function main() {
   await mkdir(SHOTS, { recursive: true })
 
   const { server, port } = await serve(resolve(HERE, '..'))
-  // node 版 playwright 期望 chrome-linux64，实际装的是 chrome-linux —— 直接指路。
-  const browser = await chromium.launch({
-    executablePath: '/root/.cache/ms-playwright/chromium-1243/chrome-linux/chrome',
-    args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
-  })
+  const browser = await chromium.launch(launchOptions())
   try {
     for (const preset of presets) {
       const page = await browser.newPage({

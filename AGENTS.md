@@ -193,7 +193,7 @@ Web Speech API 在很多网络环境里不可达（Chromium 的识别后端要�
 | `src/skills/<name>/SKILL.md` | 随包技能源码 |
 | `client.js` | 浏览器半边（单文件，零构建、零运行时依赖） |
 | `scripts/` | build / pack |
-| `docs/` | PRD / API / DETAIL |
+| `docs/` | PRD / API / DETAIL / HANDOVER（**接手开发先读 HANDOVER**） |
 | `tests/` | `node --test` 的单测 |
 
 **新增文件前先看这张表。** 新的能力优先落在 `src/host/service.js` 的方法上，

@@ -270,7 +270,7 @@ node scripts/build.mjs --check   # 只校验
 node scripts/pack.mjs       # 打包 release/*.tgz
 ```
 
-纪律见 [AGENTS.md](AGENTS.md)。接口契约见 [docs/API.md](docs/API.md)，产品定义见 [docs/PRD.md](docs/PRD.md)。
+纪律见 [AGENTS.md](AGENTS.md)。接口契约见 [docs/API.md](docs/API.md)，实现细节见 [docs/DETAIL.md](docs/DETAIL.md)，产品定义见 [docs/PRD.md](docs/PRD.md)，**接手开发看 [docs/HANDOVER.md](docs/HANDOVER.md)**。
 
 ## 已知限制
 
