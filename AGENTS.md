@@ -55,15 +55,20 @@ plugin_manager install_bundle  <release/*.tgz>
 ```
 src/       ← 开发对象（DSH 不可见）
   host/      Host 半边源码
+  client/    浏览器半边源码（按模块分文件）
   skills/    Skill 源码（开发中的 Skill 永远不被 agent 调到）
 build/     ← 发布物（gitignore）
   skills/    通过校验的 Skill（bundledSkillDir 指向这里）
 release/   ← npm bundle tarball（gitignore）
+client.js  ← **生成物**：scripts/build-client.mjs 由 src/client/* 拼装
 ```
 
 - `src/skills` 不在 DSH 任何扫描根目录（`.dsh/skills` / `.agents/skills`）→ 双重隔离。
 - `build/` 由 `scripts/build.mjs` 从 `src/` 生成，并跑**发布前校验**。
 - 校验不过 → **非 0 退出，不产出**。不要跳过校验直接 `cp`。
+- **`client.js` 不许手改**：它是 `src/client/*.js` 按 `manifest.json` 顺序拼出来的。
+  改界面改 `src/client/`，然后 `node scripts/build-client.mjs`（`build.mjs` 会自动跑）。
+  `build.mjs --check` 会拦住"源码改了但没重拼"的情况。
 
 > DSH 的 skill 发现深度只有一层：只认 `<root>/<name>/SKILL.md`。
 > 布局必须是 `build/skills/<name>/SKILL.md`。
@@ -218,10 +223,12 @@ DSH 桌面端的 `installMicrophonePermissions` 只放行
 - **设备名一律用「替代名」**（`@device_pnp_\?\usb#...`），不用显示名。
   显示名里有空格和中文，经过 shell 会被拆开，报一个莫名其妙的
   「找不到设备」。
-- **ffmpeg 不是系统自带的。** 定位顺序：`config.ffmpegPath` →
-  `DSH_FFMPEG_PATH` → `PATH` → 若干常见安装位置。
-  **全都找不到就是「这台机器没有摄像头采集程序」**——如实这么说，
-  并说清怎么装。面试本身不受影响（麦克风、键盘、报告全都照常）。
+- **ffmpeg 不是系统自带的，而且不许猜安装位置。** 定位顺序：`config.ffmpegPath`
+  （**用户在设置页填的，写进 profile 设置文件**）→ `DSH_FFMPEG_PATH` →
+  `PATH` → 系统的 `where`。**不硬编码任何路径**——安装位置是这台机器的事实，
+  写死的候选在别人的机器上必然失效。全都找不到就是「这台机器没有摄像头采集程序」，
+  如实这么说，并把「填路径 / 安装 ffmpeg」的入口给出来。
+  面试本身不受影响（麦克风、键盘、报告全都照常）。
 
 **客户端的契约：**
 
@@ -349,8 +356,9 @@ DSH 桌面端的 `installMicrophonePermissions` 只放行
 |---|---|
 | `src/host/` | Host 半边：service / api / tools / skills / jd / html / extract |
 | `src/host/voice/` | 语音：`host-asr`（宿主服务适配）/ `http-asr`（两套协议）/ `tts`（编排 + `tts/` 下的协议适配）/ `credentials`（凭据 seam） |
+| `src/client/` | 浏览器半边源码：`00-header` / `10-prelude` / `20-locale` / `30-theme` / `40-api` / `50-hooks` / `60-voice` / `70-primitives` / `80-views` / `90-panel`（按 `manifest.json` 顺序拼装） |
 | `src/skills/<name>/SKILL.md` | 随包技能源码 |
-| `client.js` | 浏览器半边（单文件，零构建、零运行时依赖） |
+| `client.js` | 浏览器半边**生成物**（`node scripts/build-client.mjs` 拼装；不许手改） |
 | `scripts/` | build / pack |
 | `docs/` | PRD / API / DETAIL / HANDOVER（**接手开发先读 HANDOVER**） |
 | `tests/` | `node --test` 的单测 |
@@ -407,7 +415,15 @@ manifest 字段缺失、`client.js` 没走 `window.__ModuleLoader__.load`、
 主按钮用骨白反色——蓝按钮会让它退回通用后台的样子。字体三档：
 衬线（提问与报告标题）/ 无衬线（UI）/ 等宽（计时、电平、路径、字数）。
 
-### 10.1 `client.js` 是单文件、无构建的浏览器 bundle
+### 10.1 `client.js` 是拼装出来的单文件 bundle
+
+**源码在 `src/client/`，`client.js` 是生成物。** DSH 只加载一个 `client.js`，
+浏览器里没有打包器也没有相对 import 的解析，所以"分模块维护 + 单文件交付"
+只能靠 `scripts/build-client.mjs` 拼装：
+
+- 分段文件里**不许**出现 `window.__ModuleLoader__`（bundle 契约只在构建壳里）；
+- `require('react')` 只许出现在 `10-prelude.js`；
+- 改了 `src/client/*` 忘了重拼 → `build.mjs --check` 会拦住。
 
 几条规矩：
 

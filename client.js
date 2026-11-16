@@ -26,6 +26,14 @@
  * from the browser module table at runtime; everything else is inlined, so the
  * plugin carries no build step and no runtime dependency.
  */
+/*!
+ * dsh-realtime-interview — client half (browser bundle).
+ *
+ * ⚠ 这个文件是**生成物**：源码在 src/client/，由 scripts/build-client.mjs 拼装。
+ *   要改界面请改 src/client/*.js，改这里会在下一次构建时被覆盖。
+ *
+ * 设计语言与 bundle 格式的完整说明在 src/client/00-header.js。
+ */
 window.__ModuleLoader__.load({
   id: 'dsh-realtime-interview',
   factory: (require) => {
@@ -1761,7 +1769,6 @@ window.__ModuleLoader__.load({
 
       return { supported, active, error, pending, timing, start, stop, interim: pending > 0 ? '正在转写…' : '' }
     }
-
 
     // ── small components ──────────────────────────────────────────────────
 
@@ -3781,7 +3788,7 @@ window.__ModuleLoader__.load({
       ])
     }
 
-    // ── panel ─────────────────────────────────────────────────────────────
+﻿    // ── panel ─────────────────────────────────────────────────────────────
 
     /**
      * 按岗位给场次分组。

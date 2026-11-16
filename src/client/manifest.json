@@ -1,0 +1,14 @@
+{
+  "header": "00-header.js",
+  "parts": [
+    "10-prelude.js",
+    "20-locale.js",
+    "30-theme.js",
+    "40-api.js",
+    "50-hooks.js",
+    "60-voice.js",
+    "70-primitives.js",
+    "80-views.js",
+    "90-panel.js"
+  ]
+}

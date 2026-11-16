@@ -26,6 +26,7 @@ import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join, dirname, resolve, relative, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { writeClient, clientOutOfDate } from './build-client.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SRC = join(ROOT, 'src')
@@ -325,6 +326,13 @@ async function checkLayout() {
   console.log(output.trim())
 }
 
+// 客户端 bundle 是**生成物**：先把 src/client/* 拼成 client.js，再校验。
+// 反过来就会拿上一版去跑冒烟与渲染探针，等于校验了错的东西。
+if (!onlyCheck) {
+  await writeClient()
+  console.log('✓ 已拼装 client.js（src/client/*）')
+}
+
 await checkPluginHalf()
 await checkSyntax()
 await checkClient()
@@ -341,6 +349,8 @@ if (!onlyCheck) {
   console.log(`✓ 已构建：build/skills（${skillDirs.length} 个）`)
   await checkRuntime()
 } else {
+  // 客户端 bundle 的新鲜度：源码改了但没重新拼装，等于校验了上一版。
+  if (await clientOutOfDate()) problems.push('client.js 与 src/client/ 不同步：先跑 node scripts/build-client.mjs')
   const srcFiles = (await walk(SKILLS_SRC)).map(file => relative(SKILLS_SRC, file)).sort()
   const buildFiles = (await walk(join(BUILD, 'skills'))).map(file => relative(join(BUILD, 'skills'), file)).sort()
   const same = JSON.stringify(srcFiles) === JSON.stringify(buildFiles)

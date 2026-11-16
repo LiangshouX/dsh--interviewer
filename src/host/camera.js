@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Host-side camera capture — the way out of the desktop host's camera block.
  *
  * ## 为什么需要这一层
@@ -65,7 +65,7 @@ import { createWriteStream } from 'node:fs'
 import { existsSync } from 'node:fs'
 import { access } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { mkdir, readdir, rename, rm } from 'node:fs/promises'
+import { mkdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** MIME type of the streaming preview format. */
@@ -97,32 +97,16 @@ const PREVIEW_WIDTH = 1280
 const PREVIEW_HEIGHT = 720
 
 /**
- * Common Windows install locations for ffmpeg, tried after PATH.
+ * ffmpeg 的定位顺序：**用户配置 → 环境变量 → PATH → where**。
  *
- * **为什么要有通配。** ffmpeg 的 Windows 发行版解压出来通常带版本号目录
- * （`...\Ffmpeg\ffmpeg-n7.1.1-...-win64-gpl-7.1\bin\ffmpeg.exe`），
- * 写死一个路径等于替用户决定他装哪个版本。所以这里既有精确路径，
- * 也有 `*` 通配，按目录排序后逐个试。
+ * **不要硬编码候选路径。** 曾经写死过 `D:\ProgramFils\ffmpeg\...` 这种
+ * 路径，结果在开发机上"碰巧能用"、换台机器就完全失效，而且还会把别人
+ * 装在不同版本目录里的 ffmpeg 漏掉。安装位置是**这台机器的事实**，
+ * 该由用户在设置页里填（写进 profile 的设置文件），不该由插件猜。
+ *
+ * 没有配置时靠 PATH 与系统的 `where` 兜底；两者都找不到，就如实说
+ * 「这台机器没有摄像头采集程序」，并给出让用户填路径/安装的入口。
  */
-const WINDOWS_FFMPEG_CANDIDATES = [
-  'D:\\ProgramFiles\\Ffmpeg\\*\\bin\\ffmpeg.exe',
-  'C:\\ProgramFiles\\Ffmpeg\\*\\bin\\ffmpeg.exe',
-  'C:\\Program Files\\Ffmpeg\\*\\bin\\ffmpeg.exe',
-  'C:\\ffmpeg\\bin\\ffmpeg.exe',
-  'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
-  'C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe',
-  'C:\\ProgramData\\scoop\\shims\\ffmpeg.exe',
-  'D:\\ProgramFiles\\MiniConda\\Library\\bin\\ffmpeg.exe',
-  'C:\\ProgramData\\miniconda3\\Library\\bin\\ffmpeg.exe',
-]
-
-/** Common macOS/Linux install locations. */
-const UNIX_FFMPEG_CANDIDATES = [
-  '/usr/local/bin/ffmpeg',
-  '/opt/homebrew/bin/ffmpeg',
-  '/usr/bin/ffmpeg',
-]
-
 /**
  * Split ffmpeg's `-list_devices` output into structured device lists.
  *
@@ -216,13 +200,7 @@ export async function locateFfmpeg(options = {}) {
     if (fromWhere !== undefined) return { path: fromWhere, source: 'where' }
   }
 
-  const candidates = process.platform === 'win32' ? WINDOWS_FFMPEG_CANDIDATES : UNIX_FFMPEG_CANDIDATES
-  for (const candidate of candidates) {
-    for (const expanded of await expandCandidate(candidate)) {
-      const resolved = await resolveExecutable(expanded)
-      if (resolved !== undefined) return { path: resolved, source: 'wellknown' }
-    }
-  }
+  // **到此为止，不再猜安装位置。** 找不到就是找不到：让用户在设置页填。
   return undefined
 }
 
@@ -241,32 +219,6 @@ async function whereFfmpeg() {
   } catch {
     return undefined
   }
-}
-
-/**
- * Expand a `*` wildcard in a candidate path.
- *
- * @param {string} pattern
- * @returns {Promise<string[]>}
- */
-export async function expandCandidate(pattern) {
-  if (!pattern.includes('*') || process.platform !== 'win32') return [pattern]
-  const segments = pattern.split('\\')
-  const star = segments.findIndex(segment => segment === '*')
-  if (star === -1) return [pattern]
-  const root = segments.slice(0, star).join('\\')
-  const rest = segments.slice(star + 1).join('\\')
-  let entries = []
-  try {
-    entries = await readdir(root, { withFileTypes: true })
-  } catch {
-    return []
-  }
-  return entries
-    .filter(entry => entry.isDirectory())
-    .map(entry => `${root}\\${entry.name}\\${rest}`)
-    .sort()
-    .reverse()
 }
 
 /**

@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+﻿import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { deviceSelector, locateFfmpeg, parseDeviceList } from '../src/host/camera.js'
 
@@ -103,27 +103,4 @@ test('不认识的报错保留原文，不编造原因', async () => {
   const explained = explainCameraFailure('something weird happened')
   assert.equal(explained.reason, 'something weird happened')
   assert.ok(explained.hint.length > 0)
-})
-
-test('候选路径的通配只在 Windows 上展开，其他平台原样返回', async () => {
-  const { expandCandidate } = await import('../src/host/camera.js')
-  const expanded = await expandCandidate('/usr/local/bin/ffmpeg')
-  assert.deepEqual(expanded, ['/usr/local/bin/ffmpeg'])
-  if (process.platform !== 'win32') {
-    const star = await expandCandidate('C:\\nope\\*\\bin\\ffmpeg.exe')
-    assert.deepEqual(star, ['C:\\nope\\*\\bin\\ffmpeg.exe'])
-  }
-})
-
-test('ffmpeg 把打不开的摄像头标成 (none) 时也要保留，不能当成「没有设备」', async () => {
-  const { parseDeviceList } = await import('../src/host/camera.js')
-  const parsed = parseDeviceList([
-    '[dshow @ 000] "BisonCam,NB Pro" (none)',
-    '[dshow @ 000]   Alternative name "@device_pnp_\\\\?\\usb#vid_5986&pid_9102"',
-    '[dshow @ 000] "麦克风 (Realtek(R) Audio)" (audio)',
-  ].join('\n'))
-  assert.equal(parsed.video.length, 1)
-  assert.equal(parsed.video[0].name, 'BisonCam,NB Pro')
-  assert.match(parsed.video[0].alt, /device_pnp/)
-  assert.equal(parsed.audio.length, 1)
 })

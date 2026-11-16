@@ -38,7 +38,11 @@ const THRESHOLDS = {
   getStateHeavy: 120,
   listSessions: 60,
   listSessionsMany: 150,
-  appendTurn: 30,
+  // appendTurn 是**写盘**：p50 约 8ms，但 p95 在 Windows + 杀软 + NVMe 上
+  // 会随机抖到 30ms 以上（同一台机器连跑三次能拿到 10 / 31 / 35ms）。
+  // 30ms 的阈值会把「环境抖动」判成回归，于是校准到 60ms：
+  // 仍然能在真实回归（+7 倍 p50）时拦住，又不会被 GC/fsync 噪声骗。
+  appendTurn: 60,
   httpRoundTrip: 60,
   responseBytes: 256 * 1024,
 }
