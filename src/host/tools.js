@@ -105,6 +105,12 @@ export function registerTools(ctx, service) {
       async () => service.purgeEmptySessions(),
     ),
     tool(
+      'interview_agent_session',
+      '读（必要时建）面试工作区里的助手会话：返回会话 id 与它所属的工作区路径。用来确认派活不会落到别的项目。',
+      {},
+      async () => service.ensureAgentSession(),
+    ),
+    tool(
       'interview_request_agent',
       '把一件活派给面试工作区的助手会话：fetch-jd（抓 JD）或 checklist（出面试官底稿）。默认在面试工作区里复用/新建会话，不再用"最近会话"。',
       {
