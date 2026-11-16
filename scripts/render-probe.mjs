@@ -234,6 +234,18 @@ async function main() {
 
 
 
+  // ③c 设置页也要渲染一遍：它是批次 B 新加的第四页签，代码路径一样会藏
+  // 运行时错误（undefined 字段、坏 key）。这里只看"能不能渲染出来"。
+  if (tabs.length >= 4) {
+    await act(async () => { tabs[3].props.onClick() })
+    await new Promise(done => setTimeout(done, 80))
+    const settingsHtml = JSON.stringify(renderer.toJSON())
+    if (!settingsHtml.includes('设置') && !settingsHtml.includes('数据在哪')) {
+      warnings.push('设置页签点开后没有渲染出设置区')
+    }
+  }
+
+
   // ④ 轮询一次：**revision 相同**，渲染次数不得增加。
   // 面试中的轮询间隔是 1.5 秒，所以要真的等过这个间隔才测得到。
   const rendersBefore = renderCount

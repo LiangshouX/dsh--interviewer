@@ -142,7 +142,7 @@ async function main() {
         // 权限被拒的真实态：错误框和两个按钮都在，才谈得上「点得到」。
         const asked = await requestMediaPermission(page)
         if (!asked) failures.push(`${width}px：点不到「申请摄像头与麦克风」——它被别的东西盖住了`)
-        for (const [tab, label] of [[1, '面试中'], [0, '准备'], [2, '报告']]) {
+        for (const [tab, label] of [[1, '面试中'], [0, '准备'], [2, '报告'], [3, '设置']]) {
           try {
             await page.getByText(label, { exact: true }).first().click({ timeout: 5000 })
           } catch {
@@ -231,7 +231,7 @@ async function main() {
     if (check) process.exit(1)
     process.exit(1)
   }
-  console.log(`✓ 布局闸门通过：${WIDTHS.length} 个宽度 × 3 个页签，无溢出、无遮挡、按钮可点`)
+  console.log(`✓ 布局闸门通过：${WIDTHS.length} 个宽度 × 4 个页签，无溢出、无遮挡、按钮可点`)
 }
 
 main().catch(error => {

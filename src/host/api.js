@@ -221,6 +221,10 @@ async function readResource(service, segments, query) {
   if (head === 'host-sessions') {
     return { sessions: await service.listHostSessions() }
   }
+  if (head === 'settings') {
+    // 面板「设置」页：所有「东西在哪、现在用哪个」一次问全。
+    return service.settingsSnapshot(query.session)
+  }
   if (head === 'voice') {
     // 整条语音链路：识别走哪条、合成走哪条、为什么。
     // 面板一次拿全，避免「识别状态」和「合成状态」分两次问、各自过期。
@@ -256,6 +260,10 @@ async function runAction(service, segments, body) {
   const [head, ...rest] = segments
 
   switch (head) {
+    case 'settings': {
+      // 保存面板设置（白名单键）。配置文件里写死的项会被拒绝，并说明原因。
+      return await service.updateSettings(body)
+    }
     case 'config': {
       // 工作区根：面板上「浏览…」走的两步。
       //

@@ -9,6 +9,7 @@
     "60-voice.js",
     "70-primitives.js",
     "80-views.js",
+    "81-settings.js",
     "90-panel.js"
   ]
 }

@@ -1,4 +1,4 @@
-﻿    // ── panel ─────────────────────────────────────────────────────────────
+    // ── panel ─────────────────────────────────────────────────────────────
 
     /**
      * 按岗位给场次分组。
@@ -305,10 +305,13 @@
               ])
               : null,
           ]),
-          h('div', {key: 'k20',  style: narrow ? { ...S.tabs, marginLeft: 0, flex: '0 0 auto' } : S.tabs }, [
+          h('div', {key: 'k20',  style: narrow ? { ...S.tabs, marginLeft: 0, flex: '0 0 auto', flexWrap: 'wrap' } : { ...S.tabs, flexWrap: 'wrap' } }, [
             h('div', { key: 'a', style: S.tab(tab === 'prepare'), onClick: () => setTab('prepare') }, '准备'),
             h('div', { key: 'b', style: S.tab(tab === 'live'), onClick: () => setTab('live') }, '面试中'),
             h('div', { key: 'c', style: S.tab(tab === 'report'), onClick: () => setTab('report') }, '报告'),
+            // 设置页放在这里，**不占 DSH 设置页的位置**：路径、模型、后端、
+            // 保护开关都是这个插件自己的事，混进宿主设置只会让人找不着。
+            h('div', { key: 'd', style: S.tab(tab === 'settings'), onClick: () => setTab('settings') }, '设置'),
           ]),
           h('button', {
             key: 'theme',
@@ -529,7 +532,9 @@
                 ? h(PrepareView, { key: 'prepare', session, config, onChanged: refreshAll, notify })
                 : tab === 'live'
                   ? h(LiveView, { key: 'live', session, config, onChanged: refreshAll, notify })
-                  : h(ReportView, { key: 'report', session, config, onChanged: refreshAll, notify }),
+                  : tab === 'report'
+                    ? h(ReportView, { key: 'report', session, config, onChanged: refreshAll, notify })
+                    : h(SettingsView, { key: 'settings', session, config, notify }),
             sessionPoll.error !== undefined && !sessionGone
               ? h('div', {key: 'k26',  style: { ...S.hint, color: C.amber, marginTop: 12 } }, `读不到会话状态：${sessionPoll.error}`)
               : null,

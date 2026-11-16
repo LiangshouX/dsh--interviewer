@@ -27,6 +27,14 @@ import { DEFAULT_MIMO_VOICE, synthesizeWithMimo } from './tts/mimo.js'
 import { synthesizeWithMinimax } from './tts/minimax.js'
 import { synthesizeWithOpenAi } from './tts/openai.js'
 
+/** 语音配置的有效值：配置文件 > 面板设置 > 默认（见 InterviewService.voiceConfig）。 */
+async function voiceConfigOf(service) {
+  if (typeof service?.voiceConfig === 'function') {
+    try { return await service.voiceConfig() } catch { /* 回落配置 */ }
+  }
+  return service?.config ?? {}
+}
+
 /** The ways to make a voice. */
 export const TTS_MODE = {
   SERVER: 'server',
@@ -91,7 +99,7 @@ const AUTO_ORDER = ['mimo', 'openai', 'minimax', 'baidu', 'edge']
  * @returns {Promise<object>}
  */
 export async function resolveTts(service) {
-  const config = service.config ?? {}
+  const config = await voiceConfigOf(service)
   const explicit = typeof config.ttsProvider === 'string' ? config.ttsProvider.trim().toLowerCase() : 'auto'
   const format = config.ttsFormat === 'wav' ? 'wav' : 'mp3'
   const rate = typeof config.ttsRate === 'number' ? config.ttsRate : 1

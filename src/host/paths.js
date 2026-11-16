@@ -104,20 +104,47 @@ export function settingsPath() {
 }
 
 /**
+ * Which settings keys the panel may persist.
+ *
+ * **白名单，不是黑名单。** 这个文件是插件唯一会自己写的用户数据：
+ * 多写一个键就等于多一个没人校验的输入口。所以只允许这几种。
+ */
+export const SETTING_KEYS = [
+  'workspaceRoot',
+  'ffmpegPath',
+  'chromiumPath',
+  'guardEnabled',
+  'guardQuiet',
+  'asrProvider',
+  'ttsProvider',
+  'ttsModel',
+  'ttsVoice',
+]
+
+/**
  * Read the plugin's own settings.
  *
  * **读不到就是没有设置。** 一个坏掉的设置文件不该让插件起不来——
- * 它只是「用户还没选过位置」而已。
+ * 它只是「用户还没选过」而已。
  *
- * @returns {Promise<{workspaceRoot?: string}>}
+ * @returns {Promise<object>}
  */
 export async function readSettings() {
   try {
     const raw = await readFile(settingsPath(), 'utf8')
     const parsed = JSON.parse(raw)
     if (parsed === null || typeof parsed !== 'object') return {}
-    const root = parsed.workspaceRoot
-    return typeof root === 'string' && root.trim() !== '' ? { workspaceRoot: root.trim() } : {}
+    const settings = {}
+    for (const key of SETTING_KEYS) {
+      const value = parsed[key]
+      if (typeof value === 'string') {
+        const trimmed = value.trim()
+        if (trimmed !== '') settings[key] = trimmed
+      } else if (typeof value === 'boolean') {
+        settings[key] = value
+      }
+    }
+    return settings
   } catch {
     return {}
   }

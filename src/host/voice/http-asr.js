@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 走 HTTP 的服务端语音识别（插件自己的链路，不依赖宿主语音服务）。
  *
  * **两套协议，不能混。** ASR 不是一个统一标准：
@@ -17,6 +17,14 @@
  */
 import { resolveSecret } from './credentials.js'
 import { firstString, hostSelection, hostService } from './host.js'
+
+/** 语音配置的有效值：配置文件 > 面板设置 > 默认（见 InterviewService.voiceConfig）。 */
+async function voiceConfigOf(service) {
+  if (typeof service?.voiceConfig === 'function') {
+    try { return await service.voiceConfig() } catch { /* 回落配置 */ }
+  }
+  return service?.config ?? {}
+}
 
 /** How long one transcription request may take. */
 const REQUEST_TIMEOUT_MS = 120000
@@ -37,7 +45,7 @@ const DEFAULT_KEY_ENV = 'MINIMAX_API_KEY'
  * @returns {Promise<object>}
  */
 export async function resolveHttpAsr(service) {
-  const config = service.config ?? {}
+  const config = await voiceConfigOf(service)
   const host = await readHostProvider(service.ctx)
 
   const explicitProvider = typeof config.asrProvider === 'string' ? config.asrProvider.trim().toLowerCase() : 'auto'

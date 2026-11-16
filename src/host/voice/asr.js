@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 语音识别的编排层：**先问宿主，再问插件自己，最后才是浏览器**。
  *
  * **为什么顺序是这样。**
@@ -22,6 +22,14 @@ import { hostAsrState, transcribeWithHost } from './host-asr.js'
 import { describeHttpAsr, resolveHttpAsr, transcribeHttp } from './http-asr.js'
 import { hostService } from './host.js'
 
+/** 语音配置的有效值：配置文件 > 面板设置 > 默认（见 InterviewService.voiceConfig）。 */
+async function voiceConfigOf(service) {
+  if (typeof service?.voiceConfig === 'function') {
+    try { return await service.voiceConfig() } catch { /* 回落配置 */ }
+  }
+  return service?.config ?? {}
+}
+
 /** The three ways to recognize speech, plus "off". */
 export const ASR_MODE = {
   HOST: 'host',
@@ -36,7 +44,7 @@ export const ASR_MODE = {
  * @param {import('../service.js').InterviewService} service
  */
 export async function resolveAsr(service) {
-  const config = service.config ?? {}
+  const config = await voiceConfigOf(service)
   const explicit = typeof config.asrProvider === 'string' ? config.asrProvider.trim().toLowerCase() : 'auto'
   const language = typeof config.asrLanguage === 'string' ? config.asrLanguage.trim() : ''
   const host = hostAsrState(service, { language })

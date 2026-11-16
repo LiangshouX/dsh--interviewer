@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The interview session — the one implementation behind every caller.
  *
  * **The shape of one session on disk**
@@ -23,15 +23,17 @@
  * 失效。这样界面、agent 工具、报告三边永远看到同一份事实。
  */
 import { join, resolve } from 'node:path'
-import { cp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
-import { describeWorkspaceRoot, ensureDataRoot, defaultWorkspaceRoot, readSettings, writeSettings, resolveConfig } from './paths.js'
+import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { describeWorkspaceRoot, ensureDataRoot, defaultWorkspaceRoot, readSettings, writeSettings, settingsPath, SETTING_KEYS, resolveConfig } from './paths.js'
 import {
   appendJsonl, isDirectory, isFile, listDirIfExists, readJsonIfExists, readJsonl,
   readTextIfExists, resolveWithin, writeJsonAtomic, writeTextAtomic,
 } from './fsx.js'
 import { fetchJobDescription } from './jd.js'
 import { extractTextFromUpload } from './extract.js'
-import { CameraService } from './camera.js'
+import { CameraService, locateFfmpeg } from './camera.js'
+import { locateChromium } from './camera-browser.js'
 import { VoiceService } from './voice/index.js'
 import { measureFluency, summarizeFluency } from './fluency.js'
 
@@ -1011,6 +1013,156 @@ export class InterviewService {
    */
   cameraStatus() {
     return this.camera.status()
+  }
+
+  // ── transparency ─────────────────────────────────────────────────────────
+
+  /**
+   * 面板「设置」页要回答的所有「东西在哪、为什么、现在用的是哪个」。
+   *
+   * **原则：这里只读、只报告，不做决定。** 权重规则（配置文件 > 面板设置 >
+   * 默认）在 {@link updateSettings} 与语音解析里执行，这里把它们的结果摊开。
+   *
+   * @param {string} [sessionId]
+   * @returns {Promise<object>}
+   */
+  async settingsSnapshot(sessionId = undefined) {
+    const settings = await readSettings()
+    const location = await this.location()
+    const voice = await this.voice.status()
+    const camera = this.camera.status()
+    const ffmpegPath = this.config.ffmpegPath !== '' ? this.config.ffmpegPath : (settings.ffmpegPath ?? '')
+    const chromiumPath = this.config.chromiumPath !== '' ? this.config.chromiumPath : (settings.chromiumPath ?? '')
+    const ffmpeg = await locateFfmpeg({ ffmpegPath })
+    const chromium = locateChromium({ chromiumPath })
+    const session = sessionId !== undefined && sessionId !== '' ? await this.sessionFacts(sessionId) : undefined
+    return {
+      settingsFile: settingsPath(),
+      settings,
+      dataRoot: location,
+      sessionsDir: await this.sessionsDir(),
+      profilesDir: await this.profilesDir(),
+      hostWorkspace: {
+        path: await this.effectiveRoot(),
+        note: '宿主侧 agent 工作区：一场面试一个子目录，简历库与岗位档案也在这里。',
+      },
+      voice,
+      camera,
+      backends: {
+        ffmpeg: ffmpeg === undefined ? { path: '', source: '', found: false } : { ...ffmpeg, found: true },
+        chromium: chromium === undefined ? { path: '', source: '', found: false } : { ...chromium, found: true },
+      },
+      speechModel: await this.speechModelFacts(),
+      session,
+    }
+  }
+
+  /**
+   * 宿主语音模型的落盘事实（路径、体积、文件数）。
+   *
+   * 用户问过「那个 200 多 MB 下到哪了」——答案不该靠猜，这里如实给。
+   */
+  async speechModelFacts() {
+    const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME.trim() !== ''
+      ? process.env.DSH_HOME.trim()
+      : join(homedir(), '.dsh')
+    const dir = join(home, 'speech-to-text', 'sensevoice')
+    let bytes = 0
+    let files = 0
+    const walk = async current => {
+      let entries = []
+      try {
+        entries = await readdir(current, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const entry of entries) {
+        const path = join(current, entry.name)
+        if (entry.isDirectory()) await walk(path)
+        else {
+          files += 1
+          try { bytes += (await stat(path)).size } catch { /* 正在被写 */ }
+        }
+      }
+    }
+    await walk(dir)
+    return { provider: 'sensevoice-local', dir, bytes, files, exists: files > 0 }
+  }
+
+  /**
+   * 一场面试的产物清单：文件在哪、多大、什么时候写的。
+   *
+   * @param {string} sessionId
+   */
+  async sessionFacts(sessionId) {
+    const dir = await this.sessionDir(sessionId)
+    const names = ['session.json', 'resume.txt', 'jd.txt', 'checklist.json', 'transcript.jsonl', 'report.md']
+    const artifacts = []
+    for (const name of names) {
+      const path = join(dir, name)
+      try {
+        const info = await stat(path)
+        artifacts.push({ name, bytes: info.size, modifiedAt: info.mtimeMs })
+      } catch { /* 这个产物还没生成 */ }
+    }
+    for (const recording of await this.listRecordings(sessionId)) {
+      artifacts.push({
+        name: `recordings/${recording.name}`,
+        bytes: recording.bytes,
+        modifiedAt: recording.modifiedAt,
+        kind: recording.kind,
+      })
+    }
+    return { id: sessionId, dir, artifacts }
+  }
+
+  /**
+   * 保存面板设置（只允许白名单键）。
+   *
+   * **配置文件优先。** 工作区根在 `cordis.patch.yml` 里写死时，面板的修改
+   * 不生效——**而且必须告诉用户为什么**，否则他会以为设置丢了。
+   *
+   * @param {object} patch
+   */
+  async updateSettings(patch = {}) {
+    const applied = {}
+    const ignored = []
+    for (const key of SETTING_KEYS) {
+      if (!(key in patch)) continue
+      if (key === 'workspaceRoot' && this.config.workspaceRootExplicit) {
+        ignored.push({ key, reason: '配置文件里写死了 workspaceRoot，面板设置不生效' })
+        continue
+      }
+      applied[key] = patch[key]
+    }
+    const file = await writeSettings(applied)
+    return { settingsFile: file.path, applied, ignored }
+  }
+
+  /**
+   * 语音配置的**有效值**：配置文件里显式给的优先，其次面板设置，最后默认。
+   *
+   * 语音模块统一读它，而不是直接读 `this.config`——否则面板里选的模型
+   * 永远不生效（每次都被 patch 里的默认值覆盖）。
+   *
+   * @returns {Promise<object>}
+   */
+  async voiceConfig() {
+    const settings = await readSettings()
+    const merged = { ...this.config }
+    const overrides = {
+      asrProvider: settings.asrProvider,
+      ttsProvider: settings.ttsProvider,
+      ttsModel: settings.ttsModel,
+      ttsVoice: settings.ttsVoice,
+    }
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined) continue
+      const current = merged[key]
+      const isDefault = current === undefined || current === '' || current === 'auto' || current === 1
+      if (isDefault) merged[key] = value
+    }
+    return merged
   }
 
   // ── voice ────────────────────────────────────────────────────────────────
