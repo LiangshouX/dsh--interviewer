@@ -65,7 +65,7 @@ import { createWriteStream } from 'node:fs'
 import { existsSync } from 'node:fs'
 import { access } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { mkdir, rename, rm } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** MIME type of the streaming preview format. */
@@ -96,12 +96,24 @@ const PREVIEW_QUALITY = 5
 const PREVIEW_WIDTH = 1280
 const PREVIEW_HEIGHT = 720
 
-/** Common Windows install locations for ffmpeg, tried after PATH. */
+/**
+ * Common Windows install locations for ffmpeg, tried after PATH.
+ *
+ * **为什么要有通配。** ffmpeg 的 Windows 发行版解压出来通常带版本号目录
+ * （`...\Ffmpeg\ffmpeg-n7.1.1-...-win64-gpl-7.1\bin\ffmpeg.exe`），
+ * 写死一个路径等于替用户决定他装哪个版本。所以这里既有精确路径，
+ * 也有 `*` 通配，按目录排序后逐个试。
+ */
 const WINDOWS_FFMPEG_CANDIDATES = [
-  'D:\\ProgramFils\\ffmpeg\\bin\\ffmpeg.exe',
+  'D:\\ProgramFiles\\Ffmpeg\\*\\bin\\ffmpeg.exe',
+  'C:\\ProgramFiles\\Ffmpeg\\*\\bin\\ffmpeg.exe',
+  'C:\\Program Files\\Ffmpeg\\*\\bin\\ffmpeg.exe',
   'C:\\ffmpeg\\bin\\ffmpeg.exe',
   'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
   'C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe',
+  'C:\\ProgramData\\scoop\\shims\\ffmpeg.exe',
+  'D:\\ProgramFiles\\MiniConda\\Library\\bin\\ffmpeg.exe',
+  'C:\\ProgramData\\miniconda3\\Library\\bin\\ffmpeg.exe',
 ]
 
 /** Common macOS/Linux install locations. */
@@ -123,6 +135,10 @@ const UNIX_FFMPEG_CANDIDATES = [
  * [dshow @ 000002472ff5a440]   Alternative name "@device_pnp_\\?\usb#..."
  * ```
  *
+ * **`(none)` 也要认。** ffmpeg 7.x 在设备**打不开**（被占用、驱动未就绪）
+ * 时会把类型标成 `(none)` 而不是 `(video)`。只认 `(video)` 的解析器会把这台
+ * 摄像头整个丢掉，界面上就变成"没有找到摄像头设备"——把真正的原因藏了。
+ *
  * @param {string} text combined stdout+stderr of the probe
  * @returns {{video: Array<{name: string, alt: string}>, audio: Array<{name: string, alt: string}>}}
  */
@@ -138,11 +154,13 @@ export function parseDeviceList(text) {
       if (current !== undefined && current.alt === '') current.alt = alternative[1]
       continue
     }
-    const device = /"(.+)"\s+\((video|audio)\)/.exec(line)
+    // (video) 视频；(audio) 音频；(none) 无法判定类型 —— 多半是打不开，
+    // 按视频保留，让后面的抓帧去报告真正的原因。
+    const device = /"(.+)"\s+\((video|audio|none)\)/.exec(line)
     if (device === null) continue
     const entry = { name: device[1], alt: '' }
-    if (device[2] === 'video') video.push(entry)
-    else audio.push(entry)
+    if (device[2] === 'audio') audio.push(entry)
+    else video.push(entry)
     current = entry
   }
   return { video, audio }
@@ -187,15 +205,104 @@ export async function locateFfmpeg(options = {}) {
     if (resolved !== undefined) return { path: resolved, source: 'env' }
   }
 
+  // PATH：直接跑一次 `-version` 验证它真能执行（bare name 交给 OS 解析）。
   const fromPath = await resolveExecutable('ffmpeg')
   if (fromPath !== undefined) return { path: fromPath, source: 'path' }
 
+  // PATH 上有但 Node 的 spawn 取不到时（少见：PATH 只在用户 shell 里），
+  // 用系统的 `where` 再确认一次。
+  if (process.platform === 'win32') {
+    const fromWhere = await whereFfmpeg()
+    if (fromWhere !== undefined) return { path: fromWhere, source: 'where' }
+  }
+
   const candidates = process.platform === 'win32' ? WINDOWS_FFMPEG_CANDIDATES : UNIX_FFMPEG_CANDIDATES
   for (const candidate of candidates) {
-    const resolved = await resolveExecutable(candidate)
-    if (resolved !== undefined) return { path: resolved, source: 'wellknown' }
+    for (const expanded of await expandCandidate(candidate)) {
+      const resolved = await resolveExecutable(expanded)
+      if (resolved !== undefined) return { path: resolved, source: 'wellknown' }
+    }
   }
   return undefined
+}
+
+/**
+ * Ask Windows' own resolver where ffmpeg is.
+ *
+ * @returns {Promise<string | undefined>}
+ */
+async function whereFfmpeg() {
+  try {
+    const result = await runProcess('where', ['ffmpeg'], { timeoutMs: 5000 })
+    if (result.code !== 0) return undefined
+    const first = result.stdout.split(/\r?\n/).map(line => line.trim()).find(line => line !== '')
+    if (first === undefined) return undefined
+    return await resolveExecutable(first)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Expand a `*` wildcard in a candidate path.
+ *
+ * @param {string} pattern
+ * @returns {Promise<string[]>}
+ */
+export async function expandCandidate(pattern) {
+  if (!pattern.includes('*') || process.platform !== 'win32') return [pattern]
+  const segments = pattern.split('\\')
+  const star = segments.findIndex(segment => segment === '*')
+  if (star === -1) return [pattern]
+  const root = segments.slice(0, star).join('\\')
+  const rest = segments.slice(star + 1).join('\\')
+  let entries = []
+  try {
+    entries = await readdir(root, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return entries
+    .filter(entry => entry.isDirectory())
+    .map(entry => `${root}\\${entry.name}\\${rest}`)
+    .sort()
+    .reverse()
+}
+
+/**
+ * Turn ffmpeg's terse stderr into something a person can act on.
+ *
+ * **为什么单独成函数。** 用户看到的"摄像头打不开"必须能区分三种原因：
+ * 被别的程序占着、设备名对不上、驱动/权限问题。这三种的处理办法完全不同，
+ * 混成一句话就等于没说。
+ *
+ * @param {string} detail ffmpeg stderr 的最后一行
+ * @returns {{reason: string, hint: string}}
+ */
+export function explainCameraFailure(detail) {
+  const text = String(detail ?? '')
+  if (/Could not run graph|already in use|Unable to BindToObject|I\/O error/i.test(text)) {
+    return {
+      reason: '摄像头被别的程序占用（或驱动未就绪）',
+      hint: '先关掉可能占用摄像头的程序（微信、Chrome/Edge 的网页会议、钉钉、飞书、OBS 等）再点重试。Windows 的隐私开关如果是「关」，也会表现为打不开。',
+    }
+  }
+  if (/Could not find video device|among source devices/i.test(text)) {
+    return {
+      reason: '设备名对不上',
+      hint: '重新点一次「启动摄像头」让插件重新枚举设备；如果仍然失败，把摄像头拔插一次再试。',
+    }
+  }
+  if (/Access is denied|Permission denied|not permitted/i.test(text)) {
+    return {
+      reason: '系统拒绝了摄像头访问',
+      hint: '打开 Windows 设置 → 隐私和安全性 → 摄像头，确认「允许应用访问你的摄像头」和「允许桌面应用访问你的摄像头」都是开。',
+    }
+  }
+  return {
+    reason: detail.trim() !== '' ? detail.trim() : 'ffmpeg 没有给出原因',
+    hint: '把这条信息发给助手，它会根据 ffmpeg 的原始输出继续排查。',
+  }
 }
 
 /**
@@ -259,6 +366,55 @@ function runProcess(command, args, options = {}) {
     child.stderr?.on('data', chunk => { stderr += String(chunk) })
     child.on('error', error => { stderr += String(error); finish(-1) })
     child.on('close', code => finish(code ?? -1))
+  })
+}
+
+/**
+ * Try to pull exactly one frame from a camera device.
+ *
+ * 只抓一帧就退出：**不碰**正在用的摄像头独占状态，也不会在自检里把设备
+ * 一直占着。抓到 ≥2 字节（JPEG 的 SOI）就算成功。
+ *
+ * @param {string} ffmpegPath
+ * @param {{name: string, alt: string}} device
+ * @param {number} [timeoutMs]
+ * @returns {Promise<{ok: boolean, bytes: number, ms: number, detail?: string}>}
+ */
+export function probeCamera(ffmpegPath, device, timeoutMs = 6000) {
+  return new Promise(resolvePromise => {
+    const started = Date.now()
+    let child
+    try {
+      child = spawn(ffmpegPath, [
+        '-hide_banner', '-loglevel', 'error',
+        '-f', 'dshow', '-i', deviceSelector(device),
+        '-frames:v', '1', '-f', 'mjpeg', 'pipe:1',
+      ], { windowsHide: true })
+    } catch (error) {
+      resolvePromise({ ok: false, bytes: 0, ms: 0, detail: String(error) })
+      return
+    }
+    let bytes = 0
+    let stderr = ''
+    let settled = false
+    const finish = value => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { child.kill() } catch { /* 已经退出 */ }
+      resolvePromise({ ...value, bytes, ms: Date.now() - started })
+    }
+    const timer = setTimeout(() => {
+      const detail = stderr.trim().split(/\r?\n/).filter(line => line !== '').slice(-1)[0] ?? '抓帧超时'
+      finish({ ok: false, detail })
+    }, timeoutMs)
+    child.stderr?.on('data', chunk => { stderr = `${stderr}${String(chunk)}`.slice(-2000) })
+    child.stdout?.on('data', chunk => { bytes += chunk.length; if (bytes >= 2) finish({ ok: true }) })
+    child.on('error', error => finish({ ok: false, detail: String(error) }))
+    child.on('close', () => {
+      const detail = stderr.trim().split(/\r?\n/).filter(line => line !== '').slice(-1)[0] ?? 'ffmpeg 退出'
+      finish({ ok: false, detail })
+    })
   })
 }
 
@@ -356,6 +512,50 @@ export class CameraService {
    * @param {{device?: object}} [options]
    * @returns {Promise<{ok: boolean, error?: string, device?: object}>}
    */
+  /**
+   * 摄像头自检：ffmpeg 在哪、设备有哪些、能不能真抓到一帧。
+   *
+   * **为什么需要它。** "摄像头打不开"有三种原因（被占用 / 设备名不对 /
+   * 权限或驱动），凭一句报错分不出来。自检把三件事一次问清，并把 ffmpeg
+   * 的原始输出带回来——这是"所有动作透明"的一部分。
+   *
+   * @param {{device?: string}} [options]
+   * @returns {Promise<object>}
+   */
+  async diagnose(options = {}) {
+    const ffmpeg = await this.ensureFfmpeg()
+    if (!ffmpeg.ok) {
+      return {
+        ok: false,
+        ffmpeg: undefined,
+        devices: { video: [], audio: [] },
+        probes: [],
+        reason: '找不到 ffmpeg',
+        hint: '在设置页里指定 ffmpeg 路径，或用「安装 ffmpeg」让插件代下。',
+      }
+    }
+    const list = await listDevices(this.ffmpeg)
+    const wanted = options.device === undefined || options.device === ''
+      ? list.video
+      : list.video.filter(item => item.name === options.device || item.alt === options.device)
+    const probes = []
+    for (const device of wanted.slice(0, 3)) {
+      const probe = await probeCamera(this.ffmpeg, device, 6000)
+      probes.push({ name: device.name, alt: device.alt, ...probe })
+    }
+    const ok = probes.some(item => item.ok)
+    const failure = probes.find(item => item.ok !== true)
+    return {
+      ok,
+      ffmpeg: { path: this.ffmpeg, source: this.ffmpegSource },
+      devices: list,
+      probes,
+      ...(ok
+        ? { reason: '摄像头可以打开', hint: '' }
+        : explainCameraFailure(failure?.detail ?? '')),
+    }
+  }
+
   async start(options = {}) {
     if (this.child !== undefined) return { ok: true, device: this.device }
     const ffmpeg = await this.ensureFfmpeg()
@@ -414,10 +614,12 @@ export class CameraService {
     if (!firstFrame) {
       const detail = this.stderrTail.trim().split(/\r?\n/).filter(line => line.trim() !== '').slice(-1)[0] ?? ''
       const exit = await Promise.race([exited, delay(300).then(() => undefined)])
-      const reason = detail !== '' ? detail : (exit?.error ?? `ffmpeg 退出码 ${exit?.code ?? '未知'}`)
+      const fallback = detail !== '' ? detail : (exit?.error ?? `ffmpeg 退出码 ${exit?.code ?? '未知'}`)
+      // 把 ffmpeg 的原始报错翻成人能处理的话；原文保留在 detail 里供排查。
+      const explained = explainCameraFailure(fallback)
       this.stop()
-      this.error = `摄像头打不开：${reason}`
-      return { ok: false, error: this.error }
+      this.error = `摄像头打不开：${explained.reason}。${explained.hint}`
+      return { ok: false, error: this.error, detail: fallback, reason: explained.reason, hint: explained.hint }
     }
     return { ok: true, device }
   }

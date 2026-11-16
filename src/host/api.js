@@ -239,6 +239,7 @@ async function readResource(service, segments, query) {
   if (head === 'camera') {
     if (rest.length === 0) return service.cameraStatus()
     if (rest[0] === 'devices') return service.cameraDevices()
+    if (rest[0] === 'diagnose') return service.cameraDiagnose({ device: query.device })
     throw new Error(`未知的相机读取操作：${rest.join('/')}`)
   }
   throw new Error(`未知的读取资源：${segments.join('/')}`)

@@ -1064,6 +1064,16 @@ export class InterviewService {
   }
 
   /**
+   * 摄像头自检：ffmpeg 在哪、设备有哪些、能不能真抓到帧。
+   *
+   * @param {{device?: string}} [options]
+   * @returns {Promise<object>}
+   */
+  async cameraDiagnose(options = {}) {
+    return this.camera.diagnose(options)
+  }
+
+  /**
    * Start recording the camera into a session's recording folder.
    *
    * The file is written by the Host, so the panel's "保存录像" button is not

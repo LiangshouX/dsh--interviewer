@@ -428,6 +428,14 @@ export function registerTools(ctx, service) {
       },
       async args => await service.prepareSpeech(args.providerId),
     ),
+    tool(
+      'interview_camera_diagnose',
+      '摄像头自检：ffmpeg 在哪（路径与来源）、系统里有哪些摄像头、能不能真抓到一帧。打不开时用它定位是「被占用 / 设备名不对 / 权限或驱动」。',
+      {
+        device: { type: 'string', description: '只测某个设备（显示名或替代名）；省略则测前三个。' },
+      },
+      async args => await service.cameraDiagnose({ device: args.device }),
+    ),
   ]
 
   const disposers = definitions.map(definition => ctx.tools.register(definition, { when }))

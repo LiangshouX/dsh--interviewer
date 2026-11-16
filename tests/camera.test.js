@@ -72,3 +72,58 @@ test('ffmpeg 定位：路径不存在时如实返回「没有」，不假装有'
   const found = await locateFfmpeg({ ffmpegPath: 'definitely-not-a-real-ffmpeg-binary-xyz' })
   assert.equal(found, undefined)
 })
+
+// ── 摄像头打不开时的"人话"翻译 ────────────────────────────────────────────
+
+test('被别的程序占用：说清楚是占用，并给出关闭清单', async () => {
+  const { explainCameraFailure } = await import('../src/host/camera.js')
+  for (const detail of [
+    'Could not run graph (sometimes caused by a device already in use by other application)',
+    '[dshow @ 000] Unable to BindToObject for BisonCam,NB Pro',
+    '[in#0 @ 000] Error opening input: I/O error',
+  ]) {
+    const explained = explainCameraFailure(detail)
+    assert.match(explained.reason, /占用/)
+    assert.match(explained.hint, /微信|Chrome|隐私/)
+  }
+})
+
+test('设备名对不上与权限拒绝：给出不同的处理办法', async () => {
+  const { explainCameraFailure } = await import('../src/host/camera.js')
+  const missing = explainCameraFailure('Could not find video device with name [X] among source devices of type video')
+  assert.match(missing.reason, /设备名/)
+  assert.match(missing.hint, /重新/)
+  const denied = explainCameraFailure('Access is denied')
+  assert.match(denied.reason, /拒绝/)
+  assert.match(denied.hint, /隐私/)
+})
+
+test('不认识的报错保留原文，不编造原因', async () => {
+  const { explainCameraFailure } = await import('../src/host/camera.js')
+  const explained = explainCameraFailure('something weird happened')
+  assert.equal(explained.reason, 'something weird happened')
+  assert.ok(explained.hint.length > 0)
+})
+
+test('候选路径的通配只在 Windows 上展开，其他平台原样返回', async () => {
+  const { expandCandidate } = await import('../src/host/camera.js')
+  const expanded = await expandCandidate('/usr/local/bin/ffmpeg')
+  assert.deepEqual(expanded, ['/usr/local/bin/ffmpeg'])
+  if (process.platform !== 'win32') {
+    const star = await expandCandidate('C:\\nope\\*\\bin\\ffmpeg.exe')
+    assert.deepEqual(star, ['C:\\nope\\*\\bin\\ffmpeg.exe'])
+  }
+})
+
+test('ffmpeg 把打不开的摄像头标成 (none) 时也要保留，不能当成「没有设备」', async () => {
+  const { parseDeviceList } = await import('../src/host/camera.js')
+  const parsed = parseDeviceList([
+    '[dshow @ 000] "BisonCam,NB Pro" (none)',
+    '[dshow @ 000]   Alternative name "@device_pnp_\\\\?\\usb#vid_5986&pid_9102"',
+    '[dshow @ 000] "麦克风 (Realtek(R) Audio)" (audio)',
+  ].join('\n'))
+  assert.equal(parsed.video.length, 1)
+  assert.equal(parsed.video[0].name, 'BisonCam,NB Pro')
+  assert.match(parsed.video[0].alt, /device_pnp/)
+  assert.equal(parsed.audio.length, 1)
+})
