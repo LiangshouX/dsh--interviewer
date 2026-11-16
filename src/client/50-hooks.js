@@ -139,6 +139,46 @@
      *   - **说清楚是宿主挡的，还是系统挡的。** 这两件事看着像，
      *     但修的地方不同（见 `inDesktopHost`）。
      */
+    // ── media registry（面试间保护用）──────────────────────────────────────
+    //
+    // 面板要回答「现在有没有摄像头 / 麦克风开着」。这两个 hook 各自管自己的
+    // state，父组件拿不到；所以在这里登记一份**只读标记**，供「离开面试间」
+    // 的确认弹窗与兜底清理使用。它不持有任何业务状态——真正的 state 还在
+    // 各自的 hook 里，这里只是"当前有没有设备被占用"。
+    const mediaRegistry = { stream: undefined, hostActive: false, hostStop: undefined }
+
+    /** 现在有没有设备被占用。 */
+    function mediaInUse() {
+      return {
+        any: mediaRegistry.stream !== undefined || mediaRegistry.hostActive,
+        stream: mediaRegistry.stream !== undefined,
+        hostCamera: mediaRegistry.hostActive,
+      }
+    }
+
+    /**
+     * 不论用户从哪条路离开，都把设备放掉。
+     *
+     * **这是兜底，不是主路径。** 正常离开会先弹确认框；只有用户确认
+     * （或面板被宿主卸载）时才走到这里。设备没释放是最糟的结局——
+     * 摄像头指示灯一直亮着，用户会以为插件在偷看。
+     */
+    async function releaseAllMedia() {
+      const stream = mediaRegistry.stream
+      mediaRegistry.stream = undefined
+      if (stream !== undefined) {
+        try {
+          for (const track of stream.getTracks()) track.stop()
+        } catch { /* 已经停了 */ }
+      }
+      const hostStop = mediaRegistry.hostStop
+      mediaRegistry.hostActive = false
+      mediaRegistry.hostStop = undefined
+      if (typeof hostStop === 'function') {
+        try { await hostStop() } catch { /* 宿主重启时会释放 */ }
+      }
+    }
+
     function useMedia() {
       const [stream, setStream] = useState(undefined)
       const [error, setError] = useState(undefined)
@@ -149,6 +189,12 @@
       const rafRef = useRef(0)
       const streamRef = useRef(undefined)
       const watchersRef = useRef([])
+
+      // 把当前流登记到全局 registry（面试间保护用）。
+      useEffect(() => {
+        mediaRegistry.stream = stream
+        return () => { if (mediaRegistry.stream === stream) mediaRegistry.stream = undefined }
+      }, [stream])
 
       /** Read the current permission state for camera and microphone. */
       const probe = useCallback(async () => {
@@ -517,6 +563,12 @@
         }
         setState({ active: false, busy: false, error: undefined, recording: false })
       }, [])
+
+      // Host 摄像头也登记到 registry：离开面试间时要能关掉它（设备是独占的）。
+      useEffect(() => {
+        mediaRegistry.hostActive = state.active
+        mediaRegistry.hostStop = state.active ? stop : undefined
+      }, [state.active, stop])
 
       /**
        * Start recording on the Host side.

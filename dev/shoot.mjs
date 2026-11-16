@@ -31,6 +31,7 @@ const PRESETS = [
   { name: 'live', tab: 1, media: 'granted', width: 1600, height: 1000 },
   { name: 'live-media-denied', tab: 1, media: 'denied', width: 1600, height: 1000 },
   { name: 'report', tab: 2, media: 'granted', width: 1600, height: 1000 },
+  { name: 'settings', tab: 3, media: 'denied', width: 1600, height: 1000 },
   // **真实宿主的比例。**
   //
   // 面板在 DSH 主应用里只有约 1000×700 可用（左边还有 DSH 自己的侧边栏），

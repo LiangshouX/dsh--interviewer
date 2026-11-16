@@ -59,6 +59,44 @@
       )
       const configPoll = usePoll(() => apiGet('config'), undefined, [])
 
+      // ── 面试间保护 ────────────────────────────────────────────────
+      //
+      // 设备开着时，离开面板（切页签、切面试、宿主卸载）要先确认。
+      // 确认后**一定**释放设备：指示灯一直亮着是最糟的结局。
+      const [guard, setGuard] = useState(undefined)
+      const settingsPoll = usePoll(() => apiGet('settings'), 8000, [])
+      const guardQuiet = settingsPoll.data?.settings?.guardQuiet === true
+
+      // 深空仪表盘的全局样式（悬停、聚焦环、入场动效）只注入一次。
+      useEffect(() => { injectThemeCss() }, [])
+
+      // 宿主卸载面板时（切会话、切插件、关页签）设备必须被放掉。
+      useEffect(() => () => {
+        if (!mediaInUse().any) return
+        void releaseAllMedia()
+        try { sessionStorage.setItem('dsh-iv-left', '1') } catch { /* 隐私模式 */ }
+      }, [])
+      useEffect(() => {
+        let left = false
+        try {
+          left = sessionStorage.getItem('dsh-iv-left') === '1'
+          sessionStorage.removeItem('dsh-iv-left')
+        } catch { /* 忽略 */ }
+        if (left) notify('你离开了面试间', '摄像头与麦克风已被关闭。', 'info')
+      }, [])
+      // 关页签/刷新走浏览器原生确认（这是唯一能"拦住"卸载的入口）。
+      useEffect(() => {
+        // 探针/SSR 里的 window 是桩，没有 addEventListener——先确认再用。
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const handler = event => {
+          if (!mediaInUse().any) return
+          event.preventDefault()
+          event.returnValue = ''
+        }
+        window.addEventListener('beforeunload', handler)
+        return () => window.removeEventListener('beforeunload', handler)
+      }, [])
+
       const config = configPoll.data
       /** The session list; declared early because the header and the workspace picker both read it. */
       const rows = sessionsPoll.data?.sessions ?? []
@@ -110,6 +148,18 @@
       )
 
       const session = sessionPoll.data
+
+      /** 带保护的跳转：设备开着且没勾「不再提醒」时先弹确认。 */
+      const guardRun = useCallback((label, action) => {
+        if (!mediaInUse().any || guardQuiet) { action(); return }
+        setGuard({
+          label,
+          action,
+          remember: false,
+          second: false,
+          inInterview: session?.session?.status === 'running',
+        })
+      }, [guardQuiet, session?.session?.status])
 
       /**
        * 会话不见了 —— 多半是**换了卷宗库**，原来那一场不在新目录里了。
@@ -306,13 +356,32 @@
               : null,
           ]),
           h('div', {key: 'k20',  style: narrow ? { ...S.tabs, marginLeft: 0, flex: '0 0 auto', flexWrap: 'wrap' } : { ...S.tabs, flexWrap: 'wrap' } }, [
-            h('div', { key: 'a', style: S.tab(tab === 'prepare'), onClick: () => setTab('prepare') }, '准备'),
-            h('div', { key: 'b', style: S.tab(tab === 'live'), onClick: () => setTab('live') }, '面试中'),
-            h('div', { key: 'c', style: S.tab(tab === 'report'), onClick: () => setTab('report') }, '报告'),
+            h('div', { key: 'a', style: S.tab(tab === 'prepare'), onClick: () => guardRun('切换到「准备」', () => setTab('prepare')) }, '准备'),
+            h('div', { key: 'b', style: S.tab(tab === 'live'), onClick: () => guardRun('切换到「面试中」', () => setTab('live')) }, '面试中'),
+            h('div', { key: 'c', style: S.tab(tab === 'report'), onClick: () => guardRun('切换到「报告」', () => setTab('report')) }, '报告'),
             // 设置页放在这里，**不占 DSH 设置页的位置**：路径、模型、后端、
             // 保护开关都是这个插件自己的事，混进宿主设置只会让人找不着。
-            h('div', { key: 'd', style: S.tab(tab === 'settings'), onClick: () => setTab('settings') }, '设置'),
+            h('div', { key: 'd', style: S.tab(tab === 'settings'), onClick: () => guardRun('切换到「设置」', () => setTab('settings')) }, '设置'),
           ]),
+          guard === undefined ? null : h(GuardDialog, {
+            key: 'guard',
+            guard,
+            onCancel: () => setGuard(undefined),
+            onToggleRemember: checked => setGuard(previous => ({ ...previous, remember: checked })),
+            onConfirm: async () => {
+              if (guard.inInterview === true && guard.second !== true) {
+                setGuard(previous => ({ ...previous, second: true }))
+                return
+              }
+              if (guard.remember === true) {
+                try { await apiPost('settings', { guardQuiet: true }) } catch { /* 存不下也继续 */ }
+              }
+              const action = guard.action
+              setGuard(undefined)
+              await releaseAllMedia()
+              action()
+            },
+          }),
           h('button', {
             key: 'theme',
             // 按钮上写的是**切过去之后**的样子：「亮色」= 点一下变亮色。
@@ -329,7 +398,7 @@
           h('button', {
             key: 'n',
             style: { ...S.btn('primary', false), marginLeft: narrow ? 0 : 16 },
-            onClick: createSession,
+            onClick: () => guardRun('新建面试', createSession),
           }, '新建面试'),
         ]),
 
@@ -434,7 +503,7 @@
                       padding: '8px 10px', border: 'none', background: 'transparent',
                       fontFamily: F.ui, color: row.id === selected ? C.bone : C.boneDim,
                     },
-                    onClick: () => setSelected(row.id),
+                    onClick: () => guardRun('切换面试', () => setSelected(row.id)),
                   }, [
                     h('div', {
                       key: 't',
@@ -485,7 +554,7 @@
                         padding: '10px 11px', border: 'none', background: 'transparent',
                         fontFamily: F.ui, color: row.id === selected ? C.bone : C.boneDim,
                       },
-                      onClick: () => setSelected(row.id),
+                      onClick: () => guardRun('切换面试', () => setSelected(row.id)),
                     }, [
                       h('div', {
                         key: 't',

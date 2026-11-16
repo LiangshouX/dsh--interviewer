@@ -203,27 +203,28 @@ async function main() {
   // 注意：**等待放在 act 之外**。切到面试中之后，面板会起一个 1.5 秒的轮询
   // 定时器，而 React 的 act() 会一直等所有待处理工作结束——有活着的定时器时
   // 它可能永远不返回（探针自己挂住，而不是被测代码慢）。
-  const tabs = renderer.root.findAll(node =>
-    node.type === 'div'
-    && typeof node.props?.onClick === 'function'
-    && node.props?.style?.borderRadius === 7)
+  // 按**文本**找页签，而不是按 borderRadius——样式一改（视觉重做那次），
+  // 按半径找就会一个都找不到，于是报告页/设置页从来没被渲染过，探针还"通过"。
+  const findTab = label => renderer.root.findAll(node =>
+    typeof node.props?.onClick === 'function'
+    && node.props?.children === label)[0]
+
   const startedLive = Date.now()
-  if (tabs.length >= 2) {
-    await act(async () => { tabs[1].props.onClick() })
+  const liveTab = findTab('面试中')
+  if (liveTab !== undefined) {
+    await act(async () => { liveTab.props.onClick() })
   }
   const liveRenderMs = Date.now() - startedLive
   await new Promise(done => setTimeout(done, 80))
 
-  // 面试中视图的产物规模（最重的那个）。
   const liveNodes = renderer.toJSON()
   const nodeCount = countNodes(liveNodes)
 
-  // ③b 把**三个页签都点一遍**。
-  // 之前只点到了「面试中」，报告页的代码路径从来没跑过——
-  // 于是报告页里的 React key 警告就没人看见。三个页签都得渲染。
+  // ③b 三个页签都点一遍：报告页的代码路径只有点开才会跑到。
   const reportStarted = Date.now()
-  if (tabs.length >= 3) {
-    await act(async () => { tabs[2].props.onClick() })
+  const reportTab = findTab('报告')
+  if (reportTab !== undefined) {
+    await act(async () => { reportTab.props.onClick() })
     await new Promise(done => setTimeout(done, 80))
   }
   const reportRenderMs = Date.now() - reportStarted
@@ -232,19 +233,16 @@ async function main() {
     warnings.push('报告页签点开后没有渲染出报告区')
   }
 
-
-
-  // ③c 设置页也要渲染一遍：它是批次 B 新加的第四页签，代码路径一样会藏
-  // 运行时错误（undefined 字段、坏 key）。这里只看"能不能渲染出来"。
-  if (tabs.length >= 4) {
-    await act(async () => { tabs[3].props.onClick() })
+  // ③c 设置页（批次 B 新增）：同样只看"能不能渲染出来"。
+  const settingsTab = findTab('设置')
+  if (settingsTab !== undefined) {
+    await act(async () => { settingsTab.props.onClick() })
     await new Promise(done => setTimeout(done, 80))
     const settingsHtml = JSON.stringify(renderer.toJSON())
     if (!settingsHtml.includes('设置') && !settingsHtml.includes('数据在哪')) {
       warnings.push('设置页签点开后没有渲染出设置区')
     }
   }
-
 
   // ④ 轮询一次：**revision 相同**，渲染次数不得增加。
   // 面试中的轮询间隔是 1.5 秒，所以要真的等过这个间隔才测得到。

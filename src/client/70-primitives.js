@@ -334,3 +334,43 @@
       ])
     }
 
+
+    /**
+     * 离开面试间前的确认弹窗。
+     *
+     * **两件事必须说清楚**：会关掉什么（摄像头/麦克风）、以及现在是不是
+     * 正在面试（二次确认，防误触）。`second` 为 true 时按钮文案变成
+     * 「再次点击确认离开」——不是防呆，是防手滑。
+     */
+    function GuardDialog(props) {
+      const { guard, onCancel, onToggleRemember, onConfirm } = props
+      const danger = guard.inInterview === true
+      return h('div', { style: S.overlay, role: 'dialog', 'aria-modal': 'true' }, [
+        h('div', { key: 'm', style: S.modal }, [
+          h('div', { key: 't', style: { ...S.cardTitle, marginBottom: 8 } },
+            danger ? '正在面试中，确定要离开？' : '离开面试间？'),
+          h('div', { key: 'd', style: S.hint },
+            danger
+              ? '这场面试正在进行。离开会关闭摄像头与麦克风，并中断当前这一轮。'
+              : '离开会关闭正在使用的摄像头与麦克风。'),
+          h('label', {
+            key: 'r',
+            style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: 12, color: C.boneDim, cursor: 'pointer' },
+          }, [
+            h('input', {
+              key: 'c', type: 'checkbox', checked: guard.remember === true,
+              onChange: event => onToggleRemember(event.target.checked),
+            }),
+            h('span', { key: 's' }, '以后不再提醒（可在设置页恢复）'),
+          ]),
+          h('div', { key: 'b', style: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 } }, [
+            h('button', { key: 'cancel', style: S.btn(false, false), onClick: onCancel }, '留在面试间'),
+            h('button', {
+              key: 'ok',
+              style: S.btn(danger ? 'tally' : 'primary', false),
+              onClick: onConfirm,
+            }, danger && guard.second !== true ? '再次点击确认离开' : '确认离开'),
+          ]),
+        ]),
+      ])
+    }
