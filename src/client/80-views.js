@@ -1474,7 +1474,8 @@
                 // 画面在 Host（桌面端），录像就该由 Host 写盘——它手里本来
                 // 就握着一帧帧的图像，转成 mp4 是最短的路。浏览器那边的
                 // MediaRecorder 只能录到麦克风。
-                hasHostVideo
+                // 隐私开关：关掉录像入口，就不该再出现"开始录制"。
+                config?.recordVideo === false ? null : hasHostVideo
                   ? h('button', {
                     key: 'host-rec',
                     style: S.btn(hostCamera.recording ? 'tally' : false, false),
@@ -1497,7 +1498,7 @@
                     style: S.btn(recorder.recording ? 'tally' : false, media.stream === undefined),
                     onClick: () => (recorder.recording ? recorder.stop() : recorder.start()),
                   }, recorder.recording ? '停止录制' : (hasVideo ? '开始录制' : '开始录音')),
-                recorder.clip !== undefined
+                recorder.clip !== undefined && config?.recordVideo !== false
                   ? h('button', { key: 'save', style: S.btn('primary', false), onClick: saveClip }, hasVideo ? '保存录像' : '保存录音')
                   : null,
               ]),
@@ -1507,7 +1508,7 @@
             h('div', { key: 'g2' }, [
               h('div', { key: 'gh', style: { ...S.eyebrow, marginBottom: 8 } }, '声音'),
               h('div', { key: 'gr', style: S.row }, [
-                h('button', {
+                config?.recordAudio === false ? null : h('button', {
                   key: 'arec',
                   style: S.btn(audioRecorder.recording ? 'tally' : false, media.stream === undefined),
                   onClick: () => (audioRecorder.recording ? audioRecorder.stop() : audioRecorder.start()),

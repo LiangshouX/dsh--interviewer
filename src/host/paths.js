@@ -109,26 +109,86 @@ export function settingsPath() {
  * **白名单，不是黑名单。** 这个文件是插件唯一会自己写的用户数据：
  * 多写一个键就等于多一个没人校验的输入口。所以只允许这几种。
  */
-export const SETTING_KEYS = [
-  'workspaceRoot',
-  'ffmpegPath',
-  'chromiumPath',
-  'guardEnabled',
-  'guardQuiet',
-  'asrProvider',
-  'ttsProvider',
-  'ttsModel',
-  'ttsVoice',
-]
+/**
+ * 面板可以写、并且**真的会生效**的设置项，及其校验规则。
+ *
+ * **白名单 + 规格，不是黑名单。** 这个文件是插件唯一会自己写的用户数据：
+ * 每多一个键，就多一个必须校验的输入口。kind 决定读/写时怎么规范化——
+ * 枚举不在值域里、数字超范围、类型不对，一律**拒绝并说明原因**，
+ * 而不是悄悄存下去。存了却不生效，比拒绝更糟。
+ */
+export const SETTING_SPECS = {
+  workspaceRoot: { kind: 'path' },
+  ffmpegPath: { kind: 'path' },
+  chromiumPath: { kind: 'path' },
+  // 语音识别
+  asrProvider: { kind: 'enum', values: ['auto', 'host', 'browser', 'none', 'minimax', 'openai'] },
+  asrEndpoint: { kind: 'string' },
+  asrBaseUrl: { kind: 'string' },
+  asrModel: { kind: 'string' },
+  asrApiKeyEnv: { kind: 'string' },
+  asrLanguage: { kind: 'string' },
+  // 语音合成
+  ttsProvider: { kind: 'enum', values: ['auto', 'host', 'mimo', 'openai', 'minimax', 'baidu', 'edge', 'browser', 'none'] },
+  ttsBaseUrl: { kind: 'string' },
+  ttsApiKeyEnv: { kind: 'string' },
+  ttsModel: { kind: 'string' },
+  ttsVoice: { kind: 'string' },
+  ttsStyle: { kind: 'string' },
+  ttsFormat: { kind: 'enum', values: ['mp3', 'wav'] },
+  ttsRate: { kind: 'number', min: 0.5, max: 2 },
+  // 摄像头：auto = ffmpeg 优先；chromium-mf = 浏览器采集优先
+  cameraBackend: { kind: 'enum', values: ['auto', 'ffmpeg', 'chromium-mf'] },
+  // 隐私：允许录像 / 允许录音（关掉 = 面板不出现对应录制入口）
+  recordVideo: { kind: 'boolean' },
+  recordAudio: { kind: 'boolean' },
+  // 面试间保护
+  guardEnabled: { kind: 'boolean' },
+  guardQuiet: { kind: 'boolean' },
+}
+
+export const SETTING_KEYS = Object.keys(SETTING_SPECS)
 
 /**
- * Read the plugin's own settings.
+ * Normalize one setting value against its spec.
  *
- * **读不到就是没有设置。** 一个坏掉的设置文件不该让插件起不来——
- * 它只是「用户还没选过」而已。
- *
- * @returns {Promise<object>}
+ * @param {string} key
+ * @param {unknown} value
+ * @returns {{ok: true, value: string|number|boolean} | {ok: false, reason: string}}
  */
+export function normalizeSetting(key, value) {
+  const spec = SETTING_SPECS[key]
+  if (spec === undefined) return { ok: false, reason: `未知设置项 ${key}` }
+  if (spec.kind === 'boolean') {
+    return typeof value === 'boolean' ? { ok: true, value } : { ok: false, reason: `${key} 必须是 true/false` }
+  }
+  if (spec.kind === 'number') {
+    const number = typeof value === 'number' ? value : Number.NaN
+    if (!Number.isFinite(number)) return { ok: false, reason: `${key} 必须是数字` }
+    if (number < spec.min || number > spec.max) {
+      return { ok: false, reason: `${key} 必须在 ${spec.min}–${spec.max} 之间` }
+    }
+    return { ok: true, value: number }
+  }
+  if (typeof value !== 'string') return { ok: false, reason: `${key} 必须是字符串` }
+  const trimmed = value.trim()
+  if (spec.kind === 'path') {
+    // 路径允许清空（= 回到自动发现），但拒绝明显不是路径的值。
+    if (trimmed === '') return { ok: true, value: '' }
+    if (/[\r\n]/.test(trimmed)) return { ok: false, reason: `${key} 不是合法路径` }
+    return { ok: true, value: trimmed }
+  }
+  if (spec.kind === 'enum') {
+    const candidate = trimmed.toLowerCase()
+    if (!spec.values.includes(candidate)) {
+      return { ok: false, reason: `${key} 只能是 ${spec.values.join(' / ')}` }
+    }
+    return { ok: true, value: candidate }
+  }
+  // string：空串 = 用默认值
+  return { ok: true, value: trimmed }
+}
+
 export async function readSettings() {
   try {
     const raw = await readFile(settingsPath(), 'utf8')
@@ -136,13 +196,9 @@ export async function readSettings() {
     if (parsed === null || typeof parsed !== 'object') return {}
     const settings = {}
     for (const key of SETTING_KEYS) {
-      const value = parsed[key]
-      if (typeof value === 'string') {
-        const trimmed = value.trim()
-        if (trimmed !== '') settings[key] = trimmed
-      } else if (typeof value === 'boolean') {
-        settings[key] = value
-      }
+      if (!(key in parsed)) continue
+      const normalized = normalizeSetting(key, parsed[key])
+      if (normalized.ok) settings[key] = normalized.value
     }
     return settings
   } catch {

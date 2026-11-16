@@ -528,6 +528,7 @@ export class CameraService {
       ok,
       backend: ffmpegOk ? 'ffmpeg' : (browserProbe?.ok === true ? 'chromium-mf' : ''),
       ffmpeg: { path: this.ffmpeg, source: this.ffmpegSource },
+      preference: this.backendPreference ?? 'auto',
       chromium: chromium ?? { path: '', source: '' },
       devices: list,
       probes,
@@ -575,24 +576,42 @@ export class CameraService {
    */
   async start(options = {}) {
     if (this.backend !== undefined) return { ok: true, device: this.device, backend: this.backend }
-    const viaFfmpeg = await this.startFfmpeg(options)
-    if (viaFfmpeg.ok) {
-      this.backend = 'ffmpeg'
-      return { ...viaFfmpeg, backend: 'ffmpeg' }
+    // 顺序由 **面板设置** 决定：
+    //   auto（默认）      → ffmpeg 优先，失败回落浏览器采集
+    //   chromium-mf       → 浏览器采集优先（DShow 已知坏的机器）
+    //   ffmpeg            → 只用 ffmpeg（不允许悄悄换后端）
+    const preference = this.backendPreference ?? 'auto'
+    const order = preference === 'chromium-mf'
+      ? ['chromium-mf', 'ffmpeg']
+      : preference === 'ffmpeg'
+        ? ['ffmpeg']
+        : ['ffmpeg', 'chromium-mf']
+    const failures = []
+    for (const backend of order) {
+      const result = backend === 'ffmpeg'
+        ? await this.startFfmpeg(options)
+        : await this.startBrowser(options)
+      if (result.ok) {
+        if (backend === 'ffmpeg') {
+          this.backend = 'ffmpeg'
+          return { ...result, backend: 'ffmpeg' }
+        }
+        return result
+      }
+      failures.push({ backend, result })
     }
-    const viaBrowser = await this.startBrowser(options)
-    if (viaBrowser.ok) return viaBrowser
-    const ffmpegReason = viaFfmpeg.error ?? 'ffmpeg 采集失败'
-    const browserReason = viaBrowser.error ?? '浏览器采集失败'
-    // 两条都失败时，**两条原因都留着**——否则用户只知道"打不开"，不知道试过什么。
-    this.error = `${ffmpegReason}；${browserReason}`
+    const ffmpegFailure = failures.find(item => item.backend === 'ffmpeg')?.result
+    const browserFailure = failures.find(item => item.backend === 'chromium-mf')?.result
+    const reasons = failures.map(item => item.result.error ?? `${item.backend} 失败`)
+    // 所有尝试都失败时，**每条原因都留着**——否则用户只知道"打不开"，不知道试过什么。
+    this.error = reasons.join('；')
     return {
       ok: false,
       error: this.error,
-      detail: viaFfmpeg.detail ?? '',
-      reason: viaFfmpeg.reason,
-      hint: viaFfmpeg.hint,
-      browserError: browserReason,
+      detail: ffmpegFailure?.detail ?? '',
+      reason: ffmpegFailure?.reason,
+      hint: ffmpegFailure?.hint,
+      browserError: browserFailure?.error,
     }
   }
 

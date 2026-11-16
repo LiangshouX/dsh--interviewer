@@ -180,20 +180,27 @@ async function readResource(service, segments, query) {
   const [head, ...rest] = segments
 
   if (head === 'config') {
+    // **有效值，不是配置文件里的值。** 面板里改过就用面板的，
+    // 否则"设置页能改、界面照旧"这种割裂会一直存在。
+    const effective = await service.effectiveConfig()
     return {
-      asrProvider: service.config.asrProvider,
-      ttsProvider: service.config.ttsProvider,
-      ttsRate: service.config.ttsRate,
-      ttsVoice: service.config.ttsVoice,
-      recordVideo: service.config.recordVideo,
-      recordAudio: service.config.recordAudio,
+      asrProvider: effective.asrProvider,
+      ttsProvider: effective.ttsProvider,
+      ttsRate: effective.ttsRate,
+      ttsVoice: effective.ttsVoice,
+      recordVideo: effective.recordVideo,
+      recordAudio: effective.recordAudio,
+      guardEnabled: effective.guardEnabled,
+      cameraBackend: effective.cameraBackend,
       // 工作区根：界面要能回答「数据存到哪儿了、为什么是这个目录」。
       workspaceRoot: await service.location(),
-      jdFetchTimeoutMs: service.config.jdFetchTimeoutMs,
+      jdFetchTimeoutMs: effective.jdFetchTimeoutMs,
     }
   }
   if (head === 'sessions') {
     if (rest.length === 0) return { sessions: await service.listSessions() }
+    // 空场次清单（误触新建的清理候选）
+    if (rest[0] === 'empty') return { candidates: await service.listEmptySessions() }
     // **归档正文单独取。** 简历/动辄几十 KB，跟着 1.5 秒一次的轮询传
     // 是纯浪费——而且它在「准备」页才有用，面试页根本不需要。
     if (rest[1] === 'documents') {
@@ -312,6 +319,10 @@ async function runAction(service, segments, body) {
       if (rest.length === 0) {
         return { session: await service.createSession(body) }
       }
+      // 维护动作放在 id 之前，避免和会话 id 混淆。
+      if (rest[0] === 'cleanup') {
+        return await service.purgeEmptySessions(body.ids)
+      }
       const sessionId = rest[0]
       const action = rest[1]
       switch (action) {
@@ -337,6 +348,8 @@ async function runAction(service, segments, body) {
           return { session: await service.updateSession(sessionId, { status: 'done', endedAt: Date.now() }) }
         case 'archive':
           return { session: await service.setArchived(sessionId, body.archived === true) }
+        case 'delete':
+          return await service.deleteSession(sessionId, body)
         default:
           throw new Error(`未知的会话操作：${action}`)
       }

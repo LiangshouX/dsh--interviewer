@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { InterviewService } from '../src/host/service.js'
-import { readSettings, settingsPath } from '../src/host/paths.js'
+import { readSettings, settingsPath, normalizeSetting } from '../src/host/paths.js'
+import { CameraService } from '../src/host/camera.js'
 
 /** 临时 profile 目录 + 临时数据根 */
 async function withEnv(run) {
@@ -98,5 +99,107 @@ test('坏掉的设置文件不影响启动，只是"没有设置"', async () => 
     assert.deepEqual(settings, {})
     const snapshot = await service.settingsSnapshot()
     assert.equal(snapshot.dataRoot.path, root)
+  })
+})
+
+
+test('设置值按规格校验：枚举/范围/类型不对就拒绝并说明原因', async () => {
+  await withEnv(async ({ root }) => {
+    const service = new InterviewService({ config: { workspaceRoot: root }, ctx: { get: () => undefined } })
+    const result = await service.updateSettings({
+      ttsProvider: 'not-a-provider',
+      ttsRate: 9,
+      recordVideo: 'yes',
+      cameraBackend: 'chromium-mf',
+      asrLanguage: 'en',
+    })
+    assert.equal('ttsProvider' in result.applied, false)
+    assert.equal('ttsRate' in result.applied, false)
+    assert.equal('recordVideo' in result.applied, false)
+    assert.equal(result.applied.cameraBackend, 'chromium-mf')
+    assert.equal(result.applied.asrLanguage, 'en')
+    assert.equal(result.invalid.length, 3)
+    assert.match(result.invalid.map(item => item.reason).join(' '), /只能是|必须/)
+  })
+})
+
+test('校验函数单独可用：normalizeSetting', () => {
+  assert.deepEqual(normalizeSetting('ttsRate', 1.25), { ok: true, value: 1.25 })
+  assert.equal(normalizeSetting('ttsRate', 5).ok, false)
+  assert.equal(normalizeSetting('ttsProvider', 'OPENAI').ok, true)
+  assert.deepEqual(normalizeSetting('ttsProvider', 'OPENAI'), { ok: true, value: 'openai' })
+  assert.equal(normalizeSetting('unknownKey', 1).ok, false)
+})
+
+test('有效配置：配置文件显式值优先，面板设置补缺，数据根不混进来', async () => {
+  await withEnv(async ({ root }) => {
+    const service = new InterviewService({
+      config: { workspaceRoot: root, ttsProvider: 'none' },
+      ctx: { get: () => undefined },
+    })
+    await service.updateSettings({ ttsProvider: 'browser', ttsModel: 'x-tts', cameraBackend: 'chromium-mf' })
+    const effective = await service.effectiveConfig()
+    assert.equal(effective.ttsProvider, 'none', '显式写过的配置文件值必须赢')
+    assert.equal(effective.ttsModel, 'x-tts', '配置没写过的键由面板补上')
+    assert.equal(effective.cameraBackend, 'chromium-mf')
+    assert.equal(Object.hasOwn(effective, 'workspaceRoot'), true)
+    const snapshot = await service.settingsSnapshot()
+    assert.deepEqual(snapshot.explicit.sort(), ['ttsProvider', 'workspaceRoot'].sort())
+  })
+})
+
+test('摄像头后端偏好：ffmpeg 模式不回落，chromium-mf 模式浏览器优先', async () => {
+  const calls = []
+  const camera = new CameraService({})
+  camera.startFfmpeg = async () => { calls.push('ffmpeg'); return { ok: false, error: 'ffmpeg 不行' } }
+  camera.startBrowser = async () => { calls.push('browser'); return { ok: true, backend: 'chromium-mf', device: { name: 'browser' } } }
+
+  camera.backendPreference = 'ffmpeg'
+  const pinned = await camera.start()
+  assert.equal(pinned.ok, false)
+  assert.deepEqual(calls, ['ffmpeg'])
+
+  calls.length = 0
+  const camera2 = new CameraService({})
+  camera2.startFfmpeg = async () => { calls.push('ffmpeg'); return { ok: true, device: { name: 'ffmpeg' } } }
+  camera2.startBrowser = async () => { calls.push('browser'); return { ok: true, backend: 'chromium-mf', device: { name: 'browser' } } }
+  camera2.backendPreference = 'chromium-mf'
+  const preferred = await camera2.start()
+  assert.equal(preferred.backend, 'chromium-mf')
+  assert.deepEqual(calls, ['browser'])
+})
+
+
+test('删除一场面试：目录真的没了；进行中的拒绝删', async () => {
+  await withEnv(async ({ root }) => {
+    const service = new InterviewService({ config: { workspaceRoot: root }, ctx: { get: () => undefined } })
+    const session = await service.createSession({ title: '待删除' })
+    const dir = await service.sessionDir(session.id)
+    assert.equal(await service.deleteSession(session.id).then(r => r.ok), true)
+    assert.deepEqual(await service.listSessions(), [])
+    await assert.rejects(() => stat(dir))
+
+    const running = await service.createSession({ title: '进行中' })
+    await service.updateSession(running.id, { status: 'running' })
+    const refused = await service.deleteSession(running.id)
+    assert.equal(refused.ok, false)
+    assert.match(refused.error, /正在进行/)
+    assert.equal((await service.listSessions()).length, 1)
+  })
+})
+
+test('空场次清理：只删没有内容的，有简历/转录的不动', async () => {
+  await withEnv(async ({ root }) => {
+    const service = new InterviewService({ config: { workspaceRoot: root }, ctx: { get: () => undefined } })
+    await service.createSession({ title: '误触 1' })
+    await service.createSession({ title: '误触 2' })
+    const real = await service.createSession({ title: '有简历', resumeText: '这里是简历正文' })
+    const empty = await service.listEmptySessions()
+    assert.equal(empty.length, 2)
+    const purge = await service.purgeEmptySessions()
+    assert.equal(purge.removed.length, 2)
+    const rows = await service.listSessions()
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].id, real.id)
   })
 })

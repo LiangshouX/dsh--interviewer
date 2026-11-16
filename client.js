@@ -3772,7 +3772,8 @@ window.__ModuleLoader__.load({
                 // 画面在 Host（桌面端），录像就该由 Host 写盘——它手里本来
                 // 就握着一帧帧的图像，转成 mp4 是最短的路。浏览器那边的
                 // MediaRecorder 只能录到麦克风。
-                hasHostVideo
+                // 隐私开关：关掉录像入口，就不该再出现"开始录制"。
+                config?.recordVideo === false ? null : hasHostVideo
                   ? h('button', {
                     key: 'host-rec',
                     style: S.btn(hostCamera.recording ? 'tally' : false, false),
@@ -3795,7 +3796,7 @@ window.__ModuleLoader__.load({
                     style: S.btn(recorder.recording ? 'tally' : false, media.stream === undefined),
                     onClick: () => (recorder.recording ? recorder.stop() : recorder.start()),
                   }, recorder.recording ? '停止录制' : (hasVideo ? '开始录制' : '开始录音')),
-                recorder.clip !== undefined
+                recorder.clip !== undefined && config?.recordVideo !== false
                   ? h('button', { key: 'save', style: S.btn('primary', false), onClick: saveClip }, hasVideo ? '保存录像' : '保存录音')
                   : null,
               ]),
@@ -3805,7 +3806,7 @@ window.__ModuleLoader__.load({
             h('div', { key: 'g2' }, [
               h('div', { key: 'gh', style: { ...S.eyebrow, marginBottom: 8 } }, '声音'),
               h('div', { key: 'gr', style: S.row }, [
-                h('button', {
+                config?.recordAudio === false ? null : h('button', {
                   key: 'arec',
                   style: S.btn(audioRecorder.recording ? 'tally' : false, media.stream === undefined),
                   onClick: () => (audioRecorder.recording ? audioRecorder.stop() : audioRecorder.start()),
@@ -3979,16 +3980,16 @@ window.__ModuleLoader__.load({
     }
 
 /**
- * 设置页：**所有「东西在哪、现在用哪个」都在这里回答。**
+ * 设置页：**能改的都能生效，不能改的明确说只读。**
  *
- * 这一页不是 DSH 的设置页的替代品，也不是要再占一个位置——它是「模拟面试间」
- * 自己的透明面板：数据根、当前面试与产物、宿主工作区、语音链路与模型、
- * 摄像头两条采集通道、麦克风/摄像头状态、以及面试间保护的开关。
+ * 这一页不是 DSH 设置页的替代品，是「模拟面试间」自己的控制台：
  *
- * 纪律：
- *  - 读的是 Host 的 `/settings` 快照（单一真源），页面**不自己推断**；
- *  - 改设置走 `POST /settings`（白名单键），配置文件里写死的项会被拒绝并说明原因；
- *  - 每个「现在用的是哪个」都要同时给出**原因**，不只是状态。
+ *   可改：语音识别链路 / 播报模型与音色 / 摄像头采集后端与路径 /
+ *         录像与录音开关 / 面试间保护开关
+ *   只读：数据根、产物清单、宿主模型目录——这些是"事实"，不是"偏好"
+ *
+ * 写入走 `POST /settings`（白名单 + 规格校验）；**配置文件里显式写过的项
+ * 会拒绝面板覆盖，并说明原因**，不会假装保存成功。
  */
 function SettingsView(props) {
   const { session, notify } = props
@@ -3999,57 +4000,107 @@ function SettingsView(props) {
     [sessionId],
   )
   const data = snapshot.data
-  const [ffmpegPath, setFfmpegPath] = useState('')
-  const [chromiumPath, setChromiumPath] = useState('')
-  const [ttsProvider, setTtsProvider] = useState('auto')
-  const [ttsModel, setTtsModel] = useState('')
-  const [ttsVoice, setTtsVoice] = useState('')
-  const [diagnosis, setDiagnosis] = useState(undefined)
   const [busy, setBusy] = useState('')
+  const [diagnosis, setDiagnosis] = useState(undefined)
+  // 空场次清理同样两步确认。
+  const [purgeArm, setPurgeArm] = useState(false)
+  const [form, setForm] = useState(undefined)
 
-  // 首次拿到快照时把输入框填上（之后以用户输入为准，不被轮询覆盖）。
-  const seeded = useRef(false)
+  // 首次拿到快照时，用**面板设置**填表单（没设置过的项留空，让 placeholder 显示生效值）。
   useEffect(() => {
-    if (seeded.current || data === undefined) return
-    seeded.current = true
-    setFfmpegPath(data.settings?.ffmpegPath ?? '')
-    setChromiumPath(data.settings?.chromiumPath ?? '')
-    setTtsProvider(data.settings?.ttsProvider ?? 'auto')
-    setTtsModel(data.settings?.ttsModel ?? '')
-    setTtsVoice(data.settings?.ttsVoice ?? '')
-  }, [data])
+    if (form !== undefined || data === undefined) return
+    const settings = data.settings ?? {}
+    setForm({
+      asrProvider: settings.asrProvider ?? 'auto',
+      asrEndpoint: settings.asrEndpoint ?? '',
+      asrBaseUrl: settings.asrBaseUrl ?? '',
+      asrModel: settings.asrModel ?? '',
+      asrApiKeyEnv: settings.asrApiKeyEnv ?? '',
+      asrLanguage: settings.asrLanguage ?? '',
+      ttsProvider: settings.ttsProvider ?? 'auto',
+      ttsModel: settings.ttsModel ?? '',
+      ttsVoice: settings.ttsVoice ?? '',
+      ttsBaseUrl: settings.ttsBaseUrl ?? '',
+      ttsApiKeyEnv: settings.ttsApiKeyEnv ?? '',
+      ttsFormat: settings.ttsFormat ?? '',
+      ttsRate: settings.ttsRate === undefined ? '' : String(settings.ttsRate),
+      ttsStyle: settings.ttsStyle ?? '',
+      cameraBackend: settings.cameraBackend ?? 'auto',
+      ffmpegPath: settings.ffmpegPath ?? '',
+      chromiumPath: settings.chromiumPath ?? '',
+      recordVideo: settings.recordVideo,
+      recordAudio: settings.recordAudio,
+      guardEnabled: settings.guardEnabled,
+    })
+  }, [data, form])
 
-  const save = useCallback(async patch => {
+  const set = useCallback((key, value) => setForm(previous => ({ ...previous, [key]: value })), [])
+
+  const save = useCallback(async (patch, label) => {
+    const cleaned = {}
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === '' || value === undefined) continue
+      if (key === 'ttsRate') {
+        const number = Number(value)
+        if (!Number.isFinite(number)) { notify('保存失败', '语速必须是数字', 'error'); return }
+        cleaned[key] = number
+        continue
+      }
+      cleaned[key] = value
+    }
+    setBusy(label)
     try {
-      const result = await apiPost('settings', patch)
+      const result = await apiPost('settings', cleaned)
+      const invalid = result?.invalid ?? []
       const ignored = result?.ignored ?? []
+      const problems = [...invalid, ...ignored]
       notify(
-        ignored.length === 0 ? '设置已保存' : '部分设置没生效',
-        ignored.length === 0 ? '下一次操作就会按新设置执行。' : ignored.map(item => item.reason).join('；'),
-        ignored.length === 0 ? 'ok' : 'error',
+        problems.length === 0 ? '设置已保存' : '部分设置没保存',
+        problems.length === 0
+          ? '下一次操作就会按新设置执行。'
+          : problems.map(item => item.reason).join('；'),
+        problems.length === 0 ? 'ok' : 'error',
       )
       snapshot.refresh()
     } catch (failure) {
       notify('保存失败', failure instanceof Error ? failure.message : String(failure), 'error')
+    } finally {
+      setBusy('')
     }
-  }, [notify])
+  }, [notify, snapshot])
 
   const runDiagnose = useCallback(async () => {
     setBusy('diagnose')
     try {
       const result = await apiGet('camera/diagnose')
       setDiagnosis(result)
-      notify(
-        result.ok ? '摄像头可用' : '摄像头不可用',
-        result.ok ? `采集后端：${result.backend ?? '未知'}` : (result.reason ?? ''),
-        result.ok ? 'ok' : 'error',
-      )
+      notify(result.ok ? '摄像头可用' : '摄像头不可用', result.ok ? `采集后端：${result.backend ?? '未知'}` : (result.reason ?? ''), result.ok ? 'ok' : 'error')
     } catch (failure) {
       notify('自检失败', failure instanceof Error ? failure.message : String(failure), 'error')
     } finally {
       setBusy('')
     }
   }, [notify])
+
+  const purgeEmpty = useCallback(async () => {
+    if (!purgeArm) {
+      setPurgeArm(true)
+      setTimeout(() => setPurgeArm(false), 5000)
+      return
+    }
+    setBusy('purge')
+    try {
+      const result = await apiPost('sessions/cleanup', {})
+      const removed = (result?.removed ?? []).length
+      notify('已清理', `${removed} 场空面试已从磁盘删除。`, 'ok')
+      setPurgeArm(false)
+      snapshot.refresh()
+    } catch (failure) {
+      notify('清理失败', failure instanceof Error ? failure.message : String(failure), 'error')
+    } finally {
+      setBusy('')
+    }
+  }, [purgeArm, notify, snapshot])
 
   const prepareModel = useCallback(async () => {
     setBusy('model')
@@ -4064,23 +4115,12 @@ function SettingsView(props) {
     }
   }, [notify])
 
-  /** 一行「标签 → 值（+ 来源/理由）」。 */
-  const line = (key, label, value, hint) => h('div', {
-    key,
-    style: {
-      display: 'flex', gap: 12, alignItems: 'baseline', padding: '7px 0',
-      borderBottom: `1px solid ${C.ruleSoft}`,
-    },
-  }, [
-    h('span', { key: 'l', style: { ...S.label, width: 96, flex: '0 0 auto', marginBottom: 0 } }, label),
-    h('span', { key: 'v', style: { flex: '1 1 auto', minWidth: 0, fontSize: 12.5, color: C.bone, wordBreak: 'break-all', fontFamily: F.mono } }, value),
-    hint !== undefined ? h('span', { key: 'h', style: { flex: '0 0 auto', fontSize: 11, color: C.boneFaint } }, hint) : null,
-  ])
-
-  if (data === undefined) {
-    return h('div', { style: { ...S.card, padding: '18px 20px', color: C.boneFaint, fontSize: 12.5, lineHeight: 1.8 } }, loadingHint(snapshot.error))
+  if (data === undefined || form === undefined) {
+    return h('div', { style: { ...S.card, padding: '18px 20px', color: C.boneFaint, fontSize: 12.5, lineHeight: 1.8 } },
+      snapshot.error === undefined ? '正在读取…' : `读不到设置：${snapshot.error}`)
   }
 
+  const effective = data.effective ?? {}
   const voice = data.voice ?? {}
   const asr = voice.asr ?? {}
   const tts = voice.tts ?? {}
@@ -4088,147 +4128,234 @@ function SettingsView(props) {
   const backends = data.backends ?? {}
   const model = data.speechModel ?? {}
 
-  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 16 } }, [
-    h('div', { key: 'data' }, [
-      h('div', { key: 'h', style: S.eyebrow }, '数据在哪'),
-      line('root', '卷宗库', data.dataRoot?.path ?? '', data.dataRoot?.source),
+  /** 一行「标签 → 值（+ 来源/理由）」，只读。 */
+  const line = (key, label, value, hint) => h('div', {
+    key,
+    style: { display: 'flex', gap: 12, alignItems: 'baseline', padding: '7px 0', borderBottom: `1px solid ${C.ruleSoft}` },
+  }, [
+    h('span', { key: 'l', style: { ...S.label, width: 96, flex: '0 0 auto', marginBottom: 0 } }, label),
+    h('span', { key: 'v', style: { flex: '1 1 auto', minWidth: 0, fontSize: 12.5, color: C.bone, wordBreak: 'break-all', fontFamily: F.mono } }, value),
+    hint !== undefined ? h('span', { key: 'h', style: { flex: '0 0 auto', fontSize: 11, color: C.boneFaint } }, hint) : null,
+  ])
+
+  /** 表单字段：label + 控件 + 生效值提示。 */
+  const field = (key, label, control, effectiveText) => h('div', { key }, [
+    h('div', { key: 'l', style: S.label }, label),
+    control,
+    effectiveText !== undefined
+      ? h('div', { key: 'e', style: { fontSize: 10.5, color: C.boneFaint, marginTop: 4, fontFamily: F.mono } }, `生效：${effectiveText}`)
+      : null,
+  ])
+
+  const input = (key, placeholder) => h('input', {
+    key: 'i',
+    style: S.input,
+    value: form[key],
+    placeholder,
+    onChange: event => set(key, event.target.value),
+  })
+
+  const select = (key, options) => h('select', {
+    key: 's',
+    style: S.input,
+    value: form[key],
+    onChange: event => set(key, event.target.value),
+  }, options.map(option => h('option', { key: option.value, value: option.value }, option.label)))
+
+  const checkbox = (key, label) => h('label', {
+    key,
+    style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, color: C.boneDim, cursor: 'pointer', padding: '4px 0' },
+  }, [
+    h('input', {
+      key: 'c',
+      type: 'checkbox',
+      checked: form[key] === true,
+      onChange: event => set(key, event.target.checked),
+    }),
+    h('span', { key: 's' }, label),
+  ])
+
+  const section = (key, title, children, hint) => h('div', { key, style: { ...S.card, padding: '16px 18px' } }, [
+    h('div', { key: 'h', style: { ...S.cardHead, marginBottom: 10 } }, [
+      h('span', { key: 'e', style: S.eyebrow }, title),
+      hint !== undefined ? h('span', { key: 's', style: { fontSize: 11, color: C.boneFaint } }, hint) : null,
+    ]),
+    ...children,
+  ])
+
+  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, [
+    section('asr', '语音识别', [
+      h('div', { key: 'g', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 } }, [
+        field('asrProvider', '识别来源', select('asrProvider', [
+          { value: 'auto', label: 'auto（宿主 → 服务端 → 浏览器）' },
+          { value: 'host', label: 'host（只用宿主）' },
+          { value: 'browser', label: 'browser（浏览器识别）' },
+          { value: 'minimax', label: 'minimax（服务端）' },
+          { value: 'openai', label: 'openai（服务端）' },
+          { value: 'none', label: 'none（关闭）' },
+        ]), asr.mode),
+        field('asrEndpoint', '识别端点（可选）', input('asrEndpoint', effective.asrEndpoint || '例如 https://api.example.com/v1/audio/transcriptions'), effective.asrEndpoint || '内置'),
+        field('asrBaseUrl', 'Base URL（可选）', input('asrBaseUrl', effective.asrBaseUrl || '留空 = 该来源默认'), effective.asrBaseUrl || '默认'),
+        field('asrModel', '识别模型', input('asrModel', effective.asrModel || '留空 = 该来源默认'), effective.asrModel || '默认'),
+        field('asrApiKeyEnv', '凭据变量名', input('asrApiKeyEnv', effective.asrApiKeyEnv || '例如 MIMO_API_KEY'), effective.asrApiKeyEnv || '默认'),
+        field('asrLanguage', '识别语言', input('asrLanguage', effective.asrLanguage || 'zh'), effective.asrLanguage || 'zh'),
+      ]),
+      h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } }, [
+        h('button', {
+          key: 'save',
+          style: S.btn('primary', busy === 'asr'),
+          onClick: () => save({
+            asrProvider: form.asrProvider,
+            asrEndpoint: form.asrEndpoint,
+            asrBaseUrl: form.asrBaseUrl,
+            asrModel: form.asrModel,
+            asrApiKeyEnv: form.asrApiKeyEnv,
+            asrLanguage: form.asrLanguage,
+          }, 'asr'),
+        }, busy === 'asr' ? '保存中…' : '保存识别设置'),
+      ]),
+    ], asr.reason ?? ''),
+
+    section('tts', '语音播报', [
+      h('div', { key: 'g', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 } }, [
+        field('ttsProvider', '播报来源', select('ttsProvider', [
+          { value: 'auto', label: 'auto（模型 → 免密钥自然音 → 浏览器）' },
+          { value: 'host', label: 'host（只用宿主）' },
+          { value: 'mimo', label: 'mimo' },
+          { value: 'openai', label: 'openai' },
+          { value: 'minimax', label: 'minimax' },
+          { value: 'baidu', label: 'baidu（免密钥）' },
+          { value: 'edge', label: 'edge（免密钥）' },
+          { value: 'browser', label: 'browser（系统音色）' },
+          { value: 'none', label: 'none（不播报）' },
+        ]), tts.mode),
+        field('ttsModel', '播报模型', input('ttsModel', effective.ttsModel || '留空 = 该来源默认'), effective.ttsModel || '默认'),
+        field('ttsVoice', '音色', input('ttsVoice', effective.ttsVoice || '留空 = 默认音色'), effective.ttsVoice || '默认'),
+        field('ttsBaseUrl', 'Base URL（可选）', input('ttsBaseUrl', effective.ttsBaseUrl || '留空 = 该来源默认'), effective.ttsBaseUrl || '默认'),
+        field('ttsApiKeyEnv', '凭据变量名', input('ttsApiKeyEnv', effective.ttsApiKeyEnv || '例如 MIMO_API_KEY'), effective.ttsApiKeyEnv || '默认'),
+        field('ttsFormat', '音频格式', select('ttsFormat', [
+          { value: '', label: '默认' },
+          { value: 'mp3', label: 'mp3' },
+          { value: 'wav', label: 'wav' },
+        ]), effective.ttsFormat),
+        field('ttsRate', '语速', input('ttsRate', String(effective.ttsRate ?? 1)), String(effective.ttsRate ?? 1)),
+        field('ttsStyle', '风格指令（可选）', input('ttsStyle', effective.ttsStyle || '例如：语速偏慢、沉稳'), effective.ttsStyle || '无'),
+      ]),
+      h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } }, [
+        h('button', {
+          key: 'save',
+          style: S.btn('primary', busy === 'tts'),
+          onClick: () => save({
+            ttsProvider: form.ttsProvider,
+            ttsModel: form.ttsModel,
+            ttsVoice: form.ttsVoice,
+            ttsBaseUrl: form.ttsBaseUrl,
+            ttsApiKeyEnv: form.ttsApiKeyEnv,
+            ttsFormat: form.ttsFormat,
+            ttsRate: form.ttsRate,
+            ttsStyle: form.ttsStyle,
+          }, 'tts'),
+        }, busy === 'tts' ? '保存中…' : '保存播报设置'),
+      ]),
+    ], tts.reason ?? ''),
+
+    section('camera', '摄像头', [
+      h('div', { key: 'g', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 } }, [
+        field('cameraBackend', '采集后端', select('cameraBackend', [
+          { value: 'auto', label: 'auto（ffmpeg 优先，失败回落浏览器）' },
+          { value: 'ffmpeg', label: 'ffmpeg（只用 DirectShow）' },
+          { value: 'chromium-mf', label: 'Chromium（Media Foundation）优先' },
+        ]), camera.backend === 'chromium-mf' ? 'Chromium（Media Foundation）' : (camera.backend === 'ffmpeg' ? 'ffmpeg' : '未接通')),
+        field('ffmpegPath', 'ffmpeg 路径', input('ffmpegPath', backends.ffmpeg?.found === true ? backends.ffmpeg.path : 'D:\\tools\\ffmpeg\\bin\\ffmpeg.exe'),
+          backends.ffmpeg?.found === true ? `${backends.ffmpeg.path}（${backends.ffmpeg.source}）` : '未找到'),
+        field('chromiumPath', 'Chrome / Edge 路径', input('chromiumPath', backends.chromium?.found === true ? backends.chromium.path : 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'),
+          backends.chromium?.found === true ? `${backends.chromium.path}（${backends.chromium.source}）` : '未找到'),
+      ]),
+      h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } }, [
+        h('button', {
+          key: 'save',
+          style: S.btn('primary', busy === 'camera'),
+          onClick: () => save({
+            cameraBackend: form.cameraBackend,
+            ffmpegPath: form.ffmpegPath,
+            chromiumPath: form.chromiumPath,
+          }, 'camera'),
+        }, busy === 'camera' ? '保存中…' : '保存摄像头设置'),
+        h('button', { key: 'diag', style: S.btn(false, busy === 'diagnose'), onClick: runDiagnose },
+          busy === 'diagnose' ? '正在自检…' : '自检摄像头'),
+      ]),
+      diagnosis !== undefined
+        ? h('div', { key: 'diag', style: { paddingTop: 10, fontSize: 11.5, lineHeight: 1.8, color: diagnosis.ok ? C.jade : C.amber } }, [
+          h('div', { key: 'a' }, diagnosis.ok ? `可用 · 后端 ${diagnosis.backend ?? '未知'}` : `不可用 · ${diagnosis.reason ?? ''}`),
+          diagnosis.hint !== undefined && diagnosis.hint !== '' ? h('div', { key: 'b', style: { color: C.boneFaint } }, diagnosis.hint) : null,
+          (diagnosis.probes ?? []).map(probe => h('div', { key: probe.name, style: { color: C.boneFaint, fontFamily: F.mono } },
+            `${probe.name}: ${probe.ok ? '抓帧成功' : (probe.detail ?? '失败')}`)),
+        ])
+        : null,
+    ], camera.running === true ? '画面已接通' : '未接通'),
+
+    section('privacy', '录像与录音', [
+      checkbox('recordVideo', '允许录像（关掉 = 面板不出现录像入口）'),
+      checkbox('recordAudio', '允许录音（关掉 = 面板不出现录音入口）'),
+      h('div', { key: 'b', style: { marginTop: 10 } }, [
+        h('button', {
+          key: 'save',
+          style: S.btn('primary', busy === 'privacy'),
+          onClick: () => save({ recordVideo: form.recordVideo, recordAudio: form.recordAudio }, 'privacy'),
+        }, busy === 'privacy' ? '保存中…' : '保存隐私设置'),
+      ]),
+    ]),
+
+    section('guard', '面试间保护', [
+      checkbox('guardEnabled', '离开面试间前确认（关闭后直接释放设备，不再提示）'),
+      line('gq', '退出提醒', data.settings?.guardQuiet === true ? '已关闭（以后不再提醒）' : '开启'),
+      h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } }, [
+        h('button', { key: 'save', style: S.btn('primary', busy === 'guard'), onClick: () => save({ guardEnabled: form.guardEnabled }, 'guard') },
+          busy === 'guard' ? '保存中…' : '保存保护设置'),
+        h('button', { key: 'reset', style: S.btn(false, data.settings?.guardQuiet !== true), onClick: () => save({ guardQuiet: false }, 'guard') }, '恢复退出提醒'),
+      ]),
+      h('div', { key: 'note', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7, paddingTop: 6 } },
+        '面试中退出会强制二次确认；面板内切页签/切面试与侧栏切到其他面板都会被拦下。'),
+    ]),
+
+    section('env', '环境（只读）', [
+      line('root', '数据根', data.dataRoot?.path ?? '', data.dataRoot?.source),
       h('div', { key: 'why', style: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.7, padding: '4px 0 8px' } }, data.dataRoot?.reason ?? ''),
       line('sessions', '面试目录', data.sessionsDir ?? ''),
       line('profiles', '岗位档案', data.profilesDir ?? ''),
       line('settings', '设置文件', data.settingsFile ?? ''),
       line('host', '宿主工作区', data.hostWorkspace?.path ?? ''),
-      h('div', { key: 'note', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7 } }, data.hostWorkspace?.note ?? ''),
-    ]),
-
-    session === undefined ? null : h('div', { key: 'session' }, [
-      h('div', { key: 'h', style: S.eyebrow }, '这一场的产物'),
-      line('id', '面试 id', session.session?.id ?? ''),
-      line('dir', '卷宗目录', data.session?.dir ?? ''),
-      (data.session?.artifacts ?? []).map(item => line(
-        `a-${item.name}`,
-        item.kind === 'video' ? '录像' : item.kind === 'audio' ? '录音' : '文件',
-        item.name,
-        formatBytes(item.bytes),
-      )),
-    ]),
-
-    h('div', { key: 'voice' }, [
-      h('div', { key: 'h', style: S.eyebrow }, '语音：现在用哪条'),
-      line('asr', '识别', `${asr.mode ?? '?'}${asr.host?.provider?.name !== undefined ? ` · ${asr.host.provider.name}` : ''}`, asr.source),
-      h('div', { key: 'ar', style: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.7, padding: '2px 0 6px' } }, asr.reason ?? ''),
-      line('tts', '播报', `${tts.mode ?? '?'}${tts.label !== undefined ? ` · ${tts.label}` : ''}`, tts.source),
-      h('div', { key: 'tr', style: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.7, padding: '2px 0 6px' } }, tts.reason ?? ''),
       line('model', '宿主模型', `${model.provider ?? ''} · ${formatBytes(model.bytes ?? 0)} · ${model.files ?? 0} 个文件`, model.exists === true ? '已就绪' : '未下载'),
       line('modeldir', '模型目录', model.dir ?? ''),
-      h('div', { key: 'modelbtns', style: { display: 'flex', gap: 8, paddingTop: 8, flexWrap: 'wrap' } }, [
-        h('button', {
-          key: 'prep',
-          style: S.btn(false, busy === 'model'),
-          onClick: prepareModel,
-        }, busy === 'model' ? '正在准备…' : '准备语音模型'),
-      ]),
-      h('div', { key: 'ttsform', style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingTop: 12 } }, [
-        h('div', { key: 'p' }, [
-          h('div', { key: 'l', style: S.label }, '播报来源（面板设置）'),
-          h('select', {
-            key: 's',
-            style: S.input,
-            value: ttsProvider,
-            onChange: event => setTtsProvider(event.target.value),
-          }, ['auto', 'browser', 'mimo', 'openai', 'minimax', 'baidu', 'edge', 'none'].map(name => h('option', { key: name, value: name }, name))),
-        ]),
-        h('div', { key: 'm' }, [
-          h('div', { key: 'l', style: S.label }, '播报模型'),
-          h('input', {
-            key: 'i',
-            style: S.input,
-            value: ttsModel,
-            placeholder: '留空 = 该来源的默认模型',
-            onChange: event => setTtsModel(event.target.value),
-          }),
-        ]),
-        h('div', { key: 'v' }, [
-          h('div', { key: 'l', style: S.label }, '音色'),
-          h('input', {
-            key: 'i',
-            style: S.input,
-            value: ttsVoice,
-            placeholder: '留空 = 默认音色',
-            onChange: event => setTtsVoice(event.target.value),
-          }),
-        ]),
-        h('div', { key: 'save', style: { display: 'flex', alignItems: 'flex-end' } }, [
-          h('button', {
-            key: 'b',
-            style: S.btn('primary', false),
-            onClick: () => save({ ttsProvider, ttsModel, ttsVoice }),
-          }, '保存语音设置'),
-        ]),
-      ]),
-    ]),
-
-    h('div', { key: 'camera' }, [
-      h('div', { key: 'h', style: S.eyebrow }, '摄像头：两条采集通道'),
-      line('backend', '当前后端', camera.backend === 'chromium-mf' ? 'Chromium（Media Foundation）' : camera.backend === 'ffmpeg' ? 'ffmpeg（DirectShow）' : '未接通'),
-      line('fstate', '状态', camera.running === true ? (camera.hasFrame === true ? '画面已接通' : '进程在，但还没出帧') : '未启动'),
-      line('ff', 'ffmpeg', backends.ffmpeg?.found === true ? backends.ffmpeg.path : '未找到', backends.ffmpeg?.source),
-      line('cr', 'Chromium', backends.chromium?.found === true ? backends.chromium.path : '未找到', backends.chromium?.source),
-      h('div', { key: 'paths', style: { display: 'grid', gridTemplateColumns: '1fr', gap: 10, paddingTop: 10 } }, [
-        h('div', { key: 'f' }, [
-          h('div', { key: 'l', style: S.label }, 'ffmpeg 路径（留空 = 走 PATH）'),
-          h('input', {
-            key: 'i',
-            style: S.input,
-            value: ffmpegPath,
-            placeholder: 'D:\\tools\\ffmpeg\\bin\\ffmpeg.exe',
-            onChange: event => setFfmpegPath(event.target.value),
-          }),
-        ]),
-        h('div', { key: 'c' }, [
-          h('div', { key: 'l', style: S.label }, 'Chrome / Edge 路径（留空 = 自动发现）'),
-          h('input', {
-            key: 'i',
-            style: S.input,
-            value: chromiumPath,
-            placeholder: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-            onChange: event => setChromiumPath(event.target.value),
-          }),
-        ]),
-        h('div', { key: 'b', style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, [
-          h('button', { key: 'save', style: S.btn('primary', false), onClick: () => save({ ffmpegPath, chromiumPath }) }, '保存路径'),
-          h('button', { key: 'diag', style: S.btn(false, busy === 'diagnose'), onClick: runDiagnose }, busy === 'diagnose' ? '正在自检…' : '自检摄像头'),
-        ]),
-      ]),
-      diagnosis !== undefined
-        ? h('div', { key: 'diag', style: { paddingTop: 10, fontSize: 11.5, lineHeight: 1.8, color: diagnosis.ok ? C.jade : C.amber } }, [
-          h('div', { key: 'a' }, diagnosis.ok ? `可用 · 后端 ${diagnosis.backend ?? '未知'}` : `不可用 · ${diagnosis.reason ?? ''}`),
-          diagnosis.hint !== undefined && diagnosis.hint !== ''
-            ? h('div', { key: 'b', style: { color: C.boneFaint } }, diagnosis.hint)
-            : null,
-          (diagnosis.probes ?? []).map(probe => h('div', { key: probe.name, style: { color: C.boneFaint, fontFamily: F.mono } }, `${probe.name}: ${probe.ok ? '抓帧成功' : (probe.detail ?? '失败')}`)),
+      (data.emptySessions ?? []).length > 0
+        ? h('div', { key: 'empty', style: { paddingTop: 8 } }, [
+          line('ec', '空场次', `${data.emptySessions.length} 场`, '没有任何内容'),
+          h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } }, [
+            h('button', {
+              key: 'purge',
+              style: S.btn(purgeArm ? 'tally' : 'primary', busy === 'purge'),
+              onClick: purgeEmpty,
+            }, busy === 'purge' ? '清理中…' : (purgeArm ? '再次点击确认清理' : `清理 ${data.emptySessions.length} 场空场次`)),
+          ]),
+          h('div', { key: 'n', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7, paddingTop: 6 } },
+            '只删没有任何内容的场次；有简历 / JD / 考点 / 转录 / 报告的一场都不会动。'),
         ])
         : null,
-    ]),
-
-    h('div', { key: 'guard' }, [
-      h('div', { key: 'h', style: S.eyebrow }, '面试间保护'),
-      line('gq', '退出提醒', data.settings?.guardQuiet === true ? '已关闭（以后不再提醒）' : '开启'),
-      h('div', { key: 'b', style: { paddingTop: 8 } }, [
-        h('button', {
-          key: 'reset',
-          style: S.btn(false, data.settings?.guardQuiet !== true),
-          onClick: () => save({ guardQuiet: false }),
-        }, '恢复退出提醒'),
+      h('div', { key: 'b', style: { marginTop: 8 } }, [
+        h('button', { key: 'prep', style: S.btn(false, busy === 'model'), onClick: prepareModel }, busy === 'model' ? '正在准备…' : '准备语音模型'),
       ]),
-      h('div', { key: 'note', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7, paddingTop: 6 } },
-        '面试中退出会强制二次确认；未开始时只提醒一次。'),
+      session === undefined ? null : h('div', { key: 'session' }, [
+        line('sid', '面试 id', data.session?.id ?? ''),
+        line('sdir', '卷宗目录', data.session?.dir ?? ''),
+        (data.session?.artifacts ?? []).map(item => line(
+          `a-${item.name}`,
+          item.kind === 'video' ? '录像' : item.kind === 'audio' ? '录音' : '文件',
+          item.name,
+          formatBytes(item.bytes),
+        )),
+      ]),
     ]),
   ])
-}
-
-/** 设置页加载中的一句话。 */
-function loadingHint(error) {
-  return error === undefined ? '正在读取…' : `读不到设置：${error}`
 }
 
     // ── panel ─────────────────────────────────────────────────────────────
@@ -4297,8 +4424,12 @@ function loadingHint(error) {
       // 设备开着时，离开面板（切页签、切面试、宿主卸载）要先确认。
       // 确认后**一定**释放设备：指示灯一直亮着是最糟的结局。
       const [guard, setGuard] = useState(undefined)
+      // 删除要两步：第一次点只是"上膛"，四秒内再点才真删。
+      const [pendingDelete, setPendingDelete] = useState(undefined)
       const settingsPoll = usePoll(() => apiGet('settings'), 8000, [])
       const guardQuiet = settingsPoll.data?.settings?.guardQuiet === true
+      // 保护总开关：关掉后不再弹确认，但**设备仍然在离开时释放**。
+      const guardEnabled = settingsPoll.data?.settings?.guardEnabled !== false
 
       // 深空仪表盘的全局样式（悬停、聚焦环、入场动效）只注入一次。
       useEffect(() => { injectThemeCss() }, [])
@@ -4384,7 +4515,7 @@ function loadingHint(error) {
 
       /** 带保护的跳转：设备开着且没勾「不再提醒」时先弹确认。 */
       const guardRun = useCallback((label, action) => {
-        if (!mediaInUse().any || guardQuiet) { action(); return }
+        if (!mediaInUse().any || guardQuiet || !guardEnabled) { action(); return }
         setGuard({
           label,
           action,
@@ -4392,7 +4523,7 @@ function loadingHint(error) {
           second: false,
           inInterview: session?.session?.status === 'running',
         })
-      }, [guardQuiet, session?.session?.status])
+      }, [guardEnabled, guardQuiet, session?.session?.status])
 
       /**
        * 会话不见了 —— 多半是**换了卷宗库**，原来那一场不在新目录里了。
@@ -4439,12 +4570,36 @@ function loadingHint(error) {
         void configPoll.refresh()
       }, [configPoll])
 
+      /** 删除一场面试（连同卷宗目录）。两步确认，避免手滑。 */
+      const deleteSession = useCallback(async id => {
+        try {
+          const result = await apiPost(`sessions/${id}/delete`, {})
+          if (result?.ok === false) {
+            notify('删不掉', `${result.error ?? ''}${result.hint !== undefined ? ` ${result.hint}` : ''}`, 'error')
+            return
+          }
+          setPendingDelete(undefined)
+          if (selected === id) setSelected(undefined)
+          notify('已删除', `${result.title ?? id} 的卷宗目录已从磁盘删除。`, 'ok')
+          refreshAll()
+        } catch (failure) {
+          notify('删不掉', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [notify, refreshAll, selected])
+
       const createSession = useCallback(async () => {
         try {
           const result = await apiPost('sessions', {})
           setSelected(result.session.id)
           setTab('prepare')
-          notify('新面试已建好', '先从简历库挑一份（或上传新的），再放 JD。', 'ok')
+          // 误触新建是常事——给一次"撤销"，比事后去列表里删更顺手。
+          setNotice({
+            title: '新面试已建好',
+            detail: '先从简历库挑一份（或上传新的），再放 JD。误触了可以撤销。',
+            kind: 'ok',
+            at: Date.now(),
+            action: { label: '撤销新建', run: () => { void deleteSession(result.session.id) } },
+          })
           refreshAll()
         } catch (failure) {
           notify('建不了', failure instanceof Error ? failure.message : String(failure), 'error')
@@ -4538,12 +4693,16 @@ function loadingHint(error) {
       // 不是我们的按钮——只能在这里**捕获阶段拦一次**：设备开着时，
       // 点击落在面板左侧（DSH 侧栏）就先问；确认后把这次点击重放回去。
       // 顶部菜单栏允许通过，避免把无关点击也拦住。
-      const guardStateRef = useRef({ quiet: false, running: false })
-      guardStateRef.current = { quiet: guardQuiet, running: session?.session?.status === 'running' }
+      const guardStateRef = useRef({ quiet: false, running: false, enabled: true })
+      guardStateRef.current = {
+        quiet: guardQuiet,
+        enabled: guardEnabled,
+        running: session?.session?.status === 'running',
+      }
       useEffect(() => {
         if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return undefined
         const handler = event => {
-          if (!mediaInUse().any || guardStateRef.current.quiet) return
+          if (!mediaInUse().any || guardStateRef.current.quiet || !guardStateRef.current.enabled) return
           const root = pageRef.current
           if (root === null || root === undefined || typeof root.getBoundingClientRect !== 'function') return
           // 只拦**面板左侧**的点击（DSH 侧栏是导航入口）；顶部菜单与面板内放行。
@@ -4854,6 +5013,21 @@ function loadingHint(error) {
                       },
                       onClick: () => archiveRow(row),
                     }, row.archived ? '取出' : '归档'),
+                    h('button', {
+                      key: 'del',
+                      title: '删除这场面试（连同卷宗目录，不可恢复）',
+                      'aria-label': '删除这场面试',
+                      style: {
+                        flex: '0 0 auto', cursor: 'pointer', border: 'none', background: 'transparent',
+                        color: pendingDelete === row.id ? C.tally : C.boneFaint, fontSize: 10, padding: '0 8px',
+                        fontWeight: pendingDelete === row.id ? 600 : 400,
+                      },
+                      onClick: () => {
+                        if (pendingDelete === row.id) { void deleteSession(row.id); return }
+                        setPendingDelete(row.id)
+                        setTimeout(() => setPendingDelete(current => (current === row.id ? undefined : current)), 4000)
+                      },
+                    }, pendingDelete === row.id ? '确认删除' : '删除'),
                   ])),
                 ])),
           ]),

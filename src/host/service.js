@@ -25,7 +25,7 @@
 import { join, resolve } from 'node:path'
 import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { describeWorkspaceRoot, ensureDataRoot, defaultWorkspaceRoot, readSettings, writeSettings, settingsPath, SETTING_KEYS, resolveConfig } from './paths.js'
+import { describeWorkspaceRoot, ensureDataRoot, defaultWorkspaceRoot, readSettings, writeSettings, settingsPath, SETTING_KEYS, normalizeSetting, resolveConfig } from './paths.js'
 import {
   appendJsonl, isDirectory, isFile, listDirIfExists, readJsonIfExists, readJsonl,
   readTextIfExists, resolveWithin, writeJsonAtomic, writeTextAtomic,
@@ -116,6 +116,11 @@ export class InterviewService {
    * @param {{config?: object, ctx?: object}} deps
    */
   constructor(deps = {}) {
+    // **原始配置要留着。** resolveConfig 会把缺省值填满，之后就分不清
+    // "配置文件里写了 auto" 和 "配置文件里根本没写"——而合并面板设置时，
+    // 只有**显式写过**的键才该压过面板设置。
+    this.rawConfig = deps.config !== undefined && typeof deps.config === 'object' && deps.config !== null ? deps.config : {}
+    this.explicitKeys = new Set(Object.keys(this.rawConfig))
     this.config = resolveConfig(deps.config)
     this.ctx = deps.ctx
     /** Session id the UI last touched; used as the default for agent calls. */
@@ -355,6 +360,95 @@ export class InterviewService {
    *
    * @returns {Promise<Array<object>>}
    */
+  /**
+   * 删除一场面试（连同它的卷宗目录）。
+   *
+   * **归档不是删除的替代品。** 归档是"收起来"，误触新建出来的空场次
+   * 需要的是真的删掉——否则列表永远比实际用过的多。
+   *
+   * 正在进行的面试默认拒绝删除：先结束，避免把进行中的转录删掉。
+   *
+   * @param {string} sessionId
+   * @param {{force?: boolean}} [input]
+   */
+  async deleteSession(sessionId, input = {}) {
+    const id = String(sessionId ?? '').trim()
+    const dir = await this.sessionDir(id)
+    const meta = await readJsonIfExists(join(dir, 'session.json'))
+    if (meta === undefined) {
+      return { ok: false, error: `没有这场面试：${id}`, hint: '刷新列表看看它是不是已经被删掉了。' }
+    }
+    if (meta.status === 'running' && input.force !== true) {
+      return {
+        ok: false,
+        error: '这场面试正在进行，先结束再删。',
+        hint: '结束面试后可以删；只是不想看到它的话，归档也可以。',
+      }
+    }
+    await rm(dir, { recursive: true, force: true })
+    if (this.selectedSessionId === id) this.selectedSessionId = undefined
+    return { ok: true, sessionId: id, title: meta.title ?? id, deleted: dir }
+  }
+
+  /**
+   * 空场次：一条内容都没有的会话（误触新建的典型产物）。
+   *
+   * 判定要严格——宁可漏判，不能把用户准备到一半的场次当空的删掉：
+   * 没有简历、没有 JD、没有考点、没有转录、没有报告，才算空。
+   *
+   * @returns {Promise<Array<{id: string, title: string, createdAt: number}>>}
+   */
+  async listEmptySessions() {
+    const root = await this.sessionsDir()
+    const names = await listDirIfExists(root)
+    const candidates = []
+    for (const name of names) {
+      if (!SESSION_ID_PATTERN.test(name)) continue
+      const dir = join(root, name)
+      if (!await isDirectory(dir)) continue
+      const meta = await readJsonIfExists(join(dir, 'session.json'))
+      if (meta === undefined) continue
+      if (meta.status === 'running') continue
+      const nonEmpty = async file => {
+        try {
+          const info = await stat(join(dir, file))
+          return info.size > 0
+        } catch {
+          return false
+        }
+      }
+      if (await nonEmpty('resume.txt')) continue
+      if (await nonEmpty('jd.txt')) continue
+      if (await nonEmpty('report.md')) continue
+      if (await nonEmpty('transcript.jsonl')) continue
+      const checklist = await readJsonIfExists(join(dir, 'checklist.json'))
+      if (Array.isArray(checklist?.items) && checklist.items.length > 0) continue
+      candidates.push({ id: name, title: meta.title ?? name, createdAt: meta.createdAt ?? 0 })
+    }
+    return candidates
+  }
+
+  /**
+   * 清理空场次（只删空场次，绝不碰有内容的）。
+   *
+   * @param {string[]} [ids] 指定要删的 id；省略 = 全部空场次
+   */
+  async purgeEmptySessions(ids) {
+    const candidates = await this.listEmptySessions()
+    const wanted = Array.isArray(ids) && ids.length > 0 ? new Set(ids.map(value => String(value))) : undefined
+    const root = await this.sessionsDir()
+    const removed = []
+    for (const item of candidates) {
+      if (wanted !== undefined && !wanted.has(item.id)) continue
+      try {
+        await rm(join(root, item.id), { recursive: true, force: true })
+        removed.push(item)
+        if (this.selectedSessionId === item.id) this.selectedSessionId = undefined
+      } catch { /* 删不掉的留着，下次再清理 */ }
+    }
+    return { removed, remaining: await this.listEmptySessions() }
+  }
+
   async listSessions() {
     const root = await this.sessionsDir()
     const names = await listDirIfExists(root)
@@ -993,6 +1087,18 @@ export class InterviewService {
    * @returns {Promise<object>}
    */
   async startCamera(input = {}) {
+    const effective = await this.effectiveConfig()
+    // 采集后端偏好：auto = ffmpeg 优先；chromium-mf = 浏览器采集优先。
+    this.camera.backendPreference = effective.cameraBackend ?? 'auto'
+    // 面板里填的路径也要生效（配置文件显式写了就不覆盖）。
+    if (!this.explicitKeys.has('ffmpegPath') && (effective.ffmpegPath ?? '') !== this.camera.ffmpegPathOption) {
+      this.camera.ffmpegPathOption = effective.ffmpegPath ?? ''
+      this.camera.ffmpeg = undefined
+      this.camera.ffmpegSource = ''
+    }
+    if (!this.explicitKeys.has('chromiumPath')) {
+      this.camera.chromiumPathOption = effective.chromiumPath ?? ''
+    }
     return this.camera.start(input)
   }
 
@@ -1036,9 +1142,12 @@ export class InterviewService {
     const ffmpeg = await locateFfmpeg({ ffmpegPath })
     const chromium = locateChromium({ chromiumPath })
     const session = sessionId !== undefined && sessionId !== '' ? await this.sessionFacts(sessionId) : undefined
+    const effective = await this.effectiveConfig()
     return {
       settingsFile: settingsPath(),
       settings,
+      effective,
+      explicit: [...this.explicitKeys],
       dataRoot: location,
       sessionsDir: await this.sessionsDir(),
       profilesDir: await this.profilesDir(),
@@ -1053,6 +1162,8 @@ export class InterviewService {
         chromium: chromium === undefined ? { path: '', source: '', found: false } : { ...chromium, found: true },
       },
       speechModel: await this.speechModelFacts(),
+      // 误触新建出来的空场次：设置页给"清理"入口，而不是让用户一场场删。
+      emptySessions: await this.listEmptySessions(),
       session,
     }
   }
@@ -1127,42 +1238,49 @@ export class InterviewService {
   async updateSettings(patch = {}) {
     const applied = {}
     const ignored = []
+    const invalid = []
     for (const key of SETTING_KEYS) {
       if (!(key in patch)) continue
       if (key === 'workspaceRoot' && this.config.workspaceRootExplicit) {
         ignored.push({ key, reason: '配置文件里写死了 workspaceRoot，面板设置不生效' })
         continue
       }
-      applied[key] = patch[key]
+      const normalized = normalizeSetting(key, patch[key])
+      if (!normalized.ok) {
+        invalid.push({ key, reason: normalized.reason })
+        continue
+      }
+      applied[key] = normalized.value
     }
     const file = await writeSettings(applied)
-    return { settingsFile: file.path, applied, ignored }
+    return { settingsFile: file.path, applied, ignored, invalid }
   }
 
   /**
-   * 语音配置的**有效值**：配置文件里显式给的优先，其次面板设置，最后默认。
+   * 设置的**有效值**：配置文件里显式写过的键优先，其次面板设置，最后默认。
    *
-   * 语音模块统一读它，而不是直接读 `this.config`——否则面板里选的模型
-   * 永远不生效（每次都被 patch 里的默认值覆盖）。
+   * **为什么要留原始配置。** resolveConfig 会把缺省值填满，之后无法区分
+   * "配置里写了 auto" 与 "配置里没写"。合并时只有显式写过的键才压过面板。
+   *
+   * 语音、摄像头、保护开关都读它——否则面板里改的东西永远被默认值覆盖。
    *
    * @returns {Promise<object>}
    */
-  async voiceConfig() {
+  async effectiveConfig() {
     const settings = await readSettings()
     const merged = { ...this.config }
-    const overrides = {
-      asrProvider: settings.asrProvider,
-      ttsProvider: settings.ttsProvider,
-      ttsModel: settings.ttsModel,
-      ttsVoice: settings.ttsVoice,
-    }
-    for (const [key, value] of Object.entries(overrides)) {
-      if (value === undefined) continue
-      const current = merged[key]
-      const isDefault = current === undefined || current === '' || current === 'auto' || current === 1
-      if (isDefault) merged[key] = value
+    for (const key of SETTING_KEYS) {
+      if (settings[key] === undefined) continue
+      if (key === 'workspaceRoot') continue // 数据根由 effectiveRoot() 单独合并
+      if (this.explicitKeys.has(key)) continue
+      merged[key] = settings[key]
     }
     return merged
+  }
+
+  /** 语音模块的旧入口；语义等同 effectiveConfig。 */
+  async voiceConfig() {
+    return this.effectiveConfig()
   }
 
   // ── voice ────────────────────────────────────────────────────────────────

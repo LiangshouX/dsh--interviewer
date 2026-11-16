@@ -87,6 +87,24 @@ export function registerTools(ctx, service) {
 
   const definitions = [
     tool(
+      'interview_delete_session',
+      '删除一场面试（连同卷宗目录，不可恢复）。用于清理误建的空场次；正在进行的面试要先结束。归档请用 interview_archive_session。',
+      {
+        sessionId: sessionProperty,
+        force: { type: 'boolean', description: '正在进行的面试也删掉（默认 false，会拒绝）。' },
+      },
+      async args => {
+        if (typeof args.sessionId !== 'string' || args.sessionId === '') throw new Error('必须指定 sessionId')
+        return service.deleteSession(args.sessionId, { force: args.force === true })
+      },
+    ),
+    tool(
+      'interview_purge_empty_sessions',
+      '清理空场次：只删「没有任何内容」的会话（无简历/JD/考点/转录/报告），用于收拾误触新建。',
+      {},
+      async () => service.purgeEmptySessions(),
+    ),
+    tool(
       'interview_prepare',
       '开一场模拟面试：落盘简历与 JD，建好会话。给 jdUrl 时会先尝试抓取该链接（抓不到会如实说，并让你改用粘贴文本兜底）。',
       {

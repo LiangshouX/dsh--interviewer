@@ -64,8 +64,12 @@
       // 设备开着时，离开面板（切页签、切面试、宿主卸载）要先确认。
       // 确认后**一定**释放设备：指示灯一直亮着是最糟的结局。
       const [guard, setGuard] = useState(undefined)
+      // 删除要两步：第一次点只是"上膛"，四秒内再点才真删。
+      const [pendingDelete, setPendingDelete] = useState(undefined)
       const settingsPoll = usePoll(() => apiGet('settings'), 8000, [])
       const guardQuiet = settingsPoll.data?.settings?.guardQuiet === true
+      // 保护总开关：关掉后不再弹确认，但**设备仍然在离开时释放**。
+      const guardEnabled = settingsPoll.data?.settings?.guardEnabled !== false
 
       // 深空仪表盘的全局样式（悬停、聚焦环、入场动效）只注入一次。
       useEffect(() => { injectThemeCss() }, [])
@@ -151,7 +155,7 @@
 
       /** 带保护的跳转：设备开着且没勾「不再提醒」时先弹确认。 */
       const guardRun = useCallback((label, action) => {
-        if (!mediaInUse().any || guardQuiet) { action(); return }
+        if (!mediaInUse().any || guardQuiet || !guardEnabled) { action(); return }
         setGuard({
           label,
           action,
@@ -159,7 +163,7 @@
           second: false,
           inInterview: session?.session?.status === 'running',
         })
-      }, [guardQuiet, session?.session?.status])
+      }, [guardEnabled, guardQuiet, session?.session?.status])
 
       /**
        * 会话不见了 —— 多半是**换了卷宗库**，原来那一场不在新目录里了。
@@ -206,12 +210,36 @@
         void configPoll.refresh()
       }, [configPoll])
 
+      /** 删除一场面试（连同卷宗目录）。两步确认，避免手滑。 */
+      const deleteSession = useCallback(async id => {
+        try {
+          const result = await apiPost(`sessions/${id}/delete`, {})
+          if (result?.ok === false) {
+            notify('删不掉', `${result.error ?? ''}${result.hint !== undefined ? ` ${result.hint}` : ''}`, 'error')
+            return
+          }
+          setPendingDelete(undefined)
+          if (selected === id) setSelected(undefined)
+          notify('已删除', `${result.title ?? id} 的卷宗目录已从磁盘删除。`, 'ok')
+          refreshAll()
+        } catch (failure) {
+          notify('删不掉', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [notify, refreshAll, selected])
+
       const createSession = useCallback(async () => {
         try {
           const result = await apiPost('sessions', {})
           setSelected(result.session.id)
           setTab('prepare')
-          notify('新面试已建好', '先从简历库挑一份（或上传新的），再放 JD。', 'ok')
+          // 误触新建是常事——给一次"撤销"，比事后去列表里删更顺手。
+          setNotice({
+            title: '新面试已建好',
+            detail: '先从简历库挑一份（或上传新的），再放 JD。误触了可以撤销。',
+            kind: 'ok',
+            at: Date.now(),
+            action: { label: '撤销新建', run: () => { void deleteSession(result.session.id) } },
+          })
           refreshAll()
         } catch (failure) {
           notify('建不了', failure instanceof Error ? failure.message : String(failure), 'error')
@@ -305,12 +333,16 @@
       // 不是我们的按钮——只能在这里**捕获阶段拦一次**：设备开着时，
       // 点击落在面板左侧（DSH 侧栏）就先问；确认后把这次点击重放回去。
       // 顶部菜单栏允许通过，避免把无关点击也拦住。
-      const guardStateRef = useRef({ quiet: false, running: false })
-      guardStateRef.current = { quiet: guardQuiet, running: session?.session?.status === 'running' }
+      const guardStateRef = useRef({ quiet: false, running: false, enabled: true })
+      guardStateRef.current = {
+        quiet: guardQuiet,
+        enabled: guardEnabled,
+        running: session?.session?.status === 'running',
+      }
       useEffect(() => {
         if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return undefined
         const handler = event => {
-          if (!mediaInUse().any || guardStateRef.current.quiet) return
+          if (!mediaInUse().any || guardStateRef.current.quiet || !guardStateRef.current.enabled) return
           const root = pageRef.current
           if (root === null || root === undefined || typeof root.getBoundingClientRect !== 'function') return
           // 只拦**面板左侧**的点击（DSH 侧栏是导航入口）；顶部菜单与面板内放行。
@@ -621,6 +653,21 @@
                       },
                       onClick: () => archiveRow(row),
                     }, row.archived ? '取出' : '归档'),
+                    h('button', {
+                      key: 'del',
+                      title: '删除这场面试（连同卷宗目录，不可恢复）',
+                      'aria-label': '删除这场面试',
+                      style: {
+                        flex: '0 0 auto', cursor: 'pointer', border: 'none', background: 'transparent',
+                        color: pendingDelete === row.id ? C.tally : C.boneFaint, fontSize: 10, padding: '0 8px',
+                        fontWeight: pendingDelete === row.id ? 600 : 400,
+                      },
+                      onClick: () => {
+                        if (pendingDelete === row.id) { void deleteSession(row.id); return }
+                        setPendingDelete(row.id)
+                        setTimeout(() => setPendingDelete(current => (current === row.id ? undefined : current)), 4000)
+                      },
+                    }, pendingDelete === row.id ? '确认删除' : '删除'),
                   ])),
                 ])),
           ]),
