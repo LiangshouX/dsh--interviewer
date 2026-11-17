@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 语音合成的编排层：**宿主 → 配好的模型 → 免密钥的自然音 → 浏览器**。
  *
  * **为什么不是"接一个模型"。** 面试官的声音是沉浸感的载体，而不同人手里
@@ -21,9 +21,11 @@ import { readFile, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { resolveSecret } from './credentials.js'
 import { hostService } from './host.js'
+import { TTS_AUTO_ORDER, TTS_PROVIDERS } from './presets.js'
+import { redactSecret } from './redact.js'
 import { synthesizeWithBaidu } from './tts/baidu.js'
 import { edgeFailure, synthesizeWithEdge } from './tts/edge.js'
-import { DEFAULT_MIMO_VOICE, synthesizeWithMimo } from './tts/mimo.js'
+import { synthesizeWithMimo } from './tts/mimo.js'
 import { synthesizeWithMinimax } from './tts/minimax.js'
 import { synthesizeWithOpenAi } from './tts/openai.js'
 
@@ -46,51 +48,15 @@ export const TTS_MODE = {
 const REFERENCE_AUDIO_LIMIT = 10 * 1024 * 1024
 
 /**
- * Provider presets.
+ * Provider presets 在 `presets.js`（设置页下拉的唯一来源）。
  *
- * **默认值不是随便写的。** `auto` 里的候选顺序就是这里的顺序：
+ * **默认值不是随便写的。** `auto` 里的候选顺序就是预设表里的声明顺序：
  * 配了 key 的模型优先，其次免密钥的自然音，最后浏览器。
  */
-const PRESETS = {
-  mimo: {
-    protocol: 'chat-audio',
-    baseUrl: 'https://api.xiaomimimo.com/v1',
-    model: 'mimo-v2.5-tts',
-    voice: DEFAULT_MIMO_VOICE,
-    apiKeyEnv: 'MIMO_API_KEY',
-    label: 'MiMo TTS',
-  },
-  openai: {
-    protocol: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o-mini-tts',
-    voice: 'alloy',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    label: 'OpenAI 语音',
-  },
-  minimax: {
-    protocol: 'minimax',
-    baseUrl: 'https://api.minimaxi.com',
-    model: 'speech-02-hd',
-    voice: 'female-shaonv',
-    apiKeyEnv: 'MINIMAX_API_KEY',
-    label: 'MiniMax 语音',
-  },
-  baidu: {
-    protocol: 'baidu',
-    keyless: true,
-    label: '百度朗读',
-  },
-  edge: {
-    protocol: 'edge',
-    keyless: true,
-    voice: 'zh-CN-XiaoxiaoNeural',
-    label: 'Edge 神经音色',
-  },
-}
+const PRESETS = TTS_PROVIDERS
 
 /** `auto` 的候选顺序。 */
-const AUTO_ORDER = ['mimo', 'openai', 'minimax', 'baidu', 'edge']
+const AUTO_ORDER = TTS_AUTO_ORDER
 
 /**
  * Resolve the synthesis chain **including the secret**.
@@ -167,7 +133,7 @@ export async function describeTts(service) {
   if (resolved.mode !== TTS_MODE.SERVER) {
     return { mode: resolved.mode, source: resolved.source, reason: resolved.reason }
   }
-  const { apiKey: _secret, service: _service, ...rest } = resolved
+  const { apiKey: _secret, service: _service, referenceAudioDataUri: _sample, ...rest } = resolved
   return { ...rest, hasCredential: true }
 }
 
@@ -206,6 +172,7 @@ export async function synthesize(service, input = {}) {
     format: resolved.format,
     rate,
     text,
+    groupId: resolved.groupId ?? '',
     signal: input.signal,
   }
 
@@ -238,12 +205,16 @@ export async function synthesize(service, input = {}) {
   }
 
   if (!result.ok) {
+    // **密钥可能被网关在错误体里回显。** 出口统一擦一遍，再交给面板/日志。
+    const reason = redactSecret(result.reason, resolved.apiKey)
     return {
       ok: false,
       mode: TTS_MODE.SERVER,
       provider: resolved.provider,
-      reason: result.reason,
-      hint: '这条语音链路暂时不可用；问题照常以文字显示，不影响面试。',
+      reason,
+      hint: result.hint !== undefined && result.hint !== ''
+        ? redactSecret(result.hint, resolved.apiKey)
+        : '这条语音链路暂时不可用；问题照常以文字显示，不影响面试。',
     }
   }
   return {
@@ -320,6 +291,8 @@ async function describeCandidate(service, name, config, options) {
     ? config.ttsVoice.trim()
     : (preset.voice ?? '')
   const style = typeof config.ttsStyle === 'string' ? config.ttsStyle.trim() : ''
+  // MiniMax 的 t2a_v2 在部分账户上要求 GroupId（查询参数），空 = 不带。
+  const groupId = typeof config.ttsGroupId === 'string' ? config.ttsGroupId.trim() : ''
 
   let apiKey = ''
   let source = 'preset'
@@ -354,6 +327,7 @@ async function describeCandidate(service, name, config, options) {
       model,
       voice,
       style,
+      groupId,
       format: options.format,
       rate: options.rate,
       apiKey,

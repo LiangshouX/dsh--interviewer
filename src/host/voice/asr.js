@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 语音识别的编排层：**先问宿主，再问插件自己，最后才是浏览器**。
  *
  * **为什么顺序是这样。**
@@ -21,6 +21,7 @@
 import { hostAsrState, transcribeWithHost } from './host-asr.js'
 import { describeHttpAsr, resolveHttpAsr, transcribeHttp } from './http-asr.js'
 import { hostService } from './host.js'
+import { asrProviderOf } from './presets.js'
 
 /** 语音配置的有效值：配置文件 > 面板设置 > 默认（见 InterviewService.voiceConfig）。 */
 async function voiceConfigOf(service) {
@@ -61,7 +62,8 @@ export async function resolveAsr(service) {
       ? { mode: ASR_MODE.HOST, source: 'host', reason: host.reason, language, host, server }
       : { mode: ASR_MODE.BROWSER, source: 'none', reason: host.reason, language, host, server }
   }
-  if (explicit === 'minimax' || explicit === 'openai') {
+  // 显式选了一个「服务端 · …」预设：只有它能用才走服务端，**不偷偷换别家**。
+  if (asrProviderOf(explicit) !== undefined) {
     return server.mode === 'server'
       ? { mode: ASR_MODE.SERVER, source: server.source, reason: server.reason, language, host, server }
       : { mode: ASR_MODE.BROWSER, source: 'none', reason: server.reason, language, host, server }
@@ -128,13 +130,23 @@ export async function transcribeAudio(service, input = {}, options = {}) {
   for (const candidate of candidateOrder(resolved)) {
     if (candidate === ASR_MODE.HOST) {
       const result = await transcribeWithHost(service, { buffer, language }, signal)
-      attempts.push({ mode: ASR_MODE.HOST, ok: result.ok, ...(result.reason === undefined ? {} : { reason: result.reason }) })
+      attempts.push({
+        mode: ASR_MODE.HOST,
+        ok: result.ok,
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
+        ...(result.hint === undefined ? {} : { hint: result.hint }),
+      })
       if (result.ok) return { ...result, attempts, language }
       continue
     }
     if (candidate === ASR_MODE.SERVER) {
       const result = await transcribeHttp(service, { ...input, language }, signal)
-      attempts.push({ mode: ASR_MODE.SERVER, ok: result.ok, ...(result.reason === undefined ? {} : { reason: result.reason }) })
+      attempts.push({
+        mode: ASR_MODE.SERVER,
+        ok: result.ok,
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
+        ...(result.hint === undefined ? {} : { hint: result.hint }),
+      })
       if (result.ok) return { ...result, attempts, language }
     }
   }
@@ -142,12 +154,15 @@ export async function transcribeAudio(service, input = {}, options = {}) {
   const reason = attempts.length === 0
     ? resolved.reason
     : attempts.map(item => `${item.mode === ASR_MODE.HOST ? '宿主' : '服务端'}：${item.reason ?? '失败'}`).join('；')
+  // 失败时把**最后一条具体出路**带出去：面板要能让用户知道下一步怎么做，
+  // 而不是只说"失败了"。
+  const lastHint = [...attempts].reverse().find(item => typeof item.hint === 'string' && item.hint !== '')?.hint
   return {
     ok: false,
     mode: resolved.mode === ASR_MODE.NONE ? ASR_MODE.NONE : ASR_MODE.BROWSER,
     text: '',
     reason,
-    hint: '这一段没转出来。用键盘输入不受影响；面试照常进行。',
+    hint: lastHint ?? '这一段没转出来。用键盘输入不受影响；面试照常进行。',
     warnings: [reason],
     attempts,
   }

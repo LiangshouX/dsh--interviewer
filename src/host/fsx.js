@@ -79,6 +79,32 @@ export async function readTextIfExists(path) {
 }
 
 /**
+ * Rename with a short, bounded retry.
+ *
+ * **Windows 上 rename 会被文件锁短暂拒绝。** 目标文件刚被创建时，
+ * 杀毒软件、索引服务或另一个读句柄可能还握着它，于是
+ * `rename(tmp, target)` 抛 `EPERM` / `EBUSY`——而这次写本身没有任何问题。
+ * 面试转录会高频 touch `session.json`（每轮一次），所以这种瞬态失败
+ * 在长面试里迟早撞上。重试几次就够了；仍然失败就把原错误抛出去，
+ * 不掩盖真正的权限问题。
+ *
+ * @param {string} from
+ * @param {string} to
+ */
+async function renameWithRetry(from, to) {
+  const retryable = new Set(['EPERM', 'EBUSY', 'EACCES'])
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(from, to)
+      return
+    } catch (error) {
+      if (!retryable.has(error?.code) || attempt >= 4) throw error
+      await new Promise(resolvePromise => setTimeout(resolvePromise, 20 * (attempt + 1)))
+    }
+  }
+}
+
+/**
  * Write text atomically.
  *
  * @param {string} path
@@ -88,7 +114,7 @@ export async function writeTextAtomic(path, text) {
   await mkdir(dirname(path), { recursive: true })
   const tmp = `${path}.tmp`
   await writeFile(tmp, text, 'utf8')
-  await rename(tmp, path)
+  await renameWithRetry(tmp, path)
 }
 
 /**

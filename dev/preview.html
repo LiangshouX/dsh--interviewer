@@ -22,21 +22,30 @@
     // 预设要指定主题时，先把用户的选择写进去——
     // 面板启动时读的就是这个键，这样截图和断言跑的是用户真的看到的那一套。
     //
-    // **没指定就写回暗色**：同一个浏览器里 localStorage 是跨页面共享的，
+    // **没指定就写回产品的默认主题（亮色）**：同一个浏览器里 localStorage 是跨页面共享的，
     // 否则上一张截图选了亮色，后一张没指定主题的截图就会「继承」亮色，
     // 于是同一批截图里混着两套主题，看起来像主题自己会变。
     try {
       window.localStorage.setItem(
         'dsh-realtime-interview.theme',
-        (window.__PRESET__ && window.__PRESET__.theme) || 'dark',
+        (window.__PRESET__ && window.__PRESET__.theme) || 'light',
       )
     } catch (error) {
       console.error('预设主题写入失败', error)
     }
 
-    window.fetch = async function (url) {
+    window.fetch = async function (url, options) {
       const path = String(url).replace('/interviewer/api', '')
-      const data = window.__FIXTURES__.route(path, window.__PREVIEW__)
+      // 预览里的写操作也要**落到同一份假数据**上：保存完再刷新，
+      // 看到的不该还是保存前那一段（截图/探针会因此假装保存失败）。
+      const method = (options && options.method) || 'GET'
+      let body
+      try {
+        body = options && typeof options.body === 'string' ? JSON.parse(options.body) : undefined
+      } catch (error) {
+        body = undefined
+      }
+      const data = window.__FIXTURES__.route(path, window.__PREVIEW__, method, body)
       return { ok: true, status: 200, json: async () => ({ ok: true, data }) }
     }
 

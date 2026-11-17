@@ -1,9 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { InterviewService } from '../src/host/service.js'
+import { registerApi } from '../src/host/api.js'
 import { readSettings, settingsPath, normalizeSetting } from '../src/host/paths.js'
 import { CameraService } from '../src/host/camera.js'
 
@@ -201,5 +203,181 @@ test('空场次清理：只删没有内容的，有简历/转录的不动', asyn
     const rows = await service.listSessions()
     assert.equal(rows.length, 1)
     assert.equal(rows[0].id, real.id)
+  })
+})
+
+// ── 语音配置闭环：凭据发现 / 写入 / 清除 / 测试 ────────────────────────────
+
+/**
+ * 把 API 挂到一个假宿主上，然后发请求。
+ *
+ * 与 api.test.js 里那个同构：这里只关心语音那几条新路由，
+ * 以及「响应里不能出现密钥」。
+ */
+async function makeApi(service) {
+  let handler
+  const ctx = {
+    effect(fn) {
+      const dispose = fn()
+      return dispose
+    },
+    webServer: {
+      register(spec) {
+        handler = spec.handler
+        return () => {}
+      },
+    },
+  }
+  registerApi(ctx, service)
+  return async (method, path, body) => {
+    const req = {
+      method,
+      url: path,
+      headers: { host: '127.0.0.1:45678' },
+      async *[Symbol.asyncIterator]() {
+        if (body !== undefined) yield Buffer.from(JSON.stringify(body), 'utf8')
+      },
+    }
+    let status = 0
+    let payload = ''
+    const res = {
+      writeHead(code) { status = code; return res },
+      end(chunk) { if (chunk !== undefined) payload = String(chunk); return res },
+    }
+    await handler(req, res)
+    return { status, body: payload === '' ? undefined : JSON.parse(payload) }
+  }
+}
+
+test('语音凭据发现：profile 的 apiKeyEnv 会进清单，只有状态没有值', async () => {
+  await withEnv(async ({ profileDir, root }) => {
+    await writeFile(join(profileDir, 'cordis.patch.yml'), [
+      'llm-pi-ai:',
+      '  providers:',
+      '    xiaomi:',
+      '      apiKeyEnv: XIAOMI_TOKEN_PLAN_CN_API_KEY',
+    ].join('\n'), 'utf8')
+    const ctx = {
+      get: name => name !== 'credentials' ? undefined : {
+        describe: async ref => ({ configured: ref === 'XIAOMI_TOKEN_PLAN_CN_API_KEY', source: 'credentials', writable: true }),
+        set: async () => {},
+        unset: async () => {},
+      },
+    }
+    const service = new InterviewService({ config: { workspaceRoot: root }, ctx })
+    const rows = await service.voiceCredentials()
+    const found = rows.find(row => row.ref === 'XIAOMI_TOKEN_PLAN_CN_API_KEY')
+    assert.equal(found.configured, true)
+    assert.equal(found.source, 'host')
+    assert.ok(rows.some(row => row.ref === 'OPENAI_API_KEY'), '候选名是兜底')
+    assert.equal(JSON.stringify(rows).includes('"value"'), false)
+
+    const snapshot = await service.settingsSnapshot()
+    assert.ok(Array.isArray(snapshot.credentials))
+    assert.ok(Array.isArray(snapshot.presets) && snapshot.presets.length > 0)
+    assert.ok(snapshot.presets.every(preset => typeof preset.notes === 'string'))
+  })
+})
+
+test('写凭据只进宿主 credentials；返回里没有密钥；清除走 unset', async () => {
+  await withEnv(async ({ root }) => {
+    const calls = []
+    const ctx = {
+      get: name => name !== 'credentials' ? undefined : {
+        set: async (ref, value) => { calls.push(['set', ref, value]) },
+        unset: async ref => { calls.push(['unset', ref]) },
+        describe: async () => ({ configured: true, source: 'credentials', writable: true }),
+      },
+    }
+    const service = new InterviewService({ config: { workspaceRoot: root }, ctx })
+    const written = await service.setVoiceCredential('MIMO_API_KEY', 'sk-hidden-1234')
+    assert.equal(written.ok, true)
+    assert.equal(JSON.stringify(written).includes('sk-hidden-1234'), false)
+    assert.deepEqual(calls[0], ['set', 'MIMO_API_KEY', 'sk-hidden-1234'])
+
+    const cleared = await service.clearVoiceCredential('MIMO_API_KEY')
+    assert.equal(cleared.ok, true)
+    assert.deepEqual(calls[1], ['unset', 'MIMO_API_KEY'])
+
+    // 插件设置文件里不能出现密钥（密钥只存宿主那份）。
+    const settings = await readSettings()
+    assert.equal(JSON.stringify(settings).includes('sk-hidden-1234'), false)
+  })
+})
+
+test('没有 credentials seam：写密钥返回失败与出路，设置文件一个字节都不写', async () => {
+  await withEnv(async ({ root, profileDir }) => {
+    const service = new InterviewService({ config: { workspaceRoot: root }, ctx: { get: () => undefined } })
+    const result = await service.setVoiceCredential('MIMO_API_KEY', 'sk-hidden-5678')
+    assert.equal(result.ok, false)
+    assert.match(result.hint, /环境变量/)
+    assert.match(result.hint, /重启 DSH/)
+    assert.deepEqual(await readSettings(), {})
+    assert.equal(existsSync(join(profileDir, 'dsh-realtime-interview.json')), false)
+  })
+})
+
+test('设置快照不泄漏配置文件里的明文 key', async () => {
+  await withEnv(async ({ root }) => {
+    const service = new InterviewService({
+      config: {
+        workspaceRoot: root,
+        asrApiKey: 'sk-config-asr-secret-111',
+        ttsApiKey: 'sk-config-tts-secret-222',
+        ttsProvider: 'mimo',
+      },
+      ctx: { get: () => undefined },
+    })
+    const snapshot = await service.settingsSnapshot()
+    const json = JSON.stringify(snapshot)
+    assert.equal(json.includes('sk-config-asr-secret-111'), false, 'settings 快照不能带回明文 key')
+    assert.equal(json.includes('sk-config-tts-secret-222'), false, 'settings 快照不能带回明文 key')
+    // 有效配置里仍然保留 provider/模型这些非密钥字段（面板要显示"现在用"）。
+    assert.equal(typeof snapshot.effective.ttsProvider, 'string')
+  })
+})
+
+test('语音路由：presets / credentials / set / clear 都通，响应里 grep 不到密钥', async () => {
+  await withEnv(async ({ root }) => {
+    const store = new Map()
+    const ctx = {
+      get: name => name !== 'credentials' ? undefined : {
+        describe: async ref => ({ configured: store.has(ref), source: 'credentials', writable: true }),
+        set: async (ref, value) => { store.set(ref, value) },
+        unset: async ref => { store.delete(ref) },
+      },
+    }
+    const service = new InterviewService({ config: { workspaceRoot: root }, ctx })
+    const call = await makeApi(service)
+
+    const presets = await call('GET', '/interviewer/api/voice/presets')
+    assert.equal(presets.status, 200)
+    assert.ok(presets.body.data.presets.length > 0)
+    assert.ok(presets.body.data.presets.every(preset => typeof preset.keyless === 'boolean'))
+
+    const listed = await call('GET', '/interviewer/api/voice/credentials')
+    assert.ok(Array.isArray(listed.body.data.credentials))
+
+    const secret = 'sk-route-secret-4321'
+    const set = await call('POST', '/interviewer/api/voice/credentials', {
+      action: 'set', ref: 'MIMO_API_KEY', value: secret,
+    })
+    assert.equal(set.body.data.ok, true)
+    assert.equal(JSON.stringify(set.body).includes(secret), false)
+    assert.equal(store.get('MIMO_API_KEY'), secret, '值应该真的写进宿主存储')
+
+    const cleared = await call('POST', '/interviewer/api/voice/credentials', {
+      action: 'clear', ref: 'MIMO_API_KEY',
+    })
+    assert.equal(cleared.body.data.ok, true)
+    assert.equal(store.has('MIMO_API_KEY'), false)
+
+    const badAction = await call('POST', '/interviewer/api/voice/credentials', { action: 'wat', ref: 'MIMO_API_KEY' })
+    assert.equal(badAction.status, 400)
+
+    const badKind = await call('POST', '/interviewer/api/voice/test', { kind: 'image' })
+    assert.equal(badKind.status, 200)
+    assert.equal(badKind.body.data.ok, false)
+    assert.match(badKind.body.data.reason, /tts 或 asr/)
   })
 })

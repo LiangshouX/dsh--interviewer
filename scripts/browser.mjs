@@ -193,6 +193,9 @@ export async function openPreview(browser, { port, preset }) {
     // 浏览器会自动去要 /favicon.ico，404 很正常——那是噪声，不是缺陷。
     const url = message.location()?.url ?? ''
     if (url.includes('favicon')) return
+    // 预览页没有 Host 的 MJPEG 端点（真宿主才有）。`live-media-host-blocked`
+    // 这一档会去要 `/interviewer/camera/stream`，404 是预览环境的预期结果。
+    if (url.includes('/camera/stream')) return
     errors.push(message.text())
   })
   await page.addInitScript(`window.__PRESET__ = ${JSON.stringify(preset)}`)

@@ -53,3 +53,34 @@ test('扩展名与文件头对不上时报错而不是乱读', () => {
 test('zip 读取器在损坏文件上抛错而不是返回乱码', () => {
   assert.throws(() => readZipEntry(Buffer.from('definitely not a zip'), 'word/document.xml'))
 })
+
+test('JD 上传只收纯文本：docx / pdf 被挡住，并给出粘贴这条出路', () => {
+  const docx = extractTextFromUpload(
+    { filename: 'jd.docx', buffer: Buffer.from('PK\x03\x04junk') },
+    { plainOnly: true },
+  )
+  assert.equal(docx.ok, false)
+  assert.match(docx.warnings.join(' '), /只收纯文本|粘贴/)
+
+  const pdf = extractTextFromUpload(
+    { filename: 'jd.pdf', buffer: Buffer.from('%PDF-1.7\n...') },
+    { plainOnly: true },
+  )
+  assert.equal(pdf.ok, false)
+
+  // 扩展名伪装成 .txt 的 PDF 也挡得住——判据是文件头，不是文件名。
+  const fake = extractTextFromUpload(
+    { filename: 'jd.txt', buffer: Buffer.from('%PDF-1.7\n...') },
+    { plainOnly: true },
+  )
+  assert.equal(fake.ok, false)
+  assert.match(fake.warnings.join(' '), /只收纯文本/)
+
+  // 真正的纯文本照常读出。
+  const markdown = extractTextFromUpload(
+    { filename: 'jd.md', buffer: Buffer.from('# 岗位\n后端工程师\n', 'utf8') },
+    { plainOnly: true },
+  )
+  assert.equal(markdown.ok, true)
+  assert.match(markdown.text, /后端工程师/)
+})

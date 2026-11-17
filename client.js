@@ -3,28 +3,44 @@
  *
  * 模拟面试间 —— 把「简历 + 目标岗位 JD」变成**一场有准备的面试**。
  *
- * 设计语言：**面试卷宗**。
+ * 设计语言：**暗房里的观片台**。
  *
  * 一场面试就是一份案卷：简历与 JD 是卷内材料，考点清单是**面试官的底稿**
  * （真实面试里你看不到它），转录是速记，面试后的报告是评估表。
  * 这个隐喻不是装饰——它直接对应产品纪律：
  *
  *   ① **底稿默认收起。** 考点清单在准备阶段可查可改，但进了面试就不是
- *      「你将���被问到的问题」——那会把一场面试变成答题游戏。
+ *      「你将会被问到的问题」——那会把一场面试变成答题游戏。
  *   ② **舞台永远是主位。** 面试中，视频区占满左半屏；没有摄像头时也
  *      不塌成一行提示——那是一个**设计过的「未接通」状态**，因为画面
  *      本身就是面试室的一部分。
  *   ③ **权限被拒不是死路。** 拿不到摄像头是常事，所以插件会**主动发起
  *      授权申请**，并盯着系统设置里的变化自动接上，而不是甩一句错误。
  *   ④ **输入永远有两条路。** 语音识别是效率，键盘输入是保底。
+ *   ⑤ **界面不解释自己。** 常驻版面只放标签、状态、数值与动作；
+ *      为什么这样设计的说明进悬停/弹层，或者删掉。唯一必须留在明面上的
+ *      长文字是**失败时的出路**。完整契约见 docs/DESIGN.md。
  *
- * 配色：**深墨底 + 骨白纸感 + 单一氧化朱红（REC）+ 琥珀（提问）+ 青玉（就绪）**。
- * 主按钮用骨白反色而不是蓝——蓝按钮会让它退回通用后台的样子。
+ * 视觉：**素雅但高级**。
+ *
+ *   · 底是中性墨（不是纯黑），字是骨白（不是纯白）；强调色各有唯一职责：
+ *     氧化朱红只给 REC 与危险动作，琥珀只给「当前提问」，青玉只表示就绪。
+ *   · 立体感不靠描边大小，靠**三层表面**（纸面/浮起/舞台）：极细描边 +
+ *     顶边内高光 + 柔和负扩散阴影，外加 2% 的胶片颗粒。见 30-theme.js 的
+ *     `S.surface()` 与 `.iv-s1/.iv-s2/.iv-s3`。
+ *   · 科技感来自**仪表语言**：等宽小标签、24px 点阵、tabular 数字、刻度式电平。
+ *   · 灵动感来自**位移与呼吸**：40ms 错峰的入场、1px 的悬停、46s 的光斑漂移、
+ *     6s 的呼吸灯——不是弹跳与闪烁。
+ *   · 排版只有六档字号（display / title / body / sub / meta / nano），
+ *     层级靠字重、颜色、留白区分，不靠半像素的字号差。
+ *   · 主按钮用骨白反色而不是蓝——蓝按钮会让它退回通用后台的样子。
  *
  * Bundle format: the official DSH client-bundle shape — a lazy-CJS closure
  * registered with window.__ModuleLoader__.load({ id, factory }). `react` comes
  * from the browser module table at runtime; everything else is inlined, so the
  * plugin carries no build step and no runtime dependency.
+ *
+ * **这个文件是生成的**：源码在 src/client/，顺序见 manifest.json。
  */
 /*!
  * dsh-realtime-interview — client half (browser bundle).
@@ -51,10 +67,13 @@ window.__ModuleLoader__.load({
     const DICT = {
       zh: {
         'brand.title': '模拟面试间',
-        'brand.subtitle': '简历 + JD → 一场有准备的面试',
+        // 「简历 + JD → 一场有准备的面试」这句副标题**已删除**：
+        // 它是设计说明书，不是界面（docs/DESIGN.md §1）。页头的品牌记号
+        // 与页面本身已经在说这件事，不必再写一行字解释自己。
         'tab.prepare': '准备',
         'tab.live': '面试中',
         'tab.report': '报告',
+        'tab.settings': '设置',
         'action.new': '新建面试',
         'action.save': '保存',
         'action.fetch': '抓取',
@@ -70,7 +89,14 @@ window.__ModuleLoader__.load({
         'action.asr.off': '停止识别',
         'action.speak': '朗读问题',
         'action.upload': '上传文件',
-        'state.empty': '还没有面试。先新建一场。',
+        // 页头上的两枚芯片：卷宗库（末两段路径 + 可点换目录）与关闭通知。
+        'action.browse': '浏览…',
+        'action.closeNotice': '关闭通知',
+        // 场次行的两个悬停动作。
+        'action.archive': '归档',
+        'action.unarchive': '取出',
+        'action.delete': '删除',
+        'state.empty': '还没有面试。',
         'state.ready': '准备就绪',
         'state.listening': '正在聆听…',
         'state.idle': '待命',
@@ -81,10 +107,10 @@ window.__ModuleLoader__.load({
       },
       en: {
         'brand.title': 'Mock interview room',
-        'brand.subtitle': 'Resume + JD → a prepared interview',
         'tab.prepare': 'Prepare',
         'tab.live': 'Live',
         'tab.report': 'Report',
+        'tab.settings': 'Settings',
         'action.new': 'New interview',
         'action.save': 'Save',
         'action.fetch': 'Fetch',
@@ -100,7 +126,12 @@ window.__ModuleLoader__.load({
         'action.asr.off': 'Stop',
         'action.speak': 'Read question',
         'action.upload': 'Upload',
-        'state.empty': 'No interview yet. Create one.',
+        'action.browse': 'Browse…',
+        'action.closeNotice': 'Dismiss',
+        'action.archive': 'Archive',
+        'action.unarchive': 'Restore',
+        'action.delete': 'Delete',
+        'state.empty': 'No interview yet.',
         'state.ready': 'Ready',
         'state.listening': 'Listening…',
         'state.idle': 'Idle',
@@ -114,21 +145,50 @@ window.__ModuleLoader__.load({
     // ── type ──────────────────────────────────────────────────────────────
     //
     // 三档，各有职责：
-    //   声音（衬线）—— 提问、报告标题。它是「人说的话」，不是界面标签。
+    //   展现（衬线）—— 页面主标题、提问、报告大标题。它是「人说的话」，
+    //                  不是界面标签。拉丁走 Georgia，中文落到思源宋
+    //                  （Noto Serif SC / Source Han Serif SC）——这是本机
+    //                  已经装好的一套，中文标题终于不是「加粗的雅黑」。
     //   界面（无衬线）—— 一切可点的、可读的。
-    //   数据（等宽）—— 计时、电平、字数、id。数字要能对齐着看。
+    //   数据（等宽）—— 计时、电平、字数、路径、id。数字要能对齐着看。
     const F = {
-      voice: '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Songti SC", "Source Han Serif SC", "Noto Serif CJK SC", serif',
-      ui: 'system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif',
+      display:
+        '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, '
+        + '"Noto Serif SC", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", serif',
+      ui:
+        'system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", '
+        + '"PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif',
       mono: '"SF Mono", "Cascadia Mono", "Cascadia Code", Consolas, "Roboto Mono", ui-monospace, monospace',
     }
+
+    /**
+     * 字号只允许这六档。
+     *
+     * **为什么要写死。** 上一版散落着 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 13.5
+     * 八个字号——每个都略有不同，于是"看起来有点杂"永远说不清是哪里的问题。
+     * 字阶收窄之后，层级靠**字重、颜色、留白**区分，而不是靠半像素的字号差。
+     *
+     * unit 只是标注，真正生效的是 style 里的值。
+     */
+    const TYPE = {
+      display: { fontSize: 24, fontWeight: 600, lineHeight: 1.26, letterSpacing: '0.008em' },
+      title: { fontSize: 17, fontWeight: 600, lineHeight: 1.45, letterSpacing: '0.008em' },
+      body: { fontSize: 13.5, fontWeight: 400, lineHeight: 1.78 },
+      sub: { fontSize: 12.5, fontWeight: 400, lineHeight: 1.72 },
+      meta: { fontSize: 10.5, fontWeight: 500, lineHeight: 1.6, letterSpacing: '0.14em', textTransform: 'uppercase' },
+      nano: { fontSize: 9.5, fontWeight: 500, lineHeight: 1.5, letterSpacing: '0.12em', textTransform: 'uppercase' },
+    }
+
+    /** 间距阶梯：4 / 8 / 12 / 16 / 20 / 24 / 28 / 40。中间值一律不许出现。 */
+    const SPACE = [0, 4, 8, 12, 16, 20, 24, 28, 40]
+    const RADIUS = { sm: 10, md: 14, lg: 20, xl: 26, pill: 999 }
 
     // ── palette ───────────────────────────────────────────────────────────
     //
     // 底是**墨**（偏冷的深灰蓝），不是纯黑——纯黑会让它变成一个网页。
     // 文字是**骨白**（带一点暖），不是纯白——纯白在深底上太刺眼。
     // 三个强调色各有唯一职责，不做装饰用：
-    //   tally 氧化朱红 = 正在录制（唯一用到它的地方是 REC 灯）
+    //   tally 氧化朱红 = 正在录制（唯一用到它的地方是 REC 灯与危险动作）
     //   amber 琥珀     = 面试官在提问（提问卡的竖线、当前问题）
     //   jade  青玉     = 已就绪 / 已完成 / 已保存
     //
@@ -151,6 +211,7 @@ window.__ModuleLoader__.load({
       tally: 'var(--iv-tally)',
       amber: 'var(--iv-amber)',
       jade: 'var(--iv-jade)',
+      accent: 'var(--iv-accent)',
       // 输入框底色：深色下比底再深一点，亮色下是纯白纸面。
       field: 'var(--iv-field)',
       // 「主色块上的字」：深色主题下是浅底深字，亮色主题下反过来。
@@ -167,6 +228,36 @@ window.__ModuleLoader__.load({
       shadow: 'var(--iv-shadow)',
       sheen: 'var(--iv-sheen)',
       fade: 'var(--iv-fade)',
+      // ── 材质与层次 ──────────────────────────────────────────────────────
+      //
+      // 「立体」不是描边粗细的问题，是**光**的问题。每个表面都要回答三件事：
+      // 它朝哪受光（顶部高光 + 底部暗边）、它离台面多高（接触影 + 环境影）、
+      // 它是凸起还是凹陷（surface vs well）。
+      surface1: 'var(--iv-surface-1)',
+      surface2: 'var(--iv-surface-2)',
+      surface3: 'var(--iv-surface-3)',
+      /** 凹面：输入框、页签槽、电平表底。 */
+      well: 'var(--iv-well)',
+      inset: 'var(--iv-inset)',
+      edge: 'var(--iv-edge)',
+      hi: 'var(--iv-hi)',
+      hiSoft: 'var(--iv-hi-soft)',
+      lo: 'var(--iv-lo)',
+      elev1: 'var(--iv-elev-1)',
+      elev2: 'var(--iv-elev-2)',
+      elev3: 'var(--iv-elev-3)',
+      elev4: 'var(--iv-elev-4)',
+      elevStage: 'var(--iv-elev-stage)',
+      /** 主按钮的三段：上亮面、下暗面、字色。 */
+      primaryTop: 'var(--iv-primary-top)',
+      primaryBottom: 'var(--iv-primary-bottom)',
+      primaryText: 'var(--iv-primary-text)',
+      primaryShadow: 'var(--iv-primary-shadow)',
+      /** 磨砂（页头压在内容上时用它，才有"层"）。 */
+      glass: 'var(--iv-glass)',
+      vignette: 'var(--iv-vignette)',
+      accentWash: 'var(--iv-accent-wash)',
+      ring: 'var(--iv-ring)',
     }
 
     /**
@@ -204,47 +295,84 @@ window.__ModuleLoader__.load({
       // 只有极淡的环境光（蓝/粉/绿，2% 量级），强调色只在必要时出现。
       // 主按钮是高对比中性色（骨白），不是绿——绿按钮会立刻变成"后台"。
       dark: {
-        '--iv-ink900': '#0B0D10',
-        '--iv-ink850': '#0F1216',
-        '--iv-ink800': '#14181E',
-        '--iv-ink750': '#1A1F26',
-        '--iv-ink700': '#222932',
-        '--iv-rule': 'rgba(255,255,255,0.10)',
-        '--iv-rule-soft': 'rgba(255,255,255,0.055)',
-        '--iv-bone': '#E7E9EC',
-        '--iv-bone-dim': '#A7ADB7',
-        '--iv-bone-faint': '#6E757F',
+        '--iv-ink900': '#05070A',
+        '--iv-ink850': '#080B0F',
+        '--iv-ink800': '#0F1319',
+        '--iv-ink750': '#161B22',
+        '--iv-ink700': '#1E242D',
+        // ── 表面：光从上方来 ────────────────────────────────────────────
+        //
+        // 一层表面要有三样东西才「立」得起来：
+        //   ① **薄渐变**：顶部亮一点、底部暗一点（受光面 + 背光面）；
+        //   ② **顶边高光**：`inset 0 1px 0 var(--iv-hi)`，像铣出来的倒角；
+        //   ③ **两层影**：1–2px 的接触影 + 大模糊负扩散的环境影。
+        // 少任何一样，它都只是一块贴着边框的色块——也就是「单薄的纸」。
+        // 表面 = 高光带（左上斜扫）+ 竖向受光渐变 + 底色。
+        // 中间那层斜向高光是**镜面反射**：它让"平的色块"变成"有涂层的表面"。
+        '--iv-surface-1': 'linear-gradient(112deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.014) 26%, rgba(255,255,255,0) 48%), linear-gradient(178deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 8%, rgba(255,255,255,0.008) 34%, rgba(2,4,9,0.28) 100%), #171D25',
+        '--iv-surface-2': 'linear-gradient(112deg, rgba(255,255,255,0.075) 0%, rgba(255,255,255,0.018) 26%, rgba(255,255,255,0) 48%), linear-gradient(178deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.062) 8%, rgba(255,255,255,0.012) 32%, rgba(2,4,9,0.32) 100%), #1C232C',
+        '--iv-surface-3': 'linear-gradient(112deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 34%), linear-gradient(178deg, rgba(255,255,255,0.085) 0%, rgba(255,255,255,0) 22%), #080B0F',
+        // 凹面：输入框、页签槽、电平表底。**凸 + 凹同时存在**，层次才可信。
+        '--iv-well': 'linear-gradient(180deg, rgba(0,0,0,0.52) 0%, rgba(0,0,0,0.26) 100%), #080C10',
+        '--iv-inset': 'inset 0 1px 0 rgba(0,0,0,0.55), inset 0 2px 7px rgba(0,0,0,0.62), inset 0 0 0 1px rgba(0,0,0,0.45), inset 0 -1px 0 rgba(255,255,255,0.045)',
+        '--iv-hi': 'rgba(255,255,255,0.14)',
+        '--iv-hi-soft': 'rgba(255,255,255,0.07)',
+        '--iv-lo': 'rgba(2,4,9,0.58)',
+        '--iv-edge': 'inset 0 1px 0 var(--iv-hi), inset 0 -1px 0 var(--iv-lo)',
+        // 四级 elevation：contact（接触影）+ seam（外缝）+ ambient（环境影）。
+        // 影是**蓝黑**的（rgba(2,4,9)）：真实场景里影由天光补色，纯黑影会显得像脏。
+        '--iv-elev-1': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.025), inset 0 -1px 0 rgba(2,4,9,0.45), inset 0 -16px 24px -20px rgba(2,4,9,0.75), 0 1px 2px rgba(2,4,9,0.62), 0 0 0 1px rgba(2,4,9,0.50), 0 20px 42px -20px rgba(2,4,9,0.92)',
+        '--iv-elev-2': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.48), inset 0 -16px 24px -20px rgba(2,4,9,0.78), 0 1px 3px rgba(2,4,9,0.68), 0 0 0 1px rgba(2,4,9,0.52), 0 30px 60px -22px rgba(2,4,9,0.96)',
+        '--iv-elev-3': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.50), 0 2px 6px rgba(2,4,9,0.70), 0 0 0 1px rgba(2,4,9,0.55), 0 48px 96px -30px rgba(2,4,9,1)',
+        '--iv-elev-4': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.75), 0 0 0 1px rgba(2,4,9,0.60), 0 70px 130px -40px #000',
+        // 舞台专用：比 elev-4 收一点——它下面还压着回答框，影太散会把下一条盖住。
+        '--iv-elev-stage': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.72), 0 0 0 1px rgba(2,4,9,0.58), 0 44px 84px -34px rgba(2,4,9,0.95)',
+        // 主按钮：**一块被按在台面上的骨白键**。上亮下暗才是实体。
+        '--iv-primary-top': '#F4F6F9',
+        '--iv-primary-bottom': '#D2D7DE',
+        '--iv-primary-text': '#080A0D',
+        '--iv-primary-shadow': 'inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(0,0,0,0.22), 0 1px 2px rgba(0,0,0,0.55), 0 10px 22px -14px rgba(0,0,0,0.85)',
+        '--iv-glass': 'rgba(7,9,13,0.72)',
+        '--iv-vignette': 'radial-gradient(125% 92% at 50% 4%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.42) 82%, rgba(0,0,0,0.62) 100%)',
+        '--iv-rule': 'rgba(255,255,255,0.115)',
+        '--iv-rule-soft': 'rgba(255,255,255,0.06)',
+        '--iv-bone': '#EBEDF0',
+        '--iv-bone-dim': '#A9AFB9',
+        '--iv-bone-faint': '#6C737D',
         '--iv-tally': '#E0563F',
-        '--iv-amber': '#C9A46A',
+        '--iv-amber': '#CDA96F',
         '--iv-jade': '#6FBF9A',
-        '--iv-field': '#0C0F13',
-        '--iv-on-bone': '#0B0D10',
-        '--iv-stage': '#07090C',
-        '--iv-plate-top': '#12161C',
-        '--iv-plate-mid': '#0B0E12',
-        '--iv-plate-low': '#080A0E',
-        '--iv-cue-top': 'rgba(7,9,12,0)',
-        '--iv-cue-mid': 'rgba(7,9,12,0.84)',
-        '--iv-cue-low': 'rgba(7,9,12,0.97)',
-        '--iv-band': 'rgba(10,12,16,0.94)',
-        '--iv-clock': 'rgba(12,15,19,0.72)',
-        '--iv-shadow': 'rgba(0,0,0,0.9)',
-        '--iv-sheen': 'rgba(255,255,255,0.05)',
-        '--iv-fade': 'rgba(11,13,16,0)',
+        '--iv-field': '#0A0E13',
+        '--iv-on-bone': '#05070A',
+        '--iv-stage': '#04060A',
+        '--iv-plate-top': '#0E1218',
+        '--iv-plate-mid': '#090C11',
+        '--iv-plate-low': '#05070B',
+        '--iv-cue-top': 'rgba(4,6,10,0)',
+        '--iv-cue-mid': 'rgba(4,6,10,0.80)',
+        '--iv-cue-low': 'rgba(4,6,10,0.96)',
+        '--iv-band': 'rgba(8,10,14,0.94)',
+        '--iv-clock': 'rgba(8,11,15,0.66)',
+        '--iv-shadow': 'rgba(0,0,0,0.95)',
+        '--iv-sheen': 'rgba(255,255,255,0.06)',
+        '--iv-fade': 'rgba(5,7,10,0)',
         // 背景：一层中性底 + 三团 2% 的环境光（蓝/粉/绿），缓慢漂移。
-        '--iv-bg': 'radial-gradient(52vmax 52vmax at -8% -14%, rgba(150,185,235,0.10), transparent 66%), '
-          + 'radial-gradient(46vmax 46vmax at 108% -6%, rgba(225,170,200,0.07), transparent 64%), '
-          + 'radial-gradient(50vmax 50vmax at 30% 116%, rgba(150,205,170,0.07), transparent 66%), '
-          + 'linear-gradient(180deg, #0B0D10 0%, #0C0F13 100%)',
+        '--iv-bg': 'radial-gradient(52vmax 52vmax at -8% -14%, rgba(150,185,235,0.11), transparent 66%), '
+          + 'radial-gradient(46vmax 46vmax at 108% -6%, rgba(225,170,200,0.075), transparent 64%), '
+          + 'radial-gradient(50vmax 50vmax at 30% 116%, rgba(150,205,170,0.075), transparent 66%), '
+          + 'linear-gradient(180deg, #04060A 0%, #06080D 100%)',
         '--iv-glow-jade': 'rgba(111,191,154,0.22)',
         '--iv-glow-cobalt': 'rgba(127,166,217,0.26)',
         '--iv-accent': '#7FA6D9',
-        '--iv-tone-faint-text': '#6E757F',
+        '--iv-accent-wash': 'rgba(127,166,217,0.12)',
+        '--iv-ring': 'rgba(127,166,217,0.34)',
+        '--iv-dot': 'rgba(233,235,238,0.09)',
+        '--iv-tone-faint-text': '#6C737D',
         '--iv-tone-faint-edge': 'rgba(255,255,255,0.14)',
         '--iv-tone-faint-wash': 'rgba(255,255,255,0.05)',
-        '--iv-tone-amber-text': '#C9A46A',
-        '--iv-tone-amber-edge': 'rgba(201,164,106,0.30)',
-        '--iv-tone-amber-wash': 'rgba(201,164,106,0.08)',
+        '--iv-tone-amber-text': '#CDA96F',
+        '--iv-tone-amber-edge': 'rgba(205,169,111,0.30)',
+        '--iv-tone-amber-wash': 'rgba(205,169,111,0.08)',
         '--iv-tone-jade-text': '#6FBF9A',
         '--iv-tone-jade-edge': 'rgba(111,191,154,0.30)',
         '--iv-tone-jade-wash': 'rgba(111,191,154,0.08)',
@@ -257,41 +385,73 @@ window.__ModuleLoader__.load({
       // 不是"人民币配色"：中性纸白 + 墨字，蓝灰做链接色；
       // 朱红只留给 REC，琥珀只留给提问，青玉只表示就绪。
       light: {
-        '--iv-ink900': '#F6F5F2',
-        '--iv-ink850': '#FAF9F6',
+        '--iv-ink900': '#EEEDE7',
+        '--iv-ink850': '#F3F2ED',
         '--iv-ink800': '#FFFFFF',
-        '--iv-ink750': '#F1F0EC',
-        '--iv-ink700': '#E8E7E2',
-        '--iv-rule': 'rgba(20,23,28,0.10)',
-        '--iv-rule-soft': 'rgba(20,23,28,0.055)',
-        '--iv-bone': '#1E2126',
-        '--iv-bone-dim': '#555B64',
-        '--iv-bone-faint': '#8A9099',
+        '--iv-ink750': '#E9E8E1',
+        '--iv-ink700': '#E0DED6',
+        // 亮色下的立体感靠**白面 + 灰缝 + 暖影**：纸是白的，缝是灰的，
+        // 影要偏暖（纯黑影在暖纸上会发脏）。
+        '--iv-surface-1': 'linear-gradient(178deg, #FFFFFF 0%, #FEFDFB 52%, #F8F7F3 100%)',
+        '--iv-surface-2': 'linear-gradient(178deg, #FFFFFF 0%, #FCFBF7 58%, #F4F3ED 100%)',
+        '--iv-surface-3': 'linear-gradient(178deg, #FDFCF9 0%, #F2F1EA 100%)',
+        '--iv-well': 'linear-gradient(180deg, #F1EFE9 0%, #FAF9F6 100%)',
+        '--iv-inset': 'inset 0 1px 0 rgba(30,32,38,0.095), inset 0 2px 4px rgba(30,32,38,0.055), inset 0 0 0 1px rgba(30,32,38,0.06), inset 0 -1px 0 rgba(255,255,255,0.85)',
+        '--iv-hi': 'rgba(255,255,255,1)',
+        '--iv-hi-soft': 'rgba(255,255,255,0.75)',
+        '--iv-lo': 'rgba(30,32,38,0.075)',
+        '--iv-edge': 'inset 0 1px 0 var(--iv-hi), inset 0 -1px 0 var(--iv-lo)',
+        '--iv-elev-1': 'inset 0 1px 0 var(--iv-hi), inset 0 -1px 0 var(--iv-lo), inset 0 -14px 20px -18px rgba(30,32,38,0.10), 0 1px 2px rgba(30,32,38,0.11), 0 0 0 1px rgba(30,32,38,0.045), 0 14px 28px -18px rgba(30,32,38,0.34)',
+        '--iv-elev-2': 'inset 0 1px 0 var(--iv-hi), inset 0 -1px 0 var(--iv-lo), inset 0 -14px 20px -18px rgba(30,32,38,0.11), 0 1px 3px rgba(30,32,38,0.14), 0 0 0 1px rgba(30,32,38,0.05), 0 22px 44px -20px rgba(30,32,38,0.40)',
+        '--iv-elev-3': 'inset 0 1px 0 var(--iv-hi), inset 0 -1px 0 var(--iv-lo), 0 2px 6px rgba(30,32,38,0.16), 0 0 0 1px rgba(30,32,38,0.05), 0 40px 80px -28px rgba(30,32,38,0.46)',
+        '--iv-elev-4': 'inset 0 1px 0 var(--iv-hi), 0 2px 8px rgba(30,32,38,0.18), 0 0 0 1px rgba(30,32,38,0.06), 0 60px 110px -34px rgba(30,32,38,0.52)',
+        // 舞台专用：亮色下**不能**用一级大模糊的向下投影——白底会把那团影
+        // 读成"脏"，而不是"离桌面有距离"。收成贴身的一小段。
+        '--iv-elev-stage': 'inset 0 1px 0 var(--iv-hi), 0 2px 6px rgba(30,32,38,0.16), 0 0 0 1px rgba(30,32,38,0.055), 0 16px 30px -22px rgba(30,32,38,0.36)',
+        // 主按钮：亮色下是**一枚墨色键**。
+        '--iv-primary-top': '#2E323A',
+        '--iv-primary-bottom': '#14171C',
+        '--iv-primary-text': '#FBFAF6',
+        '--iv-primary-shadow': 'inset 0 1px 0 rgba(255,255,255,0.20), inset 0 -1px 0 rgba(0,0,0,0.35), 0 1px 2px rgba(30,32,38,0.22), 0 10px 20px -14px rgba(30,32,38,0.45)',
+        '--iv-glass': 'rgba(244,243,238,0.76)',
+        '--iv-vignette': 'radial-gradient(130% 90% at 50% 0%, rgba(30,32,38,0) 46%, rgba(30,32,38,0.055) 100%)',
+        '--iv-rule': 'rgba(20,23,28,0.11)',
+        '--iv-rule-soft': 'rgba(20,23,28,0.06)',
+        '--iv-bone': '#1B1E23',
+        '--iv-bone-dim': '#4F555D',
+        '--iv-bone-faint': '#82888F',
         '--iv-tally': '#C24A34',
         '--iv-amber': '#8C6A2B',
         '--iv-jade': '#3F7D64',
-        '--iv-field': '#FFFFFF',
+        '--iv-field': '#FBF9F4',
         '--iv-on-bone': '#FAF9F6',
-        '--iv-stage': '#EFEEE9',
-        '--iv-plate-top': '#FFFFFF',
-        '--iv-plate-mid': '#F7F6F2',
-        '--iv-plate-low': '#EDECE7',
-        '--iv-cue-top': 'rgba(246,245,242,0)',
-        '--iv-cue-mid': 'rgba(246,245,242,0.88)',
-        '--iv-cue-low': 'rgba(244,243,239,0.97)',
-        '--iv-band': 'rgba(250,249,246,0.96)',
-        '--iv-clock': 'rgba(255,255,255,0.85)',
-        '--iv-shadow': 'rgba(24,26,30,0.14)',
-        '--iv-sheen': 'rgba(255,255,255,0.8)',
-        '--iv-fade': 'rgba(246,245,242,0)',
-        '--iv-bg': 'radial-gradient(50vmax 50vmax at -6% -12%, rgba(150,185,235,0.10), transparent 66%), '
-          + 'radial-gradient(46vmax 46vmax at 106% -8%, rgba(225,180,200,0.08), transparent 64%), '
-          + 'radial-gradient(48vmax 48vmax at 32% 112%, rgba(160,205,175,0.08), transparent 66%), '
-          + 'linear-gradient(180deg, #F6F5F2 0%, #F7F6F3 100%)',
+        // **亮色下的舞台要更深，不是更白。**
+        // 纸白的页面里，如果舞台也接近白，视频区就不再是"主位"——它塌成了
+        // 页面的一部分。所以亮色的舞台是一块**装裱用的厚卡纸**：比纸深一档、
+        // 偏暖的灰，画面（或未接通板）落在它上面才立得住。
+        '--iv-stage': '#DFDCD2',
+        '--iv-plate-top': '#F0EEE6',
+        '--iv-plate-mid': '#E0DDD3',
+        '--iv-plate-low': '#CFCCC1',
+        '--iv-cue-top': 'rgba(238,237,231,0)',
+        '--iv-cue-mid': 'rgba(238,237,231,0.88)',
+        '--iv-cue-low': 'rgba(236,235,229,0.97)',
+        '--iv-band': 'rgba(247,246,241,0.96)',
+        '--iv-clock': 'rgba(255,255,255,0.78)',
+        '--iv-shadow': 'rgba(28,30,36,0.18)',
+        '--iv-sheen': 'rgba(255,255,255,0.9)',
+        '--iv-fade': 'rgba(238,237,231,0)',
+        '--iv-bg': 'radial-gradient(50vmax 50vmax at -6% -12%, rgba(150,185,235,0.12), transparent 66%), '
+          + 'radial-gradient(46vmax 46vmax at 106% -8%, rgba(225,180,200,0.09), transparent 64%), '
+          + 'radial-gradient(48vmax 48vmax at 32% 112%, rgba(160,205,175,0.09), transparent 66%), '
+          + 'linear-gradient(180deg, #EEEDE7 0%, #F2F1EB 100%)',
         '--iv-glow-jade': 'rgba(63,125,100,0.18)',
         '--iv-glow-cobalt': 'rgba(59,110,165,0.20)',
         '--iv-accent': '#3B6EA5',
-        '--iv-tone-faint-text': '#8A9099',
+        '--iv-accent-wash': 'rgba(59,110,165,0.10)',
+        '--iv-ring': 'rgba(59,110,165,0.30)',
+        '--iv-dot': 'rgba(28,31,36,0.11)',
+        '--iv-tone-faint-text': '#82888F',
         '--iv-tone-faint-edge': 'rgba(20,23,28,0.14)',
         '--iv-tone-faint-wash': 'rgba(20,23,28,0.045)',
         '--iv-tone-amber-text': '#8C6A2B',
@@ -309,10 +469,14 @@ window.__ModuleLoader__.load({
     /** 主题在 localStorage 里的键。存的是用户的**选择**，不是系统设置。 */
     const THEME_KEY = 'dsh-realtime-interview.theme'
 
+    /** 「跟随 DSH 主题」开关的键。开了之后 THEME_KEY 就不再生效。 */
+    const THEME_FOLLOW_KEY = 'dsh-realtime-interview.themeFollow'
+
     /**
      * 读用户上次选的主题。
      *
-     * 读不到就用暗色——这是这个插件一直以来的样子；
+     * **读不到就用亮色。** 亮色是这一版的主形态：白面 + 灰缝 + 暖影，
+     * 层次比暗色更容易读出来；暗色留给喜欢在夜里用的人。
      * localStorage 不可用（隐私模式）时也不能报错，所以整段都包起来。
      */
     function readTheme() {
@@ -322,7 +486,7 @@ window.__ModuleLoader__.load({
       } catch {
         // 读不到就用默认。
       }
-      return 'dark'
+      return 'light'
     }
 
     /** 记住用户选的主题。存不进去也不该拦住切换。 */
@@ -334,121 +498,327 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** 是否跟随 DSH 主题（默认关：插件有自己的两套配色，不跟宿主抢）。 */
+    function readThemeFollow() {
+      try {
+        return window.localStorage.getItem(THEME_FOLLOW_KEY) === '1'
+      } catch {
+        return false
+      }
+    }
+
+    /** 记住「跟随 DSH 主题」的选择。 */
+    function saveThemeFollow(follow) {
+      try {
+        window.localStorage.setItem(THEME_FOLLOW_KEY, follow ? '1' : '0')
+      } catch {
+        // 存不下就算了，这次切换照样生效。
+      }
+    }
+
+    /**
+     * 宿主现在是亮还是暗。
+     *
+     * **读的是 `:root` 的 `color-scheme`。** DSH 的主题层在根节点上写
+     * `color-scheme: light|dark`（装机包里读实：`@deepseek-ai/dsh-client-ui-theme`
+     * 的两套 boot 样式就是这么写的），并且同时把 `body` 底色一起换掉。
+     * 所以：先读 `color-scheme`，读不到再按 `body` 底色亮度猜，最后才退回
+     * `prefers-color-scheme`——三层兜底，任何一层成都能回答。
+     *
+     * @returns {'light'|'dark'|undefined}
+     */
+    function hostColorScheme() {
+      if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
+      try {
+        const root = document.documentElement
+        const declared = window.getComputedStyle?.(root)?.colorScheme
+        if (declared === 'light' || declared === 'dark') return declared
+        if (typeof declared === 'string' && declared.includes('dark')) return 'dark'
+        if (typeof declared === 'string' && declared.includes('light')) return 'light'
+        // 底色亮度：宿主可能只用 CSS 变量换底，不写 color-scheme。
+        const probe = document.body ?? root
+        const background = window.getComputedStyle?.(probe)?.backgroundColor ?? ''
+        const rgb = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(background)
+        if (rgb !== null) {
+          const [r, g, b] = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
+          const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+          return luminance > 0.5 ? 'light' : 'dark'
+        }
+      } catch {
+        // 读不到就走下面的系统偏好。
+      }
+      try {
+        return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches === true ? 'dark' : 'light'
+      } catch {
+        return undefined
+      }
+    }
+
+    /**
+     * 盯着宿主主题的变化。
+     *
+     * **为什么不用定时器。** 每秒读一次 `getComputedStyle` 会逼浏览器做样式
+     * 重算，而「空闲时不得重渲染 / 不得掉帧」是这个插件的红线。宿主换主题
+     * 的方式只有两种：改根节点的行内样式，或者换 `<head>` 里的样式表——
+     * 两件事都能被 `MutationObserver` 抓到，成本几乎为零。
+     *
+     * @param {(scheme: 'light'|'dark') => void} onChange
+     * @returns {() => void} 停止观察
+     */
+    function watchHostScheme(onChange) {
+      if (typeof window === 'undefined' || typeof document === 'undefined') return () => {}
+      let frame = 0
+      let last
+      const read = () => {
+        const next = hostColorScheme()
+        if (next === undefined || next === last) return
+        last = next
+        onChange(next)
+      }
+      read()
+      const schedule = () => {
+        if (frame !== 0) return
+        if (typeof window.requestAnimationFrame === 'function') {
+          frame = window.requestAnimationFrame(() => { frame = 0; read() })
+        } else {
+          frame = window.setTimeout(() => { frame = 0; read() }, 120)
+        }
+      }
+      const disposers = []
+      try {
+        const media = window.matchMedia?.('(prefers-color-scheme: dark)')
+        if (media !== undefined && typeof media.addEventListener === 'function') {
+          media.addEventListener('change', schedule)
+          disposers.push(() => media.removeEventListener('change', schedule))
+        }
+      } catch {
+        // 有的 WebView 没有 matchMedia：那就只靠 MutationObserver。
+      }
+      try {
+        const Observer = window.MutationObserver
+        if (typeof Observer === 'function') {
+          const observer = new Observer(schedule)
+          observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['style', 'class', 'data-theme'],
+          })
+          if (document.head !== null && document.head !== undefined) {
+            observer.observe(document.head, { childList: true, subtree: true, characterData: true })
+          }
+          disposers.push(() => observer.disconnect())
+        }
+      } catch {
+        // 观察不了就只在挂载时读一次。
+      }
+      return () => {
+        if (frame !== 0) {
+          if (typeof window.cancelAnimationFrame === 'function') window.cancelAnimationFrame(frame)
+          else window.clearTimeout(frame)
+          frame = 0
+        }
+        for (const dispose of disposers) dispose()
+      }
+    }
+
+    /**
+     * 三层表面。
+     *
+     * **为什么做成函数而不是每处手写 boxShadow。** 上一版每张卡片自己拼
+     * `0 18px 44px -34px` 这种值，于是页面上有七八种投影——「明明每个都
+     * 有阴影，却看起来全都浮在同一个平面上」就是这么来的。收成三档之后，
+     * 亮暗两套主题各自定义一次，全部跟着变。
+     *
+     * 每一档的 boxShadow 里都已经带了**顶边高光 + 底边暗线 + 接触影 + 环境影**，
+     * 所以调用方不要再自己加描边或投影，否则层次会被盖掉。
+     */
+    function surfaceStyle(tone) {
+      const raised = tone === 'raised'
+      const stage = tone === 'stage'
+      return {
+        background: stage ? C.surface3 : raised ? C.surface2 : C.surface1,
+        border: `1px solid ${stage ? C.ruleSoft : C.rule}`,
+        borderRadius: stage ? RADIUS.xl : RADIUS.lg,
+        boxShadow: stage ? C.elev3 : raised ? C.elev2 : C.elev1,
+      }
+    }
+
     const S = {
       page: {
         display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0,
-        // 背景是 **中性底 + 极淡环境光**（见 THEME_CSS 的 ::before 漂移层）。
+        // 背景是 **中性底 + 极淡环境光**（见 THEME_CSS 的 ::before 漂移层 + .iv-grid 点阵）。
         backgroundImage: 'var(--iv-bg)', backgroundColor: C.ink900,
-        color: C.bone, fontFamily: F.ui, fontSize: 13.5, lineHeight: 1.7,
+        color: C.bone, fontFamily: F.ui, fontSize: TYPE.body.fontSize, lineHeight: TYPE.body.lineHeight,
         WebkitFontSmoothing: 'antialiased', position: 'relative', overflow: 'clip',
+        fontVariantNumeric: 'tabular-nums',
       },
+      /** `S.space(4)` → 16px；阶梯之外的中间值一律不许出现。 */
+      space: step => SPACE[step] ?? step,
+      radius: RADIUS,
+      type: TYPE,
+      font: F,
+      surface: surfaceStyle,
+
       head: {
-        display: 'flex', alignItems: 'center', gap: 18, padding: '20px 28px 12px',
-        flex: '0 0 auto', background: 'transparent',
+        display: 'flex', alignItems: 'center', gap: 20, padding: '16px 28px 13px',
+        flex: '0 0 auto', position: 'relative', zIndex: 3,
+        // **页头是磨砂的**：内容从它下面滚过去时，能看见"层"。
+        background: C.glass,
+        backdropFilter: 'blur(14px) saturate(1.15)',
+        WebkitBackdropFilter: 'blur(14px) saturate(1.15)',
+        borderBottom: `1px solid ${C.ruleSoft}`,
+        boxShadow: `0 1px 0 ${C.hiSoft} inset, 0 10px 30px -24px ${C.shadow}`,
       },
-      title: { fontFamily: F.voice, fontSize: 21, fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.25 },
-      sub: { fontSize: 11.5, color: C.boneFaint, marginTop: 4, letterSpacing: '0.04em' },
+      title: { fontFamily: F.display, ...TYPE.display },
+      sub: { ...TYPE.sub, color: C.boneFaint, marginTop: 4, letterSpacing: '0.03em' },
       workspace: {
-        fontFamily: F.mono, fontSize: 10.5, color: C.boneFaint, marginTop: 5,
-        letterSpacing: '0.02em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        fontFamily: F.mono, ...TYPE.nano, color: C.boneFaint,
+        letterSpacing: '0.06em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
       },
+      // 页签：**凹槽 + 浮起的滑块**。凹与凸同框，是物理感的来源。
       tabs: {
         display: 'flex', gap: 2, marginLeft: 'auto', padding: 4,
-        background: C.ink700, borderRadius: 14, border: `1px solid ${C.ruleSoft}`,
+        background: C.well, borderRadius: RADIUS.md,
+        border: `1px solid ${C.ruleSoft}`, boxShadow: C.inset,
       },
       tab: (active) => ({
-        padding: '6px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 13,
-        background: active ? C.bone : 'transparent',
-        color: active ? C.ink900 : C.boneDim,
+        padding: '6px 16px', borderRadius: RADIUS.sm, cursor: 'pointer', fontSize: TYPE.body.fontSize,
+        background: active ? C.surface2 : 'transparent',
+        color: active ? C.bone : C.boneDim,
         fontWeight: active ? 600 : 400,
-        border: '1px solid transparent',
-        transition: 'background 180ms ease, color 180ms ease',
-        fontFamily: F.ui, letterSpacing: '0.02em',
+        border: `1px solid ${active ? C.rule : 'transparent'}`,
+        boxShadow: active ? C.elev1 : 'none',
+        transition: 'background 180ms var(--iv-ease), color 180ms var(--iv-ease), box-shadow 180ms var(--iv-ease)',
+        fontFamily: F.ui, letterSpacing: '0.02em', whiteSpace: 'nowrap',
       }),
-      body: { flex: '1 1 auto', minHeight: 0, display: 'flex' },
-      rail: {
-        width: 236, flex: '0 0 236px', borderRight: `1px solid ${C.ruleSoft}`,
-        overflowY: 'auto', padding: '14px 12px', background: C.ink850,
+      body: {
+        flex: '1 1 auto', minHeight: 0, display: 'flex',
+        // **显式取消层叠上下文（保护旧样式）。**
+        // 页签槽/主区曾经被一条 `[data-iv-page] > * { z-index: 1 }` 统一抬过，
+        // 于是主区自成层叠上下文，`fixed` 弹窗只能在里面比大小，顶部被页头切掉。
+        // 规则已经删了，但「已经插进文档的旧 <style>」在热更新/复用页面里可能还活着；
+        // 内联的 `z-index: auto` 优先级更高，能从根上把这层上下文拆掉。
+        position: 'relative', zIndex: 'auto',
       },
-      main: { flex: '1 1 auto', minWidth: 0, overflowY: 'auto', padding: '16px 28px 44px' },
+      // 左栏是**凹进去的侧槽**：右边的内阴影让它读成"面板比里面低一层"。
+      rail: {
+        width: 244, flex: '0 0 244px',
+        overflowY: 'auto', padding: '16px 12px',
+        background: C.surface3,
+        boxShadow: `inset -1px 0 0 ${C.ruleSoft}, inset -18px 0 24px -24px ${C.shadow}`,
+      },
+      main: { flex: '1 1 auto', minWidth: 0, overflowY: 'auto', padding: '18px 28px 48px' },
 
       card: {
-        background: C.ink800,
-        border: `1px solid ${C.rule}`,
-        borderRadius: 20,
+        ...surfaceStyle('plain'),
         padding: '20px 22px',
-        marginBottom: 18,
-        boxShadow: `0 18px 44px -34px ${C.shadow}`,
-        transition: 'border-color 220ms ease, box-shadow 220ms ease, transform 220ms ease',
+        marginBottom: 16,
+        transition: 'border-color 220ms var(--iv-ease), box-shadow 220ms var(--iv-ease)',
       },
-      cardHead: { display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 16 },
+      panel: { ...surfaceStyle('raised'), padding: '16px 18px' },
+      stageFrame: { ...surfaceStyle('stage') },
+      cardHead: { display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 16, minWidth: 0 },
       eyebrow: {
-        fontFamily: F.mono, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase',
-        color: C.boneFaint, flex: '0 0 auto',
+        fontFamily: F.mono, ...TYPE.meta, color: C.boneFaint, flex: '0 0 auto',
       },
-      cardTitle: { fontFamily: F.voice, fontSize: 17, fontWeight: 600, letterSpacing: '0.015em' },
-      hint: { fontSize: 12, color: C.boneFaint, lineHeight: 1.75 },
-      label: { fontSize: 11.5, color: C.boneDim, marginBottom: 8, display: 'block', letterSpacing: '0.03em' },
+      cardTitle: { fontFamily: F.display, ...TYPE.title, letterSpacing: '0.012em', minWidth: 0 },
+      hint: { ...TYPE.sub, color: C.boneFaint },
+      /** 一条宁静的提示行——每屏最多两条，且必须说「出路」或「来源」。 */
+      quiet: {
+        ...TYPE.sub, color: C.boneFaint, display: 'flex', alignItems: 'center', gap: 6,
+        padding: '4px 0',
+      },
+      label: { ...TYPE.meta, color: C.boneFaint, marginBottom: 8, display: 'block' },
+      // 输入框是**挖进台面的槽**（凹面 + 内阴影），聚焦时槽里亮起一圈光。
       input: {
-        width: '100%', boxSizing: 'border-box', background: C.field, color: C.bone,
-        border: `1px solid ${C.rule}`, borderRadius: 12, padding: '10px 13px', fontSize: 13.5,
-        fontFamily: F.ui, outline: 'none', lineHeight: 1.5,
-        transition: 'border-color 180ms ease, box-shadow 180ms ease',
+        width: '100%', boxSizing: 'border-box', background: C.well, color: C.bone,
+        border: `1px solid ${C.ruleSoft}`, borderRadius: RADIUS.md, padding: '9px 12px', fontSize: TYPE.body.fontSize,
+        fontFamily: F.ui, outline: 'none', lineHeight: 1.5, boxShadow: C.inset,
+        transition: 'border-color 180ms var(--iv-ease), box-shadow 180ms var(--iv-ease), background 180ms var(--iv-ease)',
       },
       textarea: {
-        width: '100%', boxSizing: 'border-box', background: C.field, color: C.bone,
-        border: `1px solid ${C.rule}`, borderRadius: 14, padding: '14px', fontSize: 13.5,
-        fontFamily: F.ui, outline: 'none', minHeight: 140, resize: 'vertical', lineHeight: 1.8,
-        transition: 'border-color 180ms ease, box-shadow 180ms ease',
+        width: '100%', boxSizing: 'border-box', background: C.well, color: C.bone,
+        border: `1px solid ${C.ruleSoft}`, borderRadius: RADIUS.md, padding: '13px 14px', fontSize: TYPE.body.fontSize,
+        fontFamily: F.ui, outline: 'none', minHeight: 132, resize: 'vertical', lineHeight: 1.8,
+        boxShadow: C.inset,
+        transition: 'border-color 180ms var(--iv-ease), box-shadow 180ms var(--iv-ease)',
       },
       btn: (kind, disabled) => {
+        // **长写边框，不用 `border` 简写。** React 在「上一次渲染是简写、
+        // 这一次是 borderColor」时会报一条 style 冲突警告，而「React 警告 0 条」
+        // 是这一版的闸门。所以统一成 width/style/color 三件套。
         const base = {
-          padding: '9px 16px', borderRadius: 12, fontSize: 13, cursor: disabled ? 'not-allowed' : 'pointer',
+          padding: '8px 15px', borderRadius: RADIUS.md, fontSize: TYPE.body.fontSize,
+          cursor: disabled ? 'not-allowed' : 'pointer',
           fontFamily: F.ui, letterSpacing: '0.02em', lineHeight: 1.5,
-          transition: 'background 180ms ease, border-color 180ms ease, color 180ms ease, transform 220ms ease, opacity 180ms ease',
-          border: `1px solid ${C.rule}`,
+          transition: 'background 180ms var(--iv-ease), border-color 180ms var(--iv-ease), '
+            + 'color 180ms var(--iv-ease), transform 220ms var(--iv-ease), opacity 180ms var(--iv-ease), box-shadow 180ms var(--iv-ease)',
+          borderWidth: 1, borderStyle: 'solid', borderColor: C.rule,
+          display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap',
         }
         if (kind === 'primary') {
-          // **高对比中性主按钮**，不是绿。绿按钮会让整页退回"后台"。
-          return { ...base, background: C.bone, color: C.ink900, borderColor: C.bone, fontWeight: 600, opacity: disabled ? 0.45 : 1 }
+          // **一枚按在台面上的键**：上亮下暗的实体面 + 接触影 + 环境影。
+          // 主色仍是高对比中性色（不是绿）——绿按钮会让整页退回"后台"。
+          return {
+            ...base,
+            background: `linear-gradient(180deg, ${C.primaryTop} 0%, ${C.primaryBottom} 100%)`,
+            color: C.primaryText, borderColor: C.primaryBottom, fontWeight: 600,
+            opacity: disabled ? 0.45 : 1,
+            boxShadow: C.primaryShadow,
+          }
         }
         if (kind === 'tally') {
-          return { ...base, background: TONES.tally.wash, color: C.tally, borderColor: TONES.tally.edge, opacity: disabled ? 0.45 : 1 }
+          return {
+            ...base,
+            background: `linear-gradient(180deg, ${TONES.tally.wash} 0%, color-mix(in srgb, ${TONES.tally.wash} 40%, transparent) 100%)`,
+            color: C.tally, borderColor: TONES.tally.edge,
+            opacity: disabled ? 0.45 : 1,
+            boxShadow: `inset 0 1px 0 ${C.hiSoft}, 0 1px 2px ${C.shadow}`,
+          }
         }
-        return { ...base, background: 'transparent', color: C.boneDim, opacity: disabled ? 0.45 : 1 }
+        // 次级按钮：平时是**一道细缝里的浅浮雕**，悬停才浮起来（见 THEME_CSS）。
+        return {
+          ...base, background: 'transparent', color: C.boneDim, opacity: disabled ? 0.45 : 1,
+          boxShadow: `inset 0 1px 0 ${C.hiSoft}`,
+        }
       },
-      row: { display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' },
+      row: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' },
       mono: { fontFamily: F.mono },
       pill: (tone) => {
         const colors = TONES[tone] ?? TONES.faint
         return {
-          fontFamily: F.mono, fontSize: 10, padding: '2px 9px', borderRadius: 999,
+          fontFamily: F.mono, fontSize: TYPE.nano.fontSize, padding: '2px 9px', borderRadius: RADIUS.pill,
           border: `1px solid ${colors.edge}`, color: colors.text, background: colors.wash, whiteSpace: 'nowrap',
-          letterSpacing: '0.06em', alignSelf: 'flex-start', lineHeight: 1.6,
+          letterSpacing: '0.1em', alignSelf: 'flex-start', lineHeight: 1.7, textTransform: 'uppercase',
+          boxShadow: `inset 0 1px 0 ${C.hiSoft}`,
         }
       },
       overlay: {
-        position: 'fixed', inset: 0, zIndex: 90,
-        background: 'color-mix(in srgb, var(--iv-ink900) 62%, transparent)',
+        position: 'fixed', inset: 0, zIndex: 120,
+        // 遮罩要**真的压暗**背景：一层浓色 + 一层模糊，弹窗才浮得起来。
+        background: 'color-mix(in srgb, var(--iv-ink900) 72%, transparent)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-        animation: 'ivFade 160ms ease both',
-        backdropFilter: 'blur(6px)',
+        animation: 'ivFade 160ms var(--iv-ease) both',
+        backdropFilter: 'blur(9px) saturate(0.9)',
       },
       modal: {
-        width: 'min(460px, 100%)', background: C.ink800, border: `1px solid ${C.rule}`,
-        borderRadius: 20, padding: '22px 24px',
-        boxShadow: `0 48px 120px -44px ${C.shadow}`,
-        animation: 'ivRise 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both',
+        width: 'min(460px, 100%)', ...surfaceStyle('stage'),
+        padding: '22px 24px',
+        boxShadow: C.elev4,
+        animation: 'ivRise 220ms var(--iv-ease) both',
       },
     }
 
     /**
      * 全局样式：只在插件页面里生效（都挂在 `[data-iv-page]` 下）。
      *
-     * **参考 dsh-media-desk 的"灵"从哪来：** 不是更多颜色，而是
-     * 极淡的环境光在缓慢漂移、内容入场有位移、悬停有反馈、点阵给出纵深。
+     * **"灵"从哪来：** 不是更多颜色，而是极淡的环境光在缓慢漂移、
+     * 内容入场有位移、悬停有反馈、点阵给出纵深、三层表面给出层次。
      */
     const THEME_CSS = `
+      [data-iv-page] {
+        --iv-ease: cubic-bezier(.2,.8,.2,1);
+        --iv-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+      }
       [data-iv-page] * { box-sizing: border-box; }
       /* 背景氛围层：三团极淡的光斑，42s 缓慢漂移。 */
       [data-iv-page]::before {
@@ -461,29 +831,108 @@ window.__ModuleLoader__.load({
         filter: blur(10px);
         animation: ivDrift 46s ease-in-out infinite alternate;
       }
-      [data-iv-page] > * { position: relative; z-index: 1; }
+      /* **不要给每个直接子节点 z-index。**
+         给了 z-index: 1，主区就变成了一个层叠上下文；弹窗是 fixed + z-index 120，
+         但它只会在这个上下文里比大小——于是整块弹窗永远压在页头（z-index: 3）
+         下面，顶部标题与按钮被页头切掉。去掉 z-index 后，主区不再自成层叠上下文，
+         弹窗才真的浮在页头之上（页头自己的 z-index 写在 S.head 里）。 */
+      [data-iv-page] > * { position: relative; }
       @keyframes ivDrift {
         from { background-position: 6% 0%; }
         to { background-position: 94% 100%; }
       }
-      [data-iv-page] button { transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 200ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease; }
+
+      /* ── 点阵：科技感来自仪表，不是网格线 ───────────────────────────────
+         24px 的点阵，只在页面上半部隐约可见（径向遮罩淡出）。
+         它给出纵深与"这块屏是仪表"的暗示，但永远不会抢文字的注意力。 */
+      [data-iv-page] .iv-grid {
+        position: absolute; inset: 0; z-index: 0; pointer-events: none;
+        background-image: radial-gradient(circle, var(--iv-dot) 1px, transparent 1.1px);
+        background-size: 24px 24px; background-position: 0 0;
+        -webkit-mask-image: radial-gradient(120% 88% at 50% 0%, #000 0%, transparent 72%);
+        mask-image: radial-gradient(120% 88% at 50% 0%, #000 0%, transparent 72%);
+        opacity: .9;
+      }
+      /* 噪点：胶片颗粒。铺在表面之上的极薄一层，只为了让"平色块"
+         有一点点物理质感——看不出颗粒，只觉得不那么塑料。 */
+      [data-iv-page] .iv-grain::after {
+        content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+        background-image: var(--iv-grain); background-size: 180px 180px;
+        opacity: .06; mix-blend-mode: overlay;
+      }
+
+      /* 暗角：屏幕四角收一点光。它让整块面板读成「一台设备」而不是
+         「一张铺开的纸」——但浓度必须低到说不出它在哪儿。 */
+      [data-iv-page]::after {
+        content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+        background: var(--iv-vignette);
+      }
+
+      /* ── 三层表面 ───────────────────────────────────────────────────── */
+      [data-iv-page] .iv-s1 { background: var(--iv-surface-1); border: 1px solid var(--iv-rule); box-shadow: var(--iv-elev-1); }
+      [data-iv-page] .iv-s2 { background: var(--iv-surface-2); border: 1px solid var(--iv-rule-soft); box-shadow: var(--iv-elev-2); }
+      [data-iv-page] .iv-s3 { background: var(--iv-surface-3); border: 1px solid var(--iv-rule-soft); box-shadow: var(--iv-elev-3); }
+
+      /* ── 凹面：输入框 / 页签槽 / 电平表底 ───────────────────────────── */
+      [data-iv-page] .iv-well {
+        background: var(--iv-well); box-shadow: var(--iv-inset);
+        border: 1px solid var(--iv-rule-soft); border-radius: 14px;
+      }
+      /* 凹槽里的内容（电平柱、进度）不要自己再带阴影。 */
+      [data-iv-page] .iv-well > * { position: relative; }
+
+      /* ── 动效 ───────────────────────────────────────────────────────── */
+      /* 入场用 backwards 而不是 both：动画结束后不保留样式，
+         否则 keyframe 里的 "transform: none" 会把悬停的位移压掉。 */
+      [data-iv-page] .iv-enter { animation: ivRise 320ms var(--iv-ease) backwards; animation-delay: calc(var(--iv-i, 0) * 40ms); }
+      /* 可点/可关注的卡片：悬停抬一档（elev-1 → elev-2），跟手。 */
+      [data-iv-page] .iv-lift { transition: box-shadow 240ms var(--iv-ease), transform 240ms var(--iv-ease), border-color 240ms var(--iv-ease); }
+      [data-iv-page] .iv-lift:hover { box-shadow: var(--iv-elev-2); transform: translateY(-1px); border-color: var(--iv-rule); }
+      [data-iv-page] button { transition: background 160ms var(--iv-ease), border-color 160ms var(--iv-ease), color 160ms var(--iv-ease), transform 200ms var(--iv-ease), opacity 160ms var(--iv-ease), box-shadow 200ms var(--iv-ease); }
+      /* 悬停抬 1px；按下**陷下去**（内阴影），这才是实体键的手感。 */
       [data-iv-page] button:hover { transform: translateY(-1px); }
-      [data-iv-page] button:active { transform: scale(0.98); }
+      [data-iv-page] button:active {
+        transform: translateY(0) scale(0.99);
+        box-shadow: inset 0 2px 5px rgba(0,0,0,0.35) !important;
+      }
       [data-iv-page] button:disabled { transform: none; }
+      [data-iv-page] button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--iv-ring) !important; }
+      [data-iv-page] .iv-ghost { opacity: 0; transition: opacity 160ms var(--iv-ease); }
+      [data-iv-page] .iv-row:hover .iv-ghost, [data-iv-page] .iv-ghost:focus-visible { opacity: 1; }
+      /* 聚焦：槽里的内阴影**保留**，外面再套一圈光。只剩光圈会把"凹"丢掉。 */
       [data-iv-page] input:focus, [data-iv-page] textarea:focus, [data-iv-page] select:focus {
         border-color: var(--iv-accent) !important;
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--iv-accent) 18%, transparent) !important;
+        box-shadow: var(--iv-inset), 0 0 0 3px var(--iv-ring) !important;
       }
-      [data-iv-page] ::selection { background: color-mix(in srgb, var(--iv-accent) 22%, transparent); }
+      [data-iv-page] ::selection { background: var(--iv-accent-wash); }
       [data-iv-page] ::-webkit-scrollbar { width: 10px; height: 10px; }
       [data-iv-page] ::-webkit-scrollbar-track { background: transparent; }
       [data-iv-page] ::-webkit-scrollbar-thumb { background: var(--iv-rule); border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
       [data-iv-page] ::-webkit-scrollbar-thumb:hover { background: var(--iv-bone-faint); background-clip: content-box; }
+
+      /* ── 仪表语言 ───────────────────────────────────────────────────── */
+      /* 等宽数字：计时、计数、字数对齐着看。 */
+      [data-iv-page] .iv-nums { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+      /* 细分隔线：中间亮、两头淡——像一条被光扫过的缝，不是一条实线。 */
+      [data-iv-page] .iv-hairline {
+        height: 1px; width: 100%;
+        background: linear-gradient(90deg, transparent, var(--iv-rule) 18%, var(--iv-rule) 82%, transparent);
+      }
+      /* 眉标前的一颗小灯：让「01 / 02」这种序号看起来像刻度而不是文字。 */
+      [data-iv-page] .iv-tick::before {
+        content: ''; display: inline-block; width: 4px; height: 4px; border-radius: 1px;
+        background: currentColor; opacity: .55; margin-right: 8px; vertical-align: 2px;
+      }
+
       /* 舞台：内阴影 + 右上角一点冷光，让"空画面"也有纵深。 */
       [data-iv-page] [data-iv-stage]::after {
         content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
         box-shadow: inset 0 0 90px 24px color-mix(in srgb, var(--iv-stage) 70%, transparent);
         background: radial-gradient(70% 55% at 78% -8%, color-mix(in srgb, var(--iv-accent) 9%, transparent), transparent 62%);
+      }
+      /* 舞台是这一页最高的东西：一级专门的 elevation + 一圈内倒角。 */
+      [data-iv-page] [data-iv-stage] {
+        box-shadow: var(--iv-elev-stage), inset 0 0 0 1px color-mix(in srgb, var(--iv-bone) 8%, transparent) !important;
       }
       /* 未接通板：极淡的点阵，给"场"而不是"一块黑"。 */
       [data-iv-page] [data-iv-plate]::before {
@@ -491,8 +940,17 @@ window.__ModuleLoader__.load({
         background-image: radial-gradient(circle, color-mix(in srgb, var(--iv-bone) 10%, transparent) 1px, transparent 1.2px);
         background-size: 26px 26px;
       }
+      /* 呼吸：未接通时的环、REC 灯。6s，慢到不惹眼。 */
+      @keyframes ivBreathe { 0%, 100% { opacity: .45 } 50% { opacity: .85 } }
+      [data-iv-page] .iv-breathe { animation: ivBreathe 6s ease-in-out infinite; }
+
       @keyframes ivFade { from { opacity: 0 } to { opacity: 1 } }
       @keyframes ivRise { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
+      /* 提醒条：从页头下缘**落**下来（不是撑开一条），退场只做淡出。 */
+      @keyframes ivToastIn {
+        from { opacity: 0; transform: translateY(-10px) scale(0.985); }
+        to { opacity: 1; transform: none; }
+      }
       @keyframes ivShimmer { to { background-position: -220% 0; } }
       .iv-shimmer {
         background: linear-gradient(100deg, var(--iv-bone-faint) 30%, var(--iv-bone) 50%, var(--iv-bone-faint) 70%);
@@ -509,7 +967,15 @@ window.__ModuleLoader__.load({
     /** 把全局样式插进文档一次（重复调用无副作用）。 */
     function injectThemeCss() {
       try {
-        if (typeof document === 'undefined' || document.getElementById('dsh-iv-style') !== null) return
+        if (typeof document === 'undefined') return
+        const existing = document.getElementById('dsh-iv-style')
+        if (existing !== null) {
+          // **内容不同就更新。** 插件被热替换/重挂时，旧的 <style> 还在文档里；
+          // 只按 id 判断「已注入」会让旧规则一直生效——弹窗被页头切掉的问题
+          // 就可能是这样"修了但没生效"的。
+          if (existing.textContent !== THEME_CSS) existing.textContent = THEME_CSS
+          return
+        }
         const style = document.createElement('style')
         style.id = 'dsh-iv-style'
         style.textContent = THEME_CSS
@@ -693,6 +1159,29 @@ window.__ModuleLoader__.load({
       const date = new Date(ts)
       const pad = value => String(value).padStart(2, '0')
       return `${pad(date.getHours())}:${pad(date.getMinutes())}`
+    }
+
+    /**
+     * 新建一场面试时的**占位元信息**。
+     *
+     * 必须与 Host 的 `defaultIdentity()` 保持一致：`新建公司 2026-11-17`
+     * 这类值不是真名字，而是「还没填」。列表分组、简历入库命名、
+     * 行的第二行小字都当它没有——不然「新建公司」会变成一个组名。
+     */
+    const STUB_COMPANY = /^新建公司 \d{4}-\d{2}-\d{2}$/
+    const STUB_POSITION = /^新建岗位 \d{4}-\d{2}-\d{2}$/
+    const STUB_TITLE = /^(?:面试 \d{4}-\d{2}-\d{2}|新建公司 \d{4}-\d{2}-\d{2} · 新建岗位 \d{4}-\d{2}-\d{2})$/
+
+    function isPlaceholderCompany(value) {
+      return STUB_COMPANY.test(String(value ?? '').trim())
+    }
+
+    function isPlaceholderPosition(value) {
+      return STUB_POSITION.test(String(value ?? '').trim())
+    }
+
+    function isPlaceholderTitle(value) {
+      return STUB_TITLE.test(String(value ?? '').trim())
     }
 
     /**
@@ -1948,6 +2437,314 @@ window.__ModuleLoader__.load({
     }
 
     // ── small components ──────────────────────────────────────────────────
+    //
+    // 这一层是**共享语言的实现**（docs/DESIGN.md §7）。视图里不许再手写
+    // 阴影、描边、字号、圆角——它们都在这里与 30-theme.js 里各定义一次。
+    //
+    // 纪律：
+    //   1. 已有组件的**签名不许改**（并行开发时别人在按签名调用）；
+    //   2. 数组 children 的每个元素都要 key（React 警告必须是 0）；
+    //   3. 任何组件都不许在渲染期碰 document / window（SSR 探针会跑它）。
+
+    /**
+     * 三层表面之一。`tone` 决定它是纸面卡片、浮起面板、还是舞台。
+     *
+     * @param {{tone?: 'plain'|'raised'|'stage', pad?: number, style?: object, className?: string, children?: any}} props
+     */
+    function Panel(props) {
+      const pad = props.pad === undefined ? 20 : props.pad
+      return h('div', {
+        className: `iv-s${props.tone === 'raised' ? '2' : props.tone === 'stage' ? '3' : '1'} iv-grain${props.className === undefined ? '' : ` ${props.className}`}`,
+        style: {
+          borderRadius: props.tone === 'stage' ? RADIUS.xl : RADIUS.lg,
+          padding: pad,
+          ...(props.style ?? {}),
+        },
+      }, props.children)
+    }
+
+    /**
+     * 一行宁静的提示。
+     *
+     * **不是警告框，也不是说明段落。** 它只承担两件事：说清现在的**来源**，
+     * 或说清**失败之后能做什么**（AGENTS.md §7）。每屏最多两条——
+     * 想写第三段解释的时候，那条解释应该去 `Hint` 里，或者干脆删掉。
+     *
+     * @param {{tone?: 'muted'|'warn'|'ok', title?: string, style?: object, children?: any}} props
+     */
+    function Quiet(props) {
+      const color = props.tone === 'warn' ? C.amber : props.tone === 'ok' ? C.jade : C.boneFaint
+      return h('div', {
+        title: props.title,
+        style: { ...S.quiet, color, ...(props.style ?? {}) },
+      }, props.children)
+    }
+
+    /**
+     * 等宽小标签：眉标、计数、单位、时间。
+     *
+     * 仪表语言的基本单位——`meta` 档字号 + 字距 + 大写字形，
+     * 让「5/14」「REC」「D:\…」在同一条视线里对齐。
+     */
+    function Meta(props) {
+      const color = props.tone === 'amber' ? C.amber
+        : props.tone === 'jade' ? C.jade
+          : props.tone === 'tally' ? C.tally
+            : props.tone === 'bone' ? C.boneDim
+              : C.boneFaint
+      return h('span', {
+        title: props.title,
+        className: 'iv-nums',
+        style: {
+          fontFamily: F.mono, ...TYPE.meta, letterSpacing: '0.14em',
+          color, whiteSpace: 'nowrap', ...(props.style ?? {}),
+        },
+      }, props.children)
+    }
+
+    /** 圆角状态胶囊。`style` 只用来覆盖个别例外（例如品牌名不该被转成大写）。 */
+    function Pill(props) {
+      return h('span', { style: { ...S.pill(props.tone), ...(props.style ?? {}) } }, props.children)
+    }
+
+    /**
+     * 图标按钮：行内动作，默认低调。
+     *
+     * `ghost` 为 true 时默认透明，悬停才显形（左栏的归档/删除用它）——
+     * 一排文字按钮常驻会把「面试场次」变成一张表格。
+     */
+    function IconBtn(props) {
+      const disabled = props.disabled === true
+      const tone = props.tone
+      const color = disabled ? C.boneFaint
+        : tone === 'tally' ? C.tally
+          : tone === 'amber' ? C.amber
+            : C.boneDim
+      return h('button', {
+        type: 'button',
+        title: props.title ?? props.label,
+        'aria-label': props.label,
+        disabled,
+        className: props.ghost === true ? 'iv-ghost' : undefined,
+        style: {
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          padding: props.wide === true ? '6px 12px' : '6px',
+          minWidth: props.wide === true ? undefined : 28, minHeight: 28,
+          // 长写边框：调用方常常只覆盖 borderColor，简写+长写混用会被 React 警告。
+          borderRadius: RADIUS.sm, borderWidth: 1, borderStyle: 'solid', borderColor: 'transparent',
+          background: 'transparent',
+          color, cursor: disabled ? 'not-allowed' : 'pointer',
+          fontFamily: F.ui, fontSize: TYPE.sub.fontSize, lineHeight: 1,
+          ...(props.style ?? {}),
+        },
+        onClick: disabled ? undefined : props.onClick,
+      }, props.children)
+    }
+
+    /** 标量读数：值 + 单位 + 标签。等宽数字，右对齐着看。 */
+    function Stat(props) {
+      const color = props.tone === 'amber' ? C.amber : props.tone === 'jade' ? C.jade : props.tone === 'tally' ? C.tally : C.bone
+      return h('div', {
+        style: {
+          ...S.surface('raised'), borderRadius: RADIUS.md, padding: '10px 13px',
+          minWidth: 0, flex: '1 1 0',
+        },
+      }, [
+        h('div', {
+          key: 'v',
+          className: 'iv-nums',
+          style: { fontFamily: F.mono, fontSize: 18, lineHeight: 1.25, color, letterSpacing: '0.02em' },
+        }, [
+          String(props.value ?? ''),
+          props.unit === undefined
+            ? null
+            : h('span', { key: 'u', style: { fontSize: TYPE.meta.fontSize, color: C.boneFaint, marginLeft: 3 } }, props.unit),
+        ]),
+        h('div', { key: 'l', style: { ...TYPE.meta, fontFamily: F.mono, color: C.boneFaint, marginTop: 4, letterSpacing: '0.1em' } }, props.label),
+      ])
+    }
+
+    /**
+     * 空状态：**一句话 + 一个动作**。
+     *
+     * 不写说明书。空简历卡片不该解释「简历可以存进库重复使用」，
+     * 只需要「还没有简历」和那个能点的地方。
+     */
+    function Empty(props) {
+      return h('div', {
+        style: {
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 10, padding: '26px 18px', borderRadius: RADIUS.md,
+          border: `1px dashed ${C.rule}`, background: 'transparent', textAlign: 'center',
+        },
+      }, [
+        props.icon === undefined ? null : h('div', {
+          key: 'i',
+          style: { color: C.boneFaint, opacity: 0.7, lineHeight: 0 },
+        }, props.icon),
+        h('div', { key: 't', style: { ...TYPE.sub, color: C.boneDim } }, props.title),
+        props.action === undefined ? null : h('div', { key: 'a' }, props.action),
+      ])
+    }
+
+    /**
+     * 同时只允许一个「？」弹层活着。
+     *
+     * 上一版每个 `Hint` 各开各的：面试中右栏那四个状态 Pill 可以同时展开、
+     * 互相盖住，不手动再点一次就永远挂在页面上。
+     * 现在开一个就把别的关掉，并且点空白处 / Esc / 滚动都会收起。
+     */
+    const HINT_CLOSERS = new Set()
+    function closeOtherHints(keep) {
+      for (const close of [...HINT_CLOSERS]) {
+        if (close !== keep) close()
+      }
+    }
+
+    /**
+     * 悬停/点击展开的说明层。
+     *
+     * **它是"设计说明书"的收容所。** 那些必须存在、但不该占常驻版面的
+     * 解释（凭据从哪来、设备是谁挡的、模型下载到哪儿了）都进这里。
+     *
+     * 位置有三种，按容器形状选：
+     *   · 默认 `align="left"`：弹层挂在触发点**左缘**；
+     *   · `align="right"`：挂在**右缘**，适合右栏与卡片右侧；
+     *   · `inline`：撑开一行，永远不会被裁掉，代价是会把后面的内容推下去。
+     *
+     * **非 inline 的弹层用 `position: fixed` + 打开时量一次坐标。**
+     * 它经常活在 `overflow: auto/hidden` 的容器里（右栏、滚动的弹层层），
+     * 绝对定位会被容器边缘裁掉——上一版「面试中」右栏的？弹层就是这样
+     * 被截断的。fixed 不受容器裁剪；空间不够时自动翻到触发点上方。
+     */
+    function Hint(props) {
+      const [open, setOpen] = useState(false)
+      // 量出来的坐标只在客户端算；SSR 与首帧没有它，所以先不渲染弹层。
+      const [spot, setSpot] = useState(undefined)
+      const rootRef = useRef(null)
+      const inline = props.inline === true
+      const align = props.align === 'right' ? 'right' : 'left'
+      const maxWidth = props.maxWidth ?? 300
+
+      // 注册进「全局只留一个」的名单；卸载时退订。
+      useEffect(() => {
+        const close = () => setOpen(false)
+        HINT_CLOSERS.add(close)
+        return () => { HINT_CLOSERS.delete(close) }
+      }, [])
+
+      // 展开后：点别处、Esc、滚动/改窗口大小都收起。
+      // 用 mousedown 而不是 click：触发按钮自己的 click 在 mousedown 之后，
+      // 若在 mousedown 关掉，紧接着的 click 又把同一个打开——会闪一下。
+      useEffect(() => {
+        if (!open || inline) return undefined
+        if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
+        const onDown = event => {
+          const root = rootRef.current
+          if (root !== null && event.target instanceof Node && root.contains(event.target)) return
+          setOpen(false)
+        }
+        const onKey = event => { if (event.key === 'Escape') setOpen(false) }
+        // 页面/容器滚动时收起（弹层是 fixed 的，不跟着滚，留着会脱位）。
+        // 但弹层**自己**在滚时不算——长文案要能在弹层里滚着读。
+        const onMove = event => {
+          const root = rootRef.current
+          if (root !== null && event.target instanceof Node && root.contains(event.target)) return
+          setOpen(false)
+        }
+        if (typeof document.addEventListener === 'function') {
+          document.addEventListener('mousedown', onDown, true)
+          document.addEventListener('keydown', onKey)
+        }
+        if (typeof window.addEventListener === 'function') {
+          window.addEventListener('scroll', onMove, true)
+          window.addEventListener('resize', onMove)
+        }
+        return () => {
+          if (typeof document.removeEventListener === 'function') {
+            document.removeEventListener('mousedown', onDown, true)
+            document.removeEventListener('keydown', onKey)
+          }
+          if (typeof window.removeEventListener === 'function') {
+            window.removeEventListener('scroll', onMove, true)
+            window.removeEventListener('resize', onMove)
+          }
+        }
+      }, [open, inline])
+
+      /** 打开：先量触发点的位置，再关掉别人。 */
+      const openAt = () => {
+        const root = rootRef.current
+        if (root !== null && typeof window !== 'undefined' && typeof window.innerWidth === 'number') {
+          const rect = root.getBoundingClientRect()
+          const width = Math.min(maxWidth, Math.max(200, window.innerWidth - 16))
+          let left = align === 'right' ? rect.right - width : rect.left
+          left = Math.min(Math.max(8, left), Math.max(8, window.innerWidth - width - 8))
+          // 下面放不下就翻到触发点上方（用 bottom 定位，不用 transform——
+          // 入场动画也要用 transform，两者会打架）。
+          const below = window.innerHeight - rect.bottom
+          const flip = below < 200 && rect.top > below
+          setSpot(flip
+            ? { position: 'fixed', left, width, bottom: window.innerHeight - rect.top + 6 }
+            : { position: 'fixed', left, width, top: rect.bottom + 6 })
+        }
+        closeOtherHints()
+        setOpen(value => !value)
+      }
+
+      const toggle = () => {
+        if (open) { setOpen(false); return }
+        openAt()
+      }
+
+      return h('span', {
+        ref: rootRef,
+        style: { position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 },
+      }, [
+        h('span', { key: 'label', style: { minWidth: 0 } }, props.label),
+        h('button', {
+          key: 'toggle',
+          type: 'button',
+          'aria-expanded': open,
+          'aria-haspopup': inline ? undefined : 'dialog',
+          title: props.title ?? '说明',
+          style: {
+            flex: '0 0 auto', width: 16, height: 16, borderRadius: RADIUS.pill, cursor: 'pointer',
+            border: `1px solid ${C.rule}`, background: open ? C.ink700 : 'transparent',
+            color: open ? C.bone : C.boneFaint, fontFamily: F.mono, fontSize: 9.5, lineHeight: 1,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+          },
+          onClick: toggle,
+        }, '?'),
+        open
+          ? h('div', {
+            key: 'body',
+            role: inline ? undefined : 'dialog',
+            style: {
+              ...(inline
+                ? {
+                  flexBasis: '100%', width: '100%', marginTop: 6,
+                  ...S.surface('stage'), padding: '10px 12px',
+                  boxShadow: C.elev4,
+                  ...TYPE.sub, color: C.boneDim, lineHeight: 1.7,
+                  animation: 'ivRise 180ms var(--iv-ease) both',
+                }
+                : {
+                  ...(spot ?? {}),
+                  // 高到放不下时在弹层内部滚，而不是超出屏幕。
+                  maxHeight: 'min(320px, calc(100vh - 24px))', overflowY: 'auto',
+                  zIndex: 140,
+                  ...S.surface('stage'), padding: '10px 12px',
+                  // 弹层是**飘在一切之上**的：用最高一级 elevation。
+                  boxShadow: C.elev4,
+                  ...TYPE.sub, color: C.boneDim, lineHeight: 1.7,
+                  animation: 'ivFade 140ms var(--iv-ease) backwards',
+                }),
+            },
+          }, props.children)
+          : null,
+      ])
+    }
 
     /**
      * A section with an eyebrow number, a serif title, and a right-hand slot.
@@ -1955,15 +2752,24 @@ window.__ModuleLoader__.load({
      * The eyebrow is a **step number** (01 / 02 / 03) — the preparation flow
      * really is a sequence (简历 → JD → 底稿), so numbering carries meaning
      * here rather than decorating.
+     *
+     * `index` 只影响入场错峰（`--iv-i`），不影响布局。
      */
     function Section(props) {
-      return h('div', { style: S.card }, [
-        h('div', {key: 'k1',  style: S.cardHead }, [
+      return h('div', {
+        className: 'iv-enter iv-lift',
+        style: { ...S.card, ...(props.style ?? {}), ['--iv-i']: props.index ?? 0 },
+      }, [
+        h('div', { key: 'k1', style: S.cardHead }, [
           props.step !== undefined
-            ? h('span', { key: 'step', style: { ...S.eyebrow, color: C.amber, paddingRight: 2 } }, props.step)
+            ? h('span', {
+              key: 'step',
+              className: 'iv-nums',
+              style: { ...S.eyebrow, color: C.amber, paddingRight: 2, letterSpacing: '0.18em' },
+            }, props.step)
             : null,
           h('span', { key: 'title', style: S.cardTitle }, props.title),
-          props.extra !== undefined ? h('div', { key: 'extra', style: { marginLeft: 'auto' } }, props.extra) : null,
+          props.extra !== undefined ? h('div', { key: 'extra', style: { marginLeft: 'auto', minWidth: 0 } }, props.extra) : null,
         ]),
         props.children,
       ])
@@ -1971,13 +2777,16 @@ window.__ModuleLoader__.load({
 
     /** A text field. */
     function Field(props) {
-      return h('div', { style: { marginBottom: 12 } }, [
+      return h('div', { style: { marginBottom: 10, minWidth: 0 } }, [
         h('label', { key: 'l', style: S.label }, props.label),
         h('input', {
           key: 'i',
           style: S.input,
           value: props.value ?? '',
           placeholder: props.placeholder,
+          type: props.type ?? 'text',
+          autoComplete: props.autoComplete ?? 'off',
+          spellCheck: false,
           onChange: event => props.onChange(event.target.value),
         }),
       ])
@@ -1985,14 +2794,16 @@ window.__ModuleLoader__.load({
 
     /** A textarea. */
     function Area(props) {
-      return h('div', { style: { marginBottom: 12 } }, [
+      return h('div', { style: { marginBottom: 10, minWidth: 0 } }, [
         h('label', { key: 'l', style: S.label }, props.label),
         h('textarea', {
           key: 't',
-          style: S.textarea,
+          style: props.style === undefined ? S.textarea : { ...S.textarea, ...props.style },
           value: props.value ?? '',
           placeholder: props.placeholder,
+          spellCheck: false,
           onChange: event => props.onChange(event.target.value),
+          onKeyDown: props.onKeyDown,
         }),
       ])
     }
@@ -2009,27 +2820,33 @@ window.__ModuleLoader__.load({
       return h('div', null, [
         h('button', {
           key: 'toggle',
+          type: 'button',
           style: {
             display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-            background: 'transparent', border: 'none', padding: '4px 0 10px',
-            cursor: 'pointer', color: C.bone, fontFamily: F.ui, fontSize: 13, textAlign: 'left',
+            background: 'transparent', border: 'none', padding: '2px 0 10px',
+            cursor: 'pointer', color: C.bone, fontFamily: F.ui, fontSize: TYPE.body.fontSize, textAlign: 'left',
           },
           onClick: () => setOpen(value => !value),
         }, [
           h('span', {
             key: 'chevron',
             style: {
-              display: 'inline-block', width: 0, height: 0,
-              borderLeft: '5px solid transparent', borderRight: '5px solid transparent',
-              borderTop: open ? '6px solid transparent' : '6px solid ' + C.boneFaint,
+              display: 'inline-block', width: 0, height: 0, flex: '0 0 auto',
+              borderLeft: '4.5px solid transparent', borderRight: '4.5px solid transparent',
+              borderTop: `5.5px solid ${C.boneFaint}`,
               transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
-              transition: 'transform 160ms ease',
+              transition: 'transform 160ms var(--iv-ease)',
             },
           }),
-          h('span', { key: 'label', style: { flex: '1 1 auto' } }, props.summary),
-          props.badge !== undefined ? h('span', { key: 'badge', style: S.pill('faint') }, props.badge) : null,
+          h('span', {
+            key: 'label',
+            style: { flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+          }, props.summary),
+          props.badge !== undefined ? h(Meta, { key: 'badge' }, props.badge) : null,
         ]),
-        open ? h('div', { key: 'body', style: { borderTop: `1px solid ${C.ruleSoft}`, paddingTop: 12 } }, props.children) : null,
+        open
+          ? h('div', { key: 'body', style: { borderTop: `1px solid ${C.ruleSoft}`, paddingTop: 12 } }, props.children)
+          : null,
       ])
     }
 
@@ -2041,26 +2858,25 @@ window.__ModuleLoader__.load({
       return h('div', {
         style: {
           display: 'flex', gap: 12, alignItems: 'flex-start',
-          padding: '10px 0', borderBottom: `1px solid ${C.ruleSoft}`,
+          padding: '9px 0', borderBottom: `1px solid ${C.ruleSoft}`,
         },
       }, [
-        h('span', { key: 'lvl', style: S.pill(levelTone) }, levelText),
+        h(Pill, { key: 'lvl', tone: levelTone }, levelText),
         h('div', { key: 'body', style: { flex: '1 1 auto', minWidth: 0 } }, [
           h('div', {
             key: 'topic',
             style: {
-              fontSize: 13, color: item.probed === true ? C.boneFaint : C.bone,
+              fontSize: TYPE.body.fontSize, lineHeight: 1.6,
+              color: item.probed === true ? C.boneFaint : C.bone,
               textDecoration: item.probed === true ? 'line-through' : 'none',
             },
           }, item.topic),
           item.why !== undefined && item.why !== ''
-            ? h('div', { key: 'why', style: { fontSize: 11.5, color: C.boneFaint, marginTop: 4, lineHeight: 1.55 } }, item.why)
+            ? h('div', { key: 'why', style: { ...TYPE.sub, color: C.boneFaint, marginTop: 3 } }, item.why)
             : null,
         ]),
-        h('span', {
-          key: 'state',
-          style: { fontFamily: F.mono, fontSize: 10.5, color: item.probed === true ? C.jade : C.boneFaint, whiteSpace: 'nowrap' },
-        }, item.probed === true ? '已问' : '待问'),
+        h(Meta, { key: 'state', tone: item.probed === true ? 'jade' : undefined },
+          item.probed === true ? '已问' : '待问'),
       ])
     }
 
@@ -2075,18 +2891,19 @@ window.__ModuleLoader__.load({
       return h('span', {
         style: {
           display: 'inline-flex', alignItems: 'center', gap: 7,
-          fontFamily: F.mono, fontSize: 10.5, letterSpacing: '0.14em',
+          fontFamily: F.mono, ...TYPE.meta, letterSpacing: '0.16em',
           color: on ? C.tally : C.boneFaint,
         },
       }, [
         h('span', {
           key: 'lamp',
+          className: on ? 'iv-breathe' : undefined,
           style: {
-            width: 7, height: 7, borderRadius: 999, display: 'block',
+            width: 7, height: 7, borderRadius: RADIUS.pill, display: 'block',
             background: on ? C.tally : 'transparent',
             border: `1px solid ${on ? C.tally : C.boneFaint}`,
             boxShadow: on ? `0 0 0 3px ${TONES.tally.wash}, 0 0 14px ${TONES.tally.glow}` : 'none',
-            transition: 'box-shadow 200ms ease',
+            transition: 'box-shadow 200ms var(--iv-ease)',
           },
         }),
         h('span', { key: 'text' }, on ? 'REC' : 'STBY'),
@@ -2114,11 +2931,13 @@ window.__ModuleLoader__.load({
           top: absolute ? 14 : undefined,
           right: absolute ? 16 : undefined,
           display: 'flex', alignItems: 'center', gap: 12,
-          padding: '5px 11px', borderRadius: 8, background: C.clock,
-          border: `1px solid ${C.rule}`,
+          padding: '5px 11px', borderRadius: RADIUS.sm, background: C.clock,
+          border: `1px solid ${C.rule}`, backdropFilter: 'blur(10px) saturate(1.2)',
+          // 压在画面上的徽标要**浮**在画面之上：内高光 + 一层短影。
+          boxShadow: `inset 0 1px 0 ${C.hiSoft}, 0 1px 3px rgba(0,0,0,0.45), 0 8px 20px -14px ${C.shadow}`,
         },
       }, [
-        h('span', { key: 't', style: { ...S.mono, fontSize: 12, color: C.boneDim, letterSpacing: '0.06em' } },
+        h(Meta, { key: 't', tone: 'bone', style: { letterSpacing: '0.08em', fontSize: 12 } },
           formatClock(props.durationMs ?? 0)),
         h(Tally, { key: 'r', on: props.recording === true }),
       ])
@@ -2134,7 +2953,15 @@ window.__ModuleLoader__.load({
       const segments = 18
       const lit = Math.round(Math.min(1, props.level ?? 0) * segments)
       const hot = lit >= segments - 2
-      return h('div', { style: { display: 'flex', gap: 2, alignItems: 'flex-end', height: 16 } },
+      // 电平表装在**凹槽**里：真调音台的表头是嵌进面板的，不是浮在上面。
+      return h('div', {
+        style: {
+          display: 'flex', gap: 2, alignItems: 'flex-end',
+          padding: '4px 7px', borderRadius: 7,
+          background: C.well, boxShadow: C.inset,
+          border: `1px solid ${C.ruleSoft}`,
+        },
+      },
         Array.from({ length: segments }, (_, index) => {
           const on = index < lit
           const height = 6 + Math.round((index / segments) * 10)
@@ -2145,7 +2972,9 @@ window.__ModuleLoader__.load({
               width: 4, height: `${height}px`, borderRadius: 1,
               background: on ? color : C.ink700,
               opacity: on ? 1 : 0.55,
-              transition: 'background 80ms linear',
+              // 亮起的段自带一点自己的光——LED 是发光的，不是涂色的。
+              boxShadow: on ? `0 0 6px ${color}` : 'none',
+              transition: 'background 80ms linear, box-shadow 80ms linear',
             },
           })
         })
@@ -2153,7 +2982,7 @@ window.__ModuleLoader__.load({
           h('span', {
             key: 'peak',
             style: {
-              marginLeft: 6, fontFamily: F.mono, fontSize: 9.5,
+              marginLeft: 6, fontFamily: F.mono, ...TYPE.nano,
               color: hot ? C.tally : C.boneFaint, letterSpacing: '0.08em',
             },
           }, hot ? 'PEAK' : ''),
@@ -2170,15 +2999,22 @@ window.__ModuleLoader__.load({
         if (listItems.length === 0) return
         rendered.push(h('ul', {
           key: `ul${rendered.length}`,
-          style: { margin: '6px 0 12px', paddingLeft: 20, lineHeight: 1.75 },
+          style: { margin: '6px 0 14px', paddingLeft: 20, lineHeight: 1.85 },
         }, listItems.map((item, index) => h('li', {
           key: `li${index}`,
-          style: { fontSize: 13, color: C.boneDim, marginBottom: 3 },
+          style: { fontSize: TYPE.body.fontSize, color: C.boneDim, marginBottom: 4 },
         }, inline(item)))))
         listItems = []
       }
       for (const line of blocks) {
         const trimmed = line.trim()
+        // **列表项的折行。** 简历里一条 bullet 经常被手工折成两行
+        // （第二行缩进两个空格）。不接上的话，它会被渲染成一段独立的
+        // 段落，读起来像"这条 bullet 后面跟了一句无关的话"。
+        if (listItems.length > 0 && /^\s{2,}\S/.test(line)) {
+          listItems[listItems.length - 1] = `${listItems[listItems.length - 1]} ${trimmed}`
+          continue
+        }
         if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
           listItems.push(trimmed.slice(2))
           continue
@@ -2191,8 +3027,8 @@ window.__ModuleLoader__.load({
           rendered.push(h('div', {
             key: `tr${rendered.length}`,
             style: {
-              display: 'flex', gap: 14, padding: '7px 0',
-              borderBottom: `1px solid ${C.ruleSoft}`, fontSize: 12.5,
+              display: 'flex', gap: 14, padding: '8px 0',
+              borderBottom: `1px solid ${C.ruleSoft}`, fontSize: TYPE.sub.fontSize,
             },
           }, cells.map((cell, index) => h('div', {
             key: `td${index}`,
@@ -2204,14 +3040,15 @@ window.__ModuleLoader__.load({
         if (trimmed === '') continue
         const heading = /^(#{1,4})\s+(.*)$/.exec(trimmed)
         if (heading !== null) {
-          const size = [19, 16.5, 15, 14][heading[1].length - 1]
+          const size = [21, 17.5, 15.5, 14][heading[1].length - 1]
           rendered.push(h('div', {
             key: `h${rendered.length}`,
             style: {
-              fontFamily: F.voice, fontSize: size, fontWeight: 600,
-              marginTop: 20, marginBottom: 8, color: C.bone,
-              paddingBottom: heading[1].length === 2 ? 8 : 0,
-              borderBottom: heading[1].length === 2 ? `1px solid ${C.rule}` : 'none',
+              fontFamily: F.display, fontSize: size, fontWeight: 600,
+              marginTop: heading[1].length === 1 ? 8 : 22, marginBottom: 9, color: C.bone,
+              letterSpacing: '0.012em', lineHeight: 1.35,
+              paddingBottom: heading[1].length <= 2 ? 8 : 0,
+              borderBottom: heading[1].length <= 2 ? `1px solid ${C.ruleSoft}` : 'none',
             },
           }, inline(heading[2])))
           continue
@@ -2220,15 +3057,15 @@ window.__ModuleLoader__.load({
           rendered.push(h('div', {
             key: `q${rendered.length}`,
             style: {
-              borderLeft: `2px solid ${C.amber}`, paddingLeft: 14, margin: '10px 0',
-              color: C.boneDim, fontFamily: F.voice, fontSize: 14, lineHeight: 1.7,
+              borderLeft: `2px solid ${C.amber}`, paddingLeft: 14, margin: '12px 0',
+              color: C.boneDim, fontFamily: F.display, fontSize: 14.5, lineHeight: 1.75,
             },
           }, inline(trimmed.slice(2))))
           continue
         }
         rendered.push(h('div', {
           key: `p${rendered.length}`,
-          style: { fontSize: 13, color: C.boneDim, lineHeight: 1.85, marginBottom: 10 },
+          style: { fontSize: TYPE.body.fontSize, color: C.boneDim, lineHeight: 1.85, marginBottom: 11 },
         }, inline(trimmed)))
       }
       flushList()
@@ -2248,7 +3085,10 @@ window.__ModuleLoader__.load({
         if (token.startsWith('`')) {
           pieces.push(h('code', {
             key: `i${key++}`,
-            style: { ...S.mono, background: C.field, padding: '2px 6px', borderRadius: 5, fontSize: 12, color: C.amber },
+            style: {
+              ...S.mono, background: C.field, padding: '2px 6px', borderRadius: 5,
+              fontSize: TYPE.sub.fontSize, color: C.amber, border: `1px solid ${C.ruleSoft}`,
+            },
           }, token.slice(1, -1)))
         } else if (token.startsWith('**')) {
           pieces.push(h('strong', { key: `i${key++}`, style: { color: C.bone, fontWeight: 600 } }, token.slice(2, -2)))
@@ -2268,21 +3108,11 @@ window.__ModuleLoader__.load({
      * （key 不能从 props 透传，React 会把它摘掉）。这里用数据驱动
      * 的 map，每行自带 key，key 由 React 直接管理。
      *
-     * @param {{key: string, label: string, value: string|number}} row
+     * @param {{key: string, label: string, value: string|number, unit?: string, tone?: string}} row
      */
     function statTile(row) {
-      return h('div', {
-        key: row.key,
-        style: {
-          background: C.ink850, border: `1px solid ${C.rule}`, borderRadius: 11,
-          padding: '12px 14px',
-        },
-      }, [
-        h('div', { key: 'v', style: { ...S.mono, fontSize: 19, color: C.bone, letterSpacing: '0.02em' } }, String(row.value)),
-        h('div', { key: 'l', style: { fontSize: 11, color: C.boneFaint, marginTop: 3 } }, row.label),
-      ])
+      return h(Stat, { key: row.key, value: row.value, unit: row.unit, label: row.label, tone: row.tone })
     }
-
 
     /**
      * 离开面试间前的确认弹窗。
@@ -2304,7 +3134,7 @@ window.__ModuleLoader__.load({
               : '离开会关闭正在使用的摄像头与麦克风。'),
           h('label', {
             key: 'r',
-            style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: 12, color: C.boneDim, cursor: 'pointer' },
+            style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: TYPE.sub.fontSize, color: C.boneDim, cursor: 'pointer' },
           }, [
             h('input', {
               key: 'c', type: 'checkbox', checked: guard.remember === true,
@@ -2328,36 +3158,65 @@ window.__ModuleLoader__.load({
 
     // ── views ─────────────────────────────────────────────────────────────
 
+    /** 简历库里的一行用的是「几月几日」这种短日期，不写年份。 */
+    function shortDate(value) {
+      if (typeof value !== 'number' || value <= 0) return ''
+      const date = new Date(value)
+      return `${date.getMonth() + 1}月${date.getDate()}日`
+    }
+
     /**
      * A preview of archived material, styled as a sheet of paper.
      *
      * 归档之后**要看得见**。一个只显示「已归档 4820 字」的空卡片，
      * 等于让人不知道到底存了些什么——那正是准备阶段最需要的信息。
+     *
+     * 纸面按 **md 渲染**（跟放大后的预览同一套），不再是一段等宽原文：
+     * 简历与 JD 本来就都是 markdown，渲染出来才读得进去。
      */
     function PaperPreview(props) {
       const text = String(props.text ?? '')
       const limit = 460
       const excerpt = text.length > limit ? `${text.slice(0, limit)}…` : text
       const clipped = text.length > limit
+      const open = props.onOpen
       return h('div', {
-        onClick: props.onOpen,
-        role: props.onOpen === undefined ? undefined : 'button',
-        tabIndex: props.onOpen === undefined ? undefined : 0,
-        title: props.onOpen === undefined ? undefined : '点击放大预览（可编辑）',
+        onClick: open,
+        onKeyDown: open === undefined
+          ? undefined
+          : event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            open()
+          },
+        role: open === undefined ? undefined : 'button',
+        tabIndex: open === undefined ? undefined : 0,
+        title: open === undefined ? undefined : '放大预览（可编辑）',
+        'aria-label': open === undefined ? undefined : '放大预览（可编辑）',
+        className: open === undefined ? undefined : 'iv-hover',
         style: {
-          position: 'relative', background: C.field, border: `1px solid ${C.rule}`,
-          borderRadius: 10, padding: '14px 16px', minHeight: 74,
-          cursor: props.onOpen === undefined ? undefined : 'zoom-in',
+          position: 'relative',
+          background: C.field,
+          border: `1px solid ${C.ruleSoft}`,
+          borderRadius: RADIUS.sm,
+          padding: '14px 16px',
+          minHeight: 74,
+          cursor: open === undefined ? undefined : 'zoom-in',
+          // 卷内材料是**一张摞在桌面上的纸**：顶边一线高光 + 一层贴合的影。
+          // 只有底色的话，它和卡片是同一种"平"。
+          boxShadow: `inset 0 1px 0 ${C.hiSoft}, 0 1px 2px ${C.shadow}, 0 10px 22px -20px ${C.shadow}`,
         },
       }, [
         h('div', {
           key: 't',
           style: {
-            fontFamily: F.voice, fontSize: 13.5, lineHeight: 1.85, color: C.boneDim,
-            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            maxHeight: clipped ? 196 : undefined, overflow: 'hidden',
+            maxHeight: clipped ? 188 : undefined, overflow: 'hidden',
+            // 卷内材料是**纸**：正文用衬线，跟报告页同一种阅读感。
+            fontFamily: F.display,
+            // md 渲染器自己带排版；这里只收一下边距，让纸面看起来是一整张。
+            marginBottom: clipped ? 0 : -2,
           },
-        }, excerpt === '' ? '（空）' : excerpt),
+        }, h(Markdown, { text: excerpt === '' ? '（空）' : excerpt })),
         clipped
           ? h('div', {
             key: 'f',
@@ -2367,60 +3226,460 @@ window.__ModuleLoader__.load({
             },
           })
           : null,
+        // 可以点开：右上角一枚极小的「放大」记号。不写字（版面文案纪律），
+        // 但让"这张纸可以点"这件事在视觉上说得出口。
+        open === undefined
+          ? null
+          : h('span', {
+            key: 'zoom',
+            'aria-hidden': true,
+            style: {
+              position: 'absolute', right: 9, top: 9,
+              width: 20, height: 20, borderRadius: RADIUS.pill,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: C.glass, border: `1px solid ${C.ruleSoft}`,
+              color: C.boneFaint, fontSize: 11, lineHeight: 1, pointerEvents: 'none',
+            },
+          }, '⤢'),
       ])
     }
 
     /**
-     * 放大预览：总览看摘要，点开后看全貌，还能一键进编辑。
+     * 放大后的材料窗口：**预览 / 编辑两种模式，编辑内容受保护**。
      *
-     * **为什么要有它。** 卡片是固定高度的——那是"总览"的尺寸，不是"阅读"的尺寸。
-     * 想通读全文的人不该被迫在 196px 高的框里滚来滚去。
+     * **为什么编辑只在放大的窗口里做。** 卡片是「总览」的尺寸，不是
+     * 「写作」的尺寸——在 200px 高的框里改一份几千字的简历，光标都看不全。
+     * 所以卡片上的【放大】【修改】都去掉了：点纸面就是放大，放大之后
+     * 默认是渲染过的预览（md），切到编辑才是**保真源码**。
+     *
+     * **哪些操作会被拦住。** 有未保存改动时，点遮罩 / Esc / 关闭都不会关窗，
+     * 而是浮出一条黄色警告，并给一个「放弃修改」的出路——「关不掉」
+     * 不能变成「没有出路」（AGENTS.md §7）。
+     *
+     * 保存的分流在窗口里完成（不叠第二层弹窗）：
+     *   简历 → 先问「覆盖原简历 / 存为新简历」，后者接着问名字；
+     *   JD   → 直接保存，一个职位一份 JD，没有第二个容器。
+     *
+     * @param {{
+     *   kind: 'resume'|'jd', title: string, text: string,
+     *   initialMode?: 'preview'|'edit', linked?: boolean, suggestedTitle?: string,
+     *   onSave: (text: string, choice?: 'overwrite'|'new', name?: string) => Promise<boolean>,
+     *   onClose: () => void,
+     * }} props
      */
-    function MaterialPreview(props) {
-      const { title, text, onClose, onEdit } = props
+    function MaterialDialog(props) {
+      const { kind, title, text, linked, suggestedTitle, onClose, onSave, onUpload } = props
+      const [mode, setMode] = useState(props.initialMode === 'edit' ? 'edit' : 'preview')
+      // 上传/粘贴进来的文字先落在草稿里；**没保存就不属于任何文件**。
+      const [draft, setDraft] = useState(props.initialText !== undefined ? props.initialText : text)
+      const [busy, setBusy] = useState(false)
+      // undefined → choice → name。只在「简历保存」时走到 choice/name。
+      const [saveStep, setSaveStep] = useState(undefined)
+      const [name, setName] = useState(suggestedTitle ?? '')
+      // 警告时窗口自己镶一圈琥珀色，让"没关掉"有可见的因果。
+      const [warned, setWarned] = useState(false)
+      const warnTimer = useRef(undefined)
+      const dirty = draft !== text
+
+      useEffect(() => () => {
+        if (warnTimer.current !== undefined) clearTimeout(warnTimer.current)
+      }, [])
+
+      /** 关不掉的唯一原因是有未保存的改动；给警告，也给「放弃修改」。 */
+      const warnUnsaved = () => {
+        setWarned(true)
+        if (warnTimer.current !== undefined) clearTimeout(warnTimer.current)
+        warnTimer.current = setTimeout(() => setWarned(false), 2600)
+      }
+
+      // Esc 与「关闭」走同一条判定。用 ref 拿最新的 dirty/saveStep，
+      // 这样监听器只挂一次，不会因为每次输入都重挂。
+      const latest = useRef({ dirty, saveStep })
+      latest.current = { dirty, saveStep }
+      const requestClose = () => {
+        if (latest.current.saveStep !== undefined) { setSaveStep(undefined); return }
+        if (latest.current.dirty) { warnUnsaved(); return }
+        onClose()
+      }
+      const requestCloseRef = useRef(requestClose)
+      requestCloseRef.current = requestClose
       useEffect(() => {
         if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
-        const handler = event => { if (event.key === 'Escape') onClose() }
+        const handler = event => {
+          if (event.key === 'Escape') requestCloseRef.current()
+        }
         window.addEventListener('keydown', handler)
         return () => window.removeEventListener('keydown', handler)
-      }, [onClose])
-      const body = String(text ?? '')
+      }, [])
+
+      const commit = async (choice, resumeName) => {
+        setBusy(true)
+        try {
+          const ok = await onSave(draft, choice, resumeName)
+          if (ok === false) return
+          setSaveStep(undefined)
+          setMode('preview')
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      // 编辑模式下**有改动才有【保存】**：没改就不该有一个按钮等着被误点。
+      const startSave = () => {
+        if (!dirty || busy) return
+        if (kind === 'resume') { setSaveStep('choice'); return }
+        void commit()
+      }
+
+      const modeChip = (key, label) => h('button', {
+        key,
+        type: 'button',
+        'aria-pressed': mode === key,
+        style: {
+          padding: '3px 10px', borderRadius: RADIUS.sm, cursor: 'pointer',
+          borderWidth: 1, borderStyle: 'solid',
+          borderColor: mode === key ? C.rule : 'transparent',
+          background: mode === key ? C.surface2 : 'transparent',
+          color: mode === key ? C.bone : C.boneFaint,
+          fontFamily: F.ui, fontSize: TYPE.sub.fontSize, lineHeight: 1.7,
+          boxShadow: mode === key ? C.elev1 : 'none',
+        },
+        onClick: () => setMode(key),
+      }, label)
+
+      const strip = (key, children, tone) => h('div', {
+        key,
+        style: {
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          padding: '9px 12px', borderRadius: RADIUS.sm,
+          background: tone === 'warn' ? TONES.amber.wash : C.surface2,
+          borderWidth: 1, borderStyle: 'solid',
+          borderColor: tone === 'warn' ? TONES.amber.edge : C.ruleSoft,
+          animation: 'ivRise 160ms var(--iv-ease) backwards',
+        },
+      }, children)
+
+      const warnStrip = warned
+        ? strip('warned', [
+          h('span', {
+            key: 't',
+            style: { ...TYPE.sub, color: C.amber, fontWeight: 600, flex: '1 1 auto', minWidth: 0 },
+          }, '请先保存变更内容后再关闭！'),
+          h('button', {
+            key: 'x',
+            type: 'button',
+            style: S.btn(false, false),
+            title: '丢掉这次编辑，关闭窗口',
+            onClick: onClose,
+          }, '放弃修改'),
+        ], 'warn')
+        : null
+
+      // 简历的保存分流要**看这一场现在有没有简历**：
+      //   · 还没有（初次上传 / 粘贴）→ 先引导入库并命名，但也留「只存这场」；
+      //   · 已有、且来自简历库 → 覆盖原简历 / 存为新简历；
+      //   · 已有、但不来自库 → 保存到这场 / 存为新简历。
+      const firstSave = kind === 'resume' && text.trim() === ''
+      const primaryLabel = kind !== 'resume'
+        ? '保存'
+        : linked === true ? '覆盖原简历' : firstSave ? '存入简历库…' : '保存到这场'
+      const primaryRun = () => {
+        if (kind !== 'resume') { void commit(); return }
+        if (linked === true || !firstSave) { void commit('overwrite'); return }
+        setSaveStep('name')
+      }
+      const secondaryLabel = kind !== 'resume'
+        ? ''
+        : (linked === true || !firstSave) ? '存为新简历' : '只存到这场'
+      const secondaryRun = () => {
+        if (linked === true || !firstSave) { setSaveStep('name'); return }
+        void commit('overwrite')
+      }
+
+      const askStrip = saveStep === 'choice'
+        ? strip('ask', [
+          h('span', {
+            key: 'q',
+            style: { ...TYPE.sub, color: C.bone, flex: '0 0 auto' },
+          }, kind === 'resume' ? '这一版存到哪？' : '保存这一版？'),
+          h('button', {
+            key: 'ow',
+            type: 'button',
+            style: S.btn('primary', busy),
+            title: kind === 'resume'
+              ? (linked === true
+                ? '写进这一场，同时更新简历库里那一份'
+                : firstSave ? '先起个名字存进简历库，再写进这一场' : '只写进这一场面试')
+              : undefined,
+            onClick: primaryRun,
+          }, primaryLabel),
+          secondaryLabel === ''
+            ? null
+            : h('button', {
+              key: 'nw',
+              type: 'button',
+              style: S.btn(false, busy),
+              onClick: secondaryRun,
+            }, secondaryLabel),
+          h('button', {
+            key: 'cx',
+            type: 'button',
+            style: S.btn(false, busy),
+            onClick: () => setSaveStep(undefined),
+          }, '取消'),
+        ], 'warn')
+        : null
+
+      const nameStrip = saveStep === 'name'
+        ? strip('name', [
+          h('label', {
+            key: 'l',
+            style: { ...TYPE.meta, color: C.boneFaint, flex: '0 0 auto', letterSpacing: '0.1em' },
+          }, '简历名称'),
+          h('input', {
+            key: 'i',
+            type: 'text',
+            autoComplete: 'off',
+            spellCheck: false,
+            // 自动聚焦：这是用户点「存为新简历」之后唯一该做的事。
+            autoFocus: true,
+            placeholder: '公司 · 岗位',
+            value: name,
+            style: { ...S.input, flex: '1 1 220px', minWidth: 0, width: 'auto' },
+            onChange: event => setName(event.target.value),
+            onKeyDown: event => {
+              if (event.key !== 'Enter' || name.trim() === '' || busy) return
+              void commit('new', name.trim())
+            },
+          }),
+          h('button', {
+            key: 'ok',
+            type: 'button',
+            style: S.btn('primary', busy || name.trim() === ''),
+            onClick: () => { void commit('new', name.trim()) },
+          }, busy ? '保存中…' : '保存'),
+          h('button', {
+            key: 'bk',
+            type: 'button',
+            style: S.btn(false, busy),
+            onClick: () => setSaveStep('choice'),
+          }, '返回'),
+        ])
+        : null
+
+      const body = mode === 'edit'
+        ? h('textarea', {
+          key: 'src',
+          value: draft,
+          spellCheck: false,
+          autoFocus: props.initialMode === 'edit',
+          onChange: event => setDraft(event.target.value),
+          style: {
+            ...S.textarea,
+            flex: '1 1 auto', minHeight: 0, resize: 'none',
+            fontFamily: F.mono, lineHeight: 1.8, padding: '16px 18px',
+            whiteSpace: 'pre-wrap',
+          },
+        })
+        : h('div', {
+          key: 'paper',
+          style: {
+            flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
+            background: C.field, border: `1px solid ${C.ruleSoft}`,
+            borderRadius: RADIUS.md, padding: '22px 26px',
+          },
+        }, draft.trim() === ''
+          ? h(Quiet, null, '（空）')
+          : h(Markdown, { text: draft }))
+
       return h('div', {
         style: S.overlay,
         role: 'dialog',
         'aria-modal': 'true',
-        onClick: event => { if (event.target === event.currentTarget) onClose() },
+        'aria-label': title,
+        onClick: event => { if (event.target === event.currentTarget) requestClose() },
       }, [
         h('div', {
           key: 'card',
-          style: { ...S.modal, width: 'min(880px, 100%)', maxHeight: '84vh', display: 'flex', flexDirection: 'column', gap: 12 },
+          style: {
+            ...S.modal,
+            // **撑满可用高度。** 放大窗口不是一个小弹层：它是阅读/编辑一整份
+            // 简历或 JD 的地方。给 `maxHeight` 而不给 `height` 时，卡片只会
+            // 长到内容那么高——编辑模式里就是"缩成一小坨"。窗口够大，就用。
+            width: 'min(1080px, 100%)',
+            height: 'min(88vh, 940px)',
+            maxHeight: 'calc(100vh - 40px)',
+            display: 'flex', flexDirection: 'column', gap: 12,
+            padding: '18px 20px 20px',
+            // 只覆盖 boxShadow，不碰 border（S.modal 用的是 border 简写；
+            // 简写 + borderColor 长写混用会被 React 报 style 冲突）。
+            boxShadow: warned
+              ? `${C.elev4}, 0 0 0 3px ${TONES.amber.wash}`
+              : C.elev4,
+            transition: 'box-shadow 200ms var(--iv-ease)',
+          },
         }, [
-          h('div', { key: 'h', style: { display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' } }, [
-            h('div', { key: 't', style: S.cardTitle }, title),
-            h('div', { key: 'g', style: { ...S.hint, fontFamily: F.mono } }, `${body.length} 字`),
-            h('div', { key: 'sp', style: { marginLeft: 'auto', display: 'flex', gap: 8 } }, [
-              onEdit === undefined ? null : h('button', { key: 'e', style: S.btn('primary', false), onClick: onEdit }, '编辑'),
-              h('button', { key: 'c', style: S.btn(false, false), onClick: onClose }, '关闭'),
-            ]),
-          ]),
           h('div', {
-            key: 'body',
-            style: {
-              flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-              background: C.field, border: `1px solid ${C.rule}`, borderRadius: 14, padding: '20px 24px',
-            },
-          }, h('div', {
-            style: { fontFamily: F.voice, fontSize: 14, lineHeight: 2, color: C.bone, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
-          }, body === '' ? '（空）' : body)),
+            key: 'h',
+            style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 },
+          }, [
+            h('div', { key: 't', style: { ...S.cardTitle, flex: '0 0 auto' } }, title),
+            h(Meta, { key: 'c' }, `${draft.length} 字`),
+            dirty ? h(Pill, { key: 'd', tone: 'amber' }, '未保存') : null,
+            h('div', {
+              key: 'mode',
+              style: {
+                display: 'flex', gap: 2, padding: 2, marginLeft: 'auto',
+                background: C.well, borderRadius: RADIUS.sm,
+                border: `1px solid ${C.ruleSoft}`, boxShadow: C.inset,
+              },
+            }, [
+              modeChip('preview', '预览'),
+              modeChip('edit', '编辑'),
+            ]),
+            // 上传也是编辑的一部分：**先读进草稿，保存才写盘。**
+            // 这样「换个文件」和「改一段文字」走的是同一条保存路径。
+            onUpload === undefined
+              ? null
+              : h('label', {
+                key: 'up',
+                title: '用一份文件替换正文（先预览，保存才生效）',
+                style: {
+                  ...S.btn(false, busy),
+                  display: 'inline-flex', cursor: busy ? 'not-allowed' : 'pointer',
+                  opacity: busy ? 0.45 : 1,
+                },
+              }, [
+                '上传文件',
+                h('input', {
+                  key: 'i',
+                  type: 'file',
+                  accept: kind === 'resume'
+                    ? '.txt,.md,.json,.docx,.pdf,text/plain,text/markdown'
+                    : '.txt,.md,.markdown,text/plain,text/markdown',
+                  style: { display: 'none' },
+                  onChange: async event => {
+                    const file = event.target.files?.[0]
+                    event.target.value = ''
+                    if (file === undefined || busy) return
+                    setBusy(true)
+                    try {
+                      const next = await onUpload(file)
+                      if (next !== undefined) {
+                        setDraft(next)
+                        setMode('edit')
+                      }
+                    } finally {
+                      setBusy(false)
+                    }
+                  },
+                }),
+              ]),
+            mode === 'edit' && dirty && saveStep === undefined
+              ? h('button', {
+                key: 'save',
+                type: 'button',
+                style: S.btn('primary', busy),
+                onClick: startSave,
+              }, busy ? '保存中…' : '保存')
+              : null,
+            h('button', {
+              key: 'close',
+              type: 'button',
+              style: S.btn(false, false),
+              onClick: requestClose,
+            }, '关闭'),
+          ]),
+          askStrip,
+          nameStrip,
+          warnStrip,
+          body,
         ]),
       ])
+    }
+
+    /**
+     * 给简历起名字的小窗。
+     *
+     * **为什么非问不可。** 库里躺着一排「简历 2026-11-16」等于没存——
+     * 选的时候还是认不出来（AGENTS.md §6.7）。放大窗口里的「存为新简历」
+     * 用的是同一种命名输入（就在窗口里），这个弹窗负责「把已经在卷内的
+     * 这一份补录进库」。取消不会丢内容：这场面试里的正文早就存好了。
+     */
+    function NameResumeDialog(props) {
+      const [name, setName] = useState(props.defaultTitle ?? '')
+      const [busy, setBusy] = useState(false)
+      const done = async (value) => {
+        if (value === '') return
+        setBusy(true)
+        try { await props.onSave(value) } finally { setBusy(false) }
+      }
+      useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const handler = event => { if (event.key === 'Escape') props.onClose() }
+        window.addEventListener('keydown', handler)
+        return () => window.removeEventListener('keydown', handler)
+      }, [props.onClose])
+      return h('div', {
+        style: S.overlay,
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-label': '给简历起个名字',
+        onClick: event => { if (event.target === event.currentTarget) props.onClose() },
+      }, h('div', {
+        key: 'card',
+        style: {
+          ...S.modal, width: 'min(420px, 100%)',
+          display: 'flex', flexDirection: 'column', gap: 14,
+        },
+      }, [
+        h('div', { key: 't', style: S.cardTitle }, '简历名称'),
+        h('div', {
+          key: 'm',
+          style: { ...TYPE.sub, color: C.boneFaint, lineHeight: 1.7 },
+        }, '以后新建面试直接选它。'),
+        h('input', {
+          key: 'i',
+          type: 'text',
+          autoComplete: 'off',
+          spellCheck: false,
+          autoFocus: true,
+          placeholder: '例如：字节跳动 · 高级后端工程师',
+          value: name,
+          style: S.input,
+          onChange: event => setName(event.target.value),
+          onKeyDown: event => {
+            if (event.key !== 'Enter' || name.trim() === '' || busy) return
+            void done(name.trim())
+          },
+        }),
+        h('div', {
+          key: 'a',
+          style: { display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' },
+        }, [
+          h('button', {
+            key: 'skip',
+            type: 'button',
+            style: S.btn(false, busy),
+            title: '不存进简历库；这一场面试里的正文已经存好了',
+            onClick: () => props.onClose(),
+          }, '先不用'),
+          h('button', {
+            key: 'ok',
+            type: 'button',
+            style: S.btn('primary', busy || name.trim() === ''),
+            onClick: () => { void done(name.trim()) },
+          }, busy ? '保存中…' : '存进简历库'),
+        ]),
+      ]))
     }
 
     /**
      * The flow spine: where this session sits in the four-step arc.
      *
      * 一场面试要走四步：归档材料 → 底稿调研 → 面试中 → 评估表。
-     * 把这条脊线画出来，用户一眼知道自己卡在哪——比任何提示文案都快。
+     * 画成一条**细的仪表条**——点 + 连线 + 等宽标签。它一眼回答「卡在哪」，
+     * 不占版面，也不解释自己为什么这么画。
      */
     function FlowSpine(props) {
       const steps = [
@@ -2429,69 +3688,61 @@ window.__ModuleLoader__.load({
         { key: 'live', label: '面试中' },
         { key: 'review', label: '评估表' },
       ]
+      const items = []
+      steps.forEach((step, index) => {
+        const done = index < props.current
+        const current = index === props.current
+        items.push(h('div', {
+          key: `s${step.key}`,
+          style: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: '0 0 auto' },
+        }, [
+          h('span', {
+            key: 'dot',
+            className: current ? 'iv-breathe' : undefined,
+            style: {
+              width: 6, height: 6, borderRadius: RADIUS.pill, flex: '0 0 auto',
+              background: done ? C.jade : current ? C.amber : 'transparent',
+              border: `1px solid ${done ? C.jade : current ? C.amber : C.boneFaint}`,
+            },
+          }),
+          h(Meta, { key: 'l', tone: current ? 'amber' : done ? 'jade' : undefined }, step.label),
+        ]))
+        if (index < steps.length - 1) {
+          items.push(h('span', {
+            key: `sep${step.key}`,
+            style: {
+              height: 1, background: C.ruleSoft,
+              flex: '1 1 24px', minWidth: 12, maxWidth: 64, margin: '0 12px',
+            },
+          }))
+        }
+      })
       return h('div', {
         style: {
-          display: 'flex', alignItems: 'center', gap: 0, marginBottom: 18,
-          padding: '11px 16px', borderRadius: 11, background: C.ink850,
-          border: `1px solid ${C.rule}`, flexWrap: 'wrap',
+          display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 6,
+          marginBottom: 20, padding: '10px 16px',
+          ...S.surface('raised'), borderRadius: RADIUS.md,
         },
-      }, [
-        h('span', {
-          key: 'label',
-          style: { ...S.eyebrow, marginRight: 16, color: C.boneFaint },
-        }, '流程'),
-        ...steps.flatMap((step, index) => {
-          const done = index < props.current
-          const current = index === props.current
-          // 流程脊线的圆点也走语气色——它要表达「走到哪一步」，
-          // 和徽章、序号是同一套语言。
-          const dot = TONES[done ? 'jade' : current ? 'amber' : 'faint']
-          const items = [
-            h('span', {
-              key: `s${step.key}`,
-              style: {
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                fontSize: 12.5, color: current ? C.bone : done ? C.boneDim : C.boneFaint,
-              },
-            }, [
-              h('span', {
-                key: 'dot',
-                style: {
-                  width: 15, height: 15, borderRadius: 999, display: 'inline-flex',
-                  alignItems: 'center', justifyContent: 'center',
-                  fontFamily: F.mono, fontSize: 9, lineHeight: 1,
-                  border: `1px solid ${dot.edge}`,
-                  background: current ? dot.wash : 'transparent',
-                  color: dot.text,
-                },
-              }, done ? '✓' : String(index + 1)),
-              h('span', { key: 'l' }, step.label),
-            ]),
-          ]
-          if (index < steps.length - 1) {
-            items.push(h('span', {
-              key: `sep${step.key}`,
-              style: { width: 34, height: 1, background: C.rule, margin: '0 12px' },
-            }))
-          }
-          return items
-        }),
-      ])
+      }, items)
     }
 
     /** The preparation view: résumé, JD, and the interviewer's notes. */
     function PrepareView(props) {
       const { session, config, onChanged, notify } = props
-      const [editing, setEditing] = useState({ resume: false, jd: false })
       const [resumeText, setResumeText] = useState('')
       const [jdText, setJdText] = useState('')
       const [jdUrl, setJdUrl] = useState('')
       const [busy, setBusy] = useState(false)
       const [jdNote, setJdNote] = useState(undefined)
-      // 放大预览：卡片是总览，点开看全貌。
-      const [preview, setPreview] = useState(undefined)
+      // 放大窗口：`{kind, mode}`。所有编辑都在这里面做——卡片上不再有
+      // 局促的输入框，也不再【放大】【修改】两个按钮。
+      const [docDialog, setDocDialog] = useState(undefined)
+      // 简历入库前的命名弹窗（把已经在卷内的一份补录进库时）。
+      const [naming, setNaming] = useState(undefined)
       // 重新生成底稿是破坏性操作：第一次点只是"上膛"。
       const [regenArm, setRegenArm] = useState(false)
+      // 简历库默认收起：常驻版面只留计数与按钮。
+      const [libraryOpen, setLibraryOpen] = useState(false)
       // 这场面试叫什么、在哪家、什么岗位——用户可以直接改。
       const [identity, setIdentity] = useState({ title: '', company: '', position: '' })
       const profilesPoll = usePoll(
@@ -2510,8 +3761,10 @@ window.__ModuleLoader__.load({
 
       const sessionId = session?.session?.id
 
-      // 服务端会从 JD 正文里提炼公司与岗位（提炼不出来就留空）。
-      // 提炼出来的值要显示出来，也允许用户改——**认错了就该能改**。
+      // 元信息只认**显式写入**：助手用 `interview_prepare` 写，用户在这三格里写。
+      // 占位值（`新建公司 2026-11-17` / `新建岗位 2026-11-17` / 老默认的
+      // 「面试 2026-11-17」）等于「还没填」，所以输入框里显示为空——让用户
+      // 看到例子，而不是看到一串假的日期名字。
       const identityTouched = useRef(false)
       useEffect(() => { identityTouched.current = false }, [session?.session?.id])
       useEffect(() => {
@@ -2519,10 +3772,13 @@ window.__ModuleLoader__.load({
         if (meta === undefined) return
         // 用户正在改的时候别覆盖他的输入。
         if (identityTouched.current) return
+        const title = String(meta.title ?? '')
+        const company = String(meta.company ?? '')
+        const position = String(meta.position ?? '')
         setIdentity({
-          title: meta.title ?? '',
-          company: meta.company ?? '',
-          position: meta.position ?? '',
+          title: isPlaceholderTitle(title) ? '' : title,
+          company: isPlaceholderCompany(company) ? '' : company,
+          position: isPlaceholderPosition(position) ? '' : position,
         })
       }, [session?.session?.id, session?.session?.title, session?.session?.company, session?.session?.position])
 
@@ -2538,16 +3794,26 @@ window.__ModuleLoader__.load({
       const resumes = resumesPoll.data?.resumes ?? []
 
       // 存进简历库时给个**能认出来**的名字。
-      // 「面试 2026-11-16」这种默认标题进库等于没存——库里全是这种名字，
-      // 选的时候还是认不出来。
+      // 「面试 2026-11-16」这种默认标题、或「新建公司 2026-11-17」这种占位
+      // 元信息进库等于没存——库里全是这种名字，选的时候还是认不出来。
       const libraryTitle = (() => {
-        const company = (session?.session?.company ?? '').trim()
-        const position = (session?.session?.position ?? '').trim()
+        const rawCompany = (session?.session?.company ?? '').trim()
+        const rawPosition = (session?.session?.position ?? '').trim()
+        const company = isPlaceholderCompany(rawCompany) ? '' : rawCompany
+        const position = isPlaceholderPosition(rawPosition) ? '' : rawPosition
         if (company !== '' && position !== '') return `${company} · ${position}`
         if (position !== '') return position
         if (company !== '') return company
         const title = (session?.session?.title ?? '').trim()
-        return /^面试 \d{4}-\d{2}-\d{2}$/.test(title) ? '' : title
+        return isPlaceholderTitle(title) ? '' : title
+      })()
+
+      // 存进库时给个**能认出来**的名字；连公司/岗位都还没有时用日期兜底，
+      // 至少比空着强（名字输入框里用户随时能改）。
+      const resumeNameSuggestion = (() => {
+        if (libraryTitle !== '') return libraryTitle
+        const now = new Date()
+        return `简历 ${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
       })()
 
       // 助手把 JD 写回来之后，正文得跟着更新。
@@ -2564,12 +3830,14 @@ window.__ModuleLoader__.load({
         void docsPoll.refresh()
       }, [docFingerprint])
 
-      // 拿到正文就填进编辑器（正在编辑时不动用户的光标）。
+      // 拿到正文就填进编辑器（放大窗口开着的时候，不覆盖正在改的草稿）。
+      const docDialogKindRef = useRef(docDialog?.kind)
+      docDialogKindRef.current = docDialog?.kind
       useEffect(() => {
         const documents = docsPoll.data
         if (documents === undefined) return
-        if (!editing.resume) setResumeText(documents.resume ?? '')
-        if (!editing.jd) setJdText(documents.jd ?? '')
+        if (docDialogKindRef.current !== 'resume') setResumeText(documents.resume ?? '')
+        if (docDialogKindRef.current !== 'jd') setJdText(documents.jd ?? '')
         setJdUrl(previous => previous === '' ? (documents.jdMeta?.url ?? '') : previous)
       }, [docsPoll.data])
 
@@ -2577,7 +3845,7 @@ window.__ModuleLoader__.load({
         setBusy(true)
         try {
           const result = await apiPost(`profiles/${profileId}/apply`, { sessionId })
-          notify(`已继承档案「${result.title}」的 ${result.items} 个考点`, '继承来的考点会被标记出来。', 'ok')
+          notify(`已继承档案「${result.title}」的 ${result.items} 个考点`, undefined, 'ok')
           onChanged()
         } catch (failure) {
           notify('继承失败', failure instanceof Error ? failure.message : String(failure), 'error')
@@ -2590,7 +3858,7 @@ window.__ModuleLoader__.load({
         setBusy(true)
         try {
           const result = await apiPost(`profiles/${profileId}/sync`, { sessionId })
-          notify(`已回写档案（${result.items} 个考点）`, '下次面同一个岗位就有基线了。', 'ok')
+          notify(`已回写档案（${result.items} 个考点）`, undefined, 'ok')
           onChanged()
         } catch (failure) {
           notify('回写失败', failure instanceof Error ? failure.message : String(failure), 'error')
@@ -2599,35 +3867,62 @@ window.__ModuleLoader__.load({
         }
       }, [sessionId, onChanged, notify])
 
-      const saveResume = useCallback(async () => {
+      /**
+       * 放大窗口里的「保存」。
+       *
+       * JD：一份职位一份 JD，保存就是保存，没有第二个容器。
+       *
+       * 简历：先问存到哪——
+       *   · **覆盖原简历**：写进这一场；如果这份本来来自简历库，库里那一份
+       *     也一起更新（否则下次选它还是旧版，用户会以为保存没生效）；
+       *   · **存为新简历**：先在库里建一份，再把它用到这一场（快照一起写）。
+       *
+       * 返回 true = 已保存；false = 没存上（窗口留在编辑态，草稿不丢）。
+       */
+      const saveDocument = useCallback(async (nextText, choice, resumeName) => {
+        if (sessionId === undefined) return false
         setBusy(true)
         try {
-          await apiPost(`sessions/${sessionId}/resume`, { text: resumeText })
-          setEditing(previous => ({ ...previous, resume: false }))
-          notify('简历已归档', '助手现在读得到它了。', 'ok')
+          if (docDialog?.kind !== 'resume') {
+            await apiPost(`sessions/${sessionId}/jd`, { text: nextText, url: jdUrl })
+            setJdText(nextText)
+            notify('已保存', undefined, 'ok')
+          } else if (choice === 'new') {
+            const created = await apiPost('resumes', { text: nextText, title: resumeName })
+            const resumeId = created?.resume?.id
+            await apiPost(`sessions/${sessionId}/resume`, { text: nextText })
+            if (typeof resumeId === 'string' && resumeId !== '') {
+              // 关联 + 快照：这一场以后也认得出它来自库里哪一份。
+              await apiPost(`resumes/${resumeId}`, { sessionId })
+            }
+            setResumeText(nextText)
+            void resumesPoll.refresh()
+            notify('已存进简历库', resumeName, 'ok')
+          } else {
+            const linked = session?.session?.resumeId
+            if (typeof linked === 'string' && linked !== '') {
+              // **先更新库，再更新这一场**：库写失败时这一场还没动，重试是安全的。
+              await apiPost('resumes', { id: linked, text: nextText })
+              void resumesPoll.refresh()
+            }
+            await apiPost(`sessions/${sessionId}/resume`, { text: nextText })
+            setResumeText(nextText)
+            notify('已保存', undefined, 'ok')
+          }
           onChanged()
           void docsPoll.refresh()
+          return true
         } catch (failure) {
-          notify('简历没存上', failure instanceof Error ? failure.message : String(failure), 'error')
+          notify(
+            docDialog?.kind === 'resume' ? '简历没存上' : 'JD 没存上',
+            failure instanceof Error ? failure.message : String(failure),
+            'error',
+          )
+          return false
         } finally {
           setBusy(false)
         }
-      }, [sessionId, resumeText, onChanged, notify, docsPoll])
-
-      const saveJd = useCallback(async () => {
-        setBusy(true)
-        try {
-          await apiPost(`sessions/${sessionId}/jd`, { text: jdText, url: jdUrl })
-          setEditing(previous => ({ ...previous, jd: false }))
-          notify('JD 已归档', 'ok')
-          onChanged()
-          void docsPoll.refresh()
-        } catch (failure) {
-          notify('JD 没存上', failure instanceof Error ? failure.message : String(failure), 'error')
-        } finally {
-          setBusy(false)
-        }
-      }, [sessionId, jdText, jdUrl, onChanged, notify, docsPoll])
+      }, [sessionId, docDialog, jdUrl, session?.session?.resumeId, onChanged, notify, docsPoll, resumesPoll])
 
       const fetchJd = useCallback(async () => {
         if (jdUrl.trim() === '') return
@@ -2642,7 +3937,6 @@ window.__ModuleLoader__.load({
               url: result.url,
               meta: { title: result.title, sections: result.sections, warnings: [] },
             })
-            setEditing(previous => ({ ...previous, jd: false }))
             setJdNote({ ok: true, text: `抓到了：${result.text.length} 字${result.title !== '' ? `（${result.title}）` : ''}` })
             onChanged()
             void docsPoll.refresh()
@@ -2662,55 +3956,85 @@ window.__ModuleLoader__.load({
         }
       }, [jdUrl, sessionId, onChanged, docsPoll])
 
-      const uploadResume = useCallback(async event => {
-        const file = event.target.files?.[0]
-        if (file === undefined) return
+      /**
+       * 读一份文件，**只把文字拿回来，不落盘**。
+       *
+       * 上传也是「编辑」的一种：文字先进放大窗口，用户看过、改过、
+       * 点【保存】才写进这一场。以前上传即归档，等于替用户做了决定。
+       *
+       * @returns {Promise<string|undefined>} 读不出来就 undefined（并已提示原因）
+       */
+      const extractResumeFile = useCallback(async file => {
         setBusy(true)
         try {
           const dataBase64 = await readFileAsBase64(file)
           const result = await apiPost('resume/extract', { filename: file.name, mimeType: file.type, dataBase64 })
           if (result.ok === true) {
-            setResumeText(result.text)
-            await apiPost(`sessions/${sessionId}/resume`, { text: result.text })
-            setEditing(previous => ({ ...previous, resume: false }))
-            notify(`简历读到了 ${result.chars} 字`, result.warnings.length > 0 ? result.warnings.join(' ') : 'ok')
-            onChanged()
-            void docsPoll.refresh()
-          } else {
-            notify('这份文件读不出文字', result.warnings.join(' '), 'error')
+            notify(
+              `简历读到了 ${result.chars} 字`,
+              result.warnings.length > 0 ? result.warnings.join(' ') : undefined,
+              result.warnings.length > 0 ? 'warn' : 'ok',
+            )
+            return result.text
           }
+          notify('这份文件读不出文字', result.warnings.join(' '), 'error')
+          return undefined
         } catch (failure) {
           notify('上传失败', failure instanceof Error ? failure.message : String(failure), 'error')
+          return undefined
         } finally {
           setBusy(false)
-          event.target.value = ''
         }
-      }, [sessionId, onChanged, notify, docsPoll])
+      }, [notify])
+
+      const extractJdFile = useCallback(async file => {
+        // **JD 只收纯文本。** 简历可以是 docx/pdf（有解析器），JD 没有这个必要：
+        // 一份 JD 就是一段可粘贴的文字，支持二进制格式只会带来乱码与状态分裂。
+        const lower = String(file.name ?? '').toLowerCase()
+        if (!/\.(txt|md|markdown|text)$/.test(lower)) {
+          notify('JD 只收纯文本', '请传 .txt 或 .md；其它格式先另存为纯文本，或把正文粘进来。', 'error')
+          return undefined
+        }
+        setBusy(true)
+        try {
+          const dataBase64 = await readFileAsBase64(file)
+          const result = await apiPost('resume/extract', {
+            filename: file.name,
+            mimeType: file.type,
+            dataBase64,
+            // 服务端也把一道关：扩展名能改，文件头骗不了人。
+            plainOnly: true,
+          })
+          if (result.ok === true) {
+            notify(`JD 读到了 ${result.chars} 字`, undefined, 'ok')
+            return result.text
+          }
+          notify('这份文件读不出文字', result.warnings.join(' '), 'error')
+          return undefined
+        } catch (failure) {
+          notify('上传失败', failure instanceof Error ? failure.message : String(failure), 'error')
+          return undefined
+        } finally {
+          setBusy(false)
+        }
+      }, [notify])
+
+      /** 空卡片上的「上传文件」：读出来，直接进放大窗口的编辑态。 */
+      const uploadResume = useCallback(async event => {
+        const file = event.target.files?.[0]
+        event.target.value = ''
+        if (file === undefined) return
+        const text = await extractResumeFile(file)
+        if (text !== undefined) setDocDialog({ kind: 'resume', mode: 'edit', initialText: text })
+      }, [extractResumeFile])
 
       const uploadJd = useCallback(async event => {
         const file = event.target.files?.[0]
+        event.target.value = ''
         if (file === undefined) return
-        setBusy(true)
-        try {
-          const dataBase64 = await readFileAsBase64(file)
-          const result = await apiPost('resume/extract', { filename: file.name, mimeType: file.type, dataBase64 })
-          if (result.ok === true) {
-            setJdText(result.text)
-            await apiPost(`sessions/${sessionId}/jd`, { text: result.text, url: jdUrl })
-            setEditing(previous => ({ ...previous, jd: false }))
-            notify(`JD 读到了 ${result.chars} 字`, 'ok')
-            onChanged()
-            void docsPoll.refresh()
-          } else {
-            notify('这份文件读不出文字', result.warnings.join(' '), 'error')
-          }
-        } catch (failure) {
-          notify('上传失败', failure instanceof Error ? failure.message : String(failure), 'error')
-        } finally {
-          setBusy(false)
-          event.target.value = ''
-        }
-      }, [sessionId, jdUrl, onChanged, notify, docsPoll])
+        const text = await extractJdFile(file)
+        if (text !== undefined) setDocDialog({ kind: 'jd', mode: 'edit', initialText: text })
+      }, [extractJdFile])
 
       // ── 简历库 ──────────────────────────────────────────────────────
       //
@@ -2719,14 +4043,14 @@ window.__ModuleLoader__.load({
       // 每场面试只引用它。
       const applyResume = useCallback(async resumeId => {
         setBusy(true)
+        setLibraryOpen(false)
         try {
           const result = await apiPost(`resumes/${resumeId}`, { sessionId })
           const title = result?.resume?.title ?? resumeId
           setResumeText(result?.resume?.text ?? '')
-          setEditing(previous => ({ ...previous, resume: false }))
           notify(
             `换上了「${title}」`,
-            '卷内存的是这一份的快照——以后改了简历，也不会动这场面试的记录。',
+            undefined,
             'ok',
           )
           onChanged()
@@ -2738,23 +4062,28 @@ window.__ModuleLoader__.load({
         }
       }, [sessionId, onChanged, notify, docsPoll])
 
-      /** 把这场面试的简历存进库。 */
-      const saveToLibrary = useCallback(async () => {
+      /** 命名之后真正入库：建一份 → 用到这一场（快照一起写）。 */
+      const saveNaming = useCallback(async title => {
+        const pending = naming
+        if (pending === undefined) return
         setBusy(true)
         try {
-          const result = await apiPost('resumes', { sessionId, title: libraryTitle })
-          notify(
-            '存进简历库了',
-            `以后新建面试可以直接选「${result?.resume?.title ?? '这份简历'}」。`,
-            'ok',
-          )
+          const created = await apiPost('resumes', { text: pending.text, title })
+          const resumeId = created?.resume?.id
+          if (typeof resumeId === 'string' && resumeId !== '') {
+            await apiPost(`resumes/${resumeId}`, { sessionId })
+          }
+          setNaming(undefined)
+          notify('存进简历库了', title, 'ok')
           void resumesPoll.refresh()
+          onChanged()
+          void docsPoll.refresh()
         } catch (failure) {
           notify('没存进去', failure instanceof Error ? failure.message : String(failure), 'error')
         } finally {
           setBusy(false)
         }
-      }, [sessionId, libraryTitle, notify, resumesPoll])
+      }, [naming, sessionId, notify, resumesPoll, onChanged, docsPoll])
 
       /** 从库里删掉一份简历。卷内已经用掉的快照不受影响。 */
       const deleteResume = useCallback(async resumeId => {
@@ -2771,33 +4100,28 @@ window.__ModuleLoader__.load({
       }, [notify, resumesPoll])
 
       // ── 这场面试叫什么 ────────────────────────────────────────────────
+      //
+      // 三格都原样提交，服务端负责归一化：
+      //   - 留空 = 没填 → 写回带日期的占位值（新建公司 / 新建岗位）；
+      //   - 标题留空 → 用「公司 · 岗位」拼；
+      //   - 用户改过标题 → 保留，不再跟着公司/岗位动。
       const saveIdentity = useCallback(async () => {
         setBusy(true)
         try {
-          const company = identity.company.trim()
-          const position = identity.position.trim()
-          const patch = { company, position }
-          // 标题还是默认的「面试 2026-11-16」，而岗位已经知道了——
-          // 那就把标题补成人话：**列表里一眼认得出来**。
-          const current = (session?.session?.title ?? '').trim()
-          if (/^面试 \d{4}-\d{2}-\d{2}$/.test(current)) {
-            const derived = company !== '' && position !== ''
-              ? `${company} · ${position}`
-              : (position !== '' ? position : company)
-            if (derived !== '') patch.title = derived
-          } else if (identity.title.trim() !== '') {
-            patch.title = identity.title.trim()
-          }
-          await apiPost(`sessions/${sessionId}`, patch)
+          await apiPost(`sessions/${sessionId}`, {
+            title: identity.title.trim(),
+            company: identity.company.trim(),
+            position: identity.position.trim(),
+          })
           identityTouched.current = false
-          notify('记下了', '列表会按新的岗位分组。', 'ok')
+          notify('记下了', undefined, 'ok')
           onChanged()
         } catch (failure) {
           notify('没改成', failure instanceof Error ? failure.message : String(failure), 'error')
         } finally {
           setBusy(false)
         }
-      }, [sessionId, identity, session?.session?.title, onChanged, notify])
+      }, [sessionId, identity, onChanged, notify])
 
       // ── 让助手去抓 JD ────────────────────────────────────────────────
       //
@@ -2813,14 +4137,13 @@ window.__ModuleLoader__.load({
         setBusy(true)
         try {
           const result = await apiPost('jd/request-agent', { sessionId, url: jdUrl.trim() })
-          const host = result?.hostSession ?? {}
           setJdNote({
             ok: true,
             text: `${result?.message ?? '已经交给助手了。'}`,
           })
           notify(
             '交给助手了',
-            `${result?.message ?? '已经交给助手了。'}（会话 id：${host.id ?? '未知'}）在 DSH 那边能看着它跑，抓到正文会自动回到这一场。`,
+            `${result?.message ?? '已经交给助手了。'}在 DSH 对话区能看到它跑；抓到的正文会自动回到这一场。`,
             'ok',
           )
         } catch (failure) {
@@ -2865,62 +4188,19 @@ window.__ModuleLoader__.load({
           ? 1
           : (session?.report ?? '') !== '' ? 3 : 2
 
-      /** One material slot: preview by default, editor on demand. */
-      const material = (options) => {
-        const open = options.editing
-        return h('div', { key: options.key }, [
-          open
-            ? h('div', { key: 'k2' }, [
-              h(Area, {key: 'k4', 
-                label: options.label,
-                value: options.value,
-                placeholder: options.placeholder,
-                onChange: options.onChange,
-              }),
-              h('div', { key: 'act', style: S.row }, [
-                h('button', {
-                  key: 'save',
-                  style: S.btn('primary', busy || options.value.trim() === ''),
-                  onClick: options.onSave,
-                }, options.saveLabel),
-                h('button', {
-                  key: 'cancel',
-                  style: S.btn(false, busy),
-                  onClick: options.onCancel,
-                }, '取消'),
-                options.upload !== undefined ? options.upload : null,
-              ]),
-            ])
-            : h('div', { key: 'k3' }, [
-              options.archived
-                ? h(PaperPreview, { key: 'p', text: options.archivedText, onOpen: options.onPreview })
-                : h('div', {
-                  key: 'empty',
-                  style: {
-                    border: `1px dashed ${C.rule}`, borderRadius: 10, padding: '18px 16px',
-                    color: C.boneFaint, fontSize: 12, lineHeight: 1.7,
-                    display: 'flex', alignItems: 'center', gap: 12,
-                  },
-                }, options.emptyHint),
-              h('div', { key: 'act', style: { ...S.row, marginTop: 12 } }, [
-                options.archived && options.onPreview !== undefined
-                  ? h('button', { key: 'zoom', style: S.btn(false, busy), onClick: options.onPreview }, '放大')
-                  : null,
-                options.archived
-                  ? h('button', { key: 'e', style: S.btn(false, busy), onClick: options.onEdit }, '修改')
-                  // **空的那份也要能打开编辑器。**
-                  // 空态上写着「或把正文粘进来」，却只有「上传文件」一个入口——
-                  // 承诺了却给不出路。新场次里没文件也照样得能贴简历。
-                  : h('button', { key: 'paste', style: S.btn(false, busy), onClick: options.onEdit }, '粘正文'),
-                options.upload !== undefined ? options.upload : null,
-                options.extraActions !== undefined ? options.extraActions : null,
-                options.archived
-                  ? h('span', { key: 'n', style: S.hint }, options.archivedNote)
-                  : null,
-              ]),
+      /** 一块卷内材料：没归档时是空态；归档后是一张**可以点开的纸**。 */
+      const material = options => h('div', { key: options.key }, [
+        options.archived
+          ? h(PaperPreview, { key: 'paper', text: options.archivedText, onOpen: options.onOpen })
+          : h(Empty, {
+            key: 'empty',
+            title: options.emptyTitle,
+            action: h('div', { style: S.row }, [
+              options.upload === undefined ? null : options.upload,
+              h('button', { key: 'paste', style: S.btn(false, busy), onClick: options.onOpen }, '粘正文'),
             ]),
-        ])
-      }
+          }),
+      ])
 
       const uploadResumeLabel = h('label', { key: 'up', style: { ...S.btn(false, busy), display: 'inline-block' } }, [
         '上传文件',
@@ -2932,138 +4212,268 @@ window.__ModuleLoader__.load({
       const uploadJdLabel = h('label', { key: 'up', style: { ...S.btn(false, busy), display: 'inline-block' } }, [
         '上传 JD',
         h('input', {
-          key: 'i', type: 'file', accept: '.txt,.md,.json,.docx,.pdf',
+          // **JD 只收纯文本**：文档格式的解析是留给简历的，JD 没有这个必要。
+          key: 'i', type: 'file', accept: '.txt,.md,.markdown,text/plain,text/markdown',
           style: { display: 'none' }, onChange: uploadJd,
         }),
       ])
 
-      // ── 简历库 ──────────────────────────────────────────────────────
-      //
-      // 简历不会每场面试都变。存一次，之后每场直接选——
-      // 这就是「新建面试时可以直接选」的地方。
-      const libraryStrip = h('div', {
+      // **简历库：存一次，之后每场直接选。**
+      // 常驻版面只有一个计数 + 一个按钮；列表点开才出现，点别处收起。
+      useEffect(() => {
+        if (!libraryOpen) return undefined
+        const close = event => {
+          const target = event.target
+          if (target !== null && target !== undefined && typeof target.closest === 'function'
+            && target.closest('[data-iv-library]') !== null) return
+          setLibraryOpen(false)
+        }
+        const onKey = event => { if (event.key === 'Escape') setLibraryOpen(false) }
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+          document.addEventListener('click', close, true)
+          document.addEventListener('keydown', onKey)
+        }
+        return () => {
+          if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+            document.removeEventListener('click', close, true)
+            document.removeEventListener('keydown', onKey)
+          }
+        }
+      }, [libraryOpen])
+
+      const libraryToggle = h('button', {
         key: 'lib',
-        style: {
-          border: `1px solid ${C.ruleSoft}`, borderRadius: 10, padding: '10px 12px',
-          marginBottom: 14, background: C.ink850,
-        },
-      }, [
-        h('div', {
-          key: 'h',
-          style: { ...S.row, justifyContent: 'space-between', marginBottom: resumes.length > 0 ? 6 : 2 },
+        type: 'button',
+        style: { ...S.btn(false, resumes.length === 0), padding: '4px 10px' },
+        disabled: resumes.length === 0,
+        title: resumes.length === 0
+          ? '还没有存过简历：上传或编辑简历时会问你要不要存进库'
+          : '从简历库选一份',
+        onClick: () => setLibraryOpen(value => !value),
+      }, `简历库 ${resumes.length}${libraryOpen && resumes.length > 0 ? ' ▴' : ' ▾'}`)
+
+      // **一行就是「用这份」。** 上一版每行挂一个「用这份」文字按钮，
+      // 在窄列里会竖着折行；而且行里只有标题和字数，认不出是哪一版。
+      // 现在：整行可点（标题 + 字数 · 日期），删除单独放右边，文字不折行。
+      const libraryPanel = libraryOpen && resumes.length > 0
+        ? h('div', {
+          key: 'panel',
+          role: 'menu',
+          style: {
+            position: 'absolute', right: 0, top: 'calc(100% + 8px)', zIndex: 45,
+            width: 'min(360px, calc(100vw - 44px))',
+            maxHeight: 360, overflowY: 'auto',
+            ...S.surface('stage'), padding: 6, boxShadow: C.elev4,
+            animation: 'ivRise 160ms var(--iv-ease) backwards',
+          },
         }, [
-          h('span', { key: 't', style: { fontSize: 11.5, color: C.boneDim } }, `简历库 · ${resumes.length} 份`),
-          h('span', { key: 'h2', style: S.hint }, '简历存一次，之后每场直接选'),
-        ]),
-        resumes.length === 0
-          ? h('div', { key: 'e', style: S.hint },
-            '还没有存过简历。归档简历后按「存进简历库」，以后新建面试就不用再传了。')
-          : h('div', { key: 'l' }, resumes.map(item => h('div', {
+          ...resumes.map(item => h('div', {
             key: item.id,
-            style: { display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0' },
+            className: 'iv-row',
+            style: {
+              display: 'flex', alignItems: 'center', gap: 4,
+              borderBottom: `1px solid ${C.ruleSoft}`,
+            },
           }, [
-            h('div', { key: 'b', style: { flex: '1 1 auto', minWidth: 0 } }, [
+            h('button', {
+              key: 'use',
+              type: 'button',
+              title: `用「${item.title}」`,
+              style: {
+                display: 'block', flex: '1 1 auto', minWidth: 0,
+                padding: '8px 8px', border: 'none', background: 'transparent',
+                textAlign: 'left', cursor: 'pointer', fontFamily: F.ui,
+                borderRadius: RADIUS.sm,
+              },
+              onClick: () => { void applyResume(item.id) },
+            }, [
               h('div', {
                 key: 't',
-                style: { fontSize: 12.5, color: C.bone, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+                style: {
+                  ...TYPE.sub, color: C.bone,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                },
               }, item.title),
-              h('div', { key: 'm', style: { ...S.mono, fontSize: 10, color: C.boneFaint, marginTop: 2 } },
-                `${item.chars} 字${session?.session?.resumeId === item.id ? ' · 本场用的就是它' : ''}`),
+              h('div', {
+                key: 'm',
+                style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, minWidth: 0 },
+              }, [
+                h(Meta, { key: 'c' }, `${item.chars} 字`),
+                typeof item.updatedAt === 'number' && item.updatedAt > 0
+                  ? h(Meta, { key: 'd' }, shortDate(item.updatedAt))
+                  : null,
+                session?.session?.resumeId === item.id
+                  ? h(Meta, { key: 'now', tone: 'jade' }, '本场')
+                  : null,
+              ]),
             ]),
-            h('button', {
-              key: 'u',
-              style: S.btn(false, busy),
-              title: '把这份简历用到这场面试',
-              onClick: () => applyResume(item.id),
-            }, '用这份'),
-            h('button', {
-              key: 'x',
+            h(IconBtn, {
+              key: 'del',
+              label: '从简历库删掉',
               title: '从简历库删掉（已经用过的面试里存的快照不受影响）',
-              'aria-label': '从简历库删掉',
-              style: { ...S.btn(false, busy), padding: '8px 10px' },
-              onClick: () => deleteResume(item.id),
-            }, '删'),
-          ]))),
-      ])
+              tone: 'tally',
+              style: { flex: '0 0 auto' },
+              onClick: () => { void deleteResume(item.id) },
+            }, '×'),
+          ])),
+          // 这场已经有一份简历、但还没进库时的补录入口。
+          // 放在库的弹层里，而不是常驻卡片上——常驻按钮会把这一版又变成一排按钮。
+          resumeArchived
+            ? h('button', {
+              key: 'store',
+              type: 'button',
+              title: '把这一场里的简历存进简历库',
+              style: {
+                display: 'block', width: '100%', marginTop: 2,
+                padding: '8px 10px', border: 'none', borderRadius: RADIUS.sm,
+                background: 'transparent', color: C.accent, cursor: 'pointer',
+                fontFamily: F.ui, fontSize: TYPE.sub.fontSize, textAlign: 'left',
+              },
+              onClick: () => {
+                setLibraryOpen(false)
+                setNaming({ text: resumeText, defaultTitle: resumeNameSuggestion })
+              },
+            }, '把这场简历存进库')
+            : null,
+        ])
+        : null
+
+      const libraryControl = h('div', {
+        key: 'lib',
+        'data-iv-library': '1',
+        style: { position: 'relative', flex: '0 0 auto' },
+      }, [libraryToggle, libraryPanel])
 
       const resumeSlot = material({
         key: 'resume',
-        editing: editing.resume,
-        value: resumeText,
         archived: resumeArchived,
         archivedText: resumeText,
-        archivedNote: `卷内已有 ${session?.documents?.resumeChars} 字`,
-        label: '简历正文',
-        placeholder: '把简历正文粘到这里……',
-        emptyHint: '还没有简历。投一个文件，或把正文粘进来——助手需要它才能出题。',
-        saveLabel: '归档简历',
-        onChange: setResumeText,
-        onSave: saveResume,
-        onCancel: () => setEditing(previous => ({ ...previous, resume: false })),
-        onEdit: () => setEditing(previous => ({ ...previous, resume: true })),
-        onPreview: () => setPreview({ kind: 'resume', label: '简历', text: resumeText }),
+        emptyTitle: '还没有简历',
+        onOpen: () => setDocDialog({ kind: 'resume', mode: resumeArchived ? 'preview' : 'edit' }),
         upload: resumeArchived ? undefined : uploadResumeLabel,
-        // 「存进简历库」：存一次，以后每场面试直接选。
-        extraActions: resumeArchived
-          ? h('button', {
-            key: 'lib',
-            style: S.btn(false, busy),
-            title: '把这份简历存进简历库，以后新建面试直接选',
-            onClick: saveToLibrary,
-          }, '存进简历库')
-          : undefined,
       })
 
       const jdSlot = material({
         key: 'jd',
-        editing: editing.jd,
-        value: jdText,
         archived: jdArchived,
         archivedText: jdText,
-        archivedNote: `卷内已有 ${session?.documents?.jdChars} 字`,
-        label: 'JD 正文',
-        placeholder: '把岗位描述粘到这里……',
-        emptyHint: '还没有 JD。贴一个链接让它自己抓，或者直接粘正文。',
-        saveLabel: '归档 JD',
-        onChange: setJdText,
-        onSave: saveJd,
-        onCancel: () => setEditing(previous => ({ ...previous, jd: false })),
-        onEdit: () => setEditing(previous => ({ ...previous, jd: true })),
-        onPreview: () => setPreview({ kind: 'jd', label: 'JD 正文', text: jdText }),
-        upload: uploadJdLabel,
+        emptyTitle: '还没有 JD',
+        onOpen: () => setDocDialog({ kind: 'jd', mode: jdArchived ? 'preview' : 'edit' }),
+        upload: jdArchived ? undefined : uploadJdLabel,
       })
 
-      const previewDialog = preview === undefined
+      const docDialogNode = docDialog === undefined
         ? null
-        : h(MaterialPreview, {
-          key: 'preview',
-          title: preview.label,
-          text: preview.text,
-          onClose: () => setPreview(undefined),
-          onEdit: () => {
-            const kind = preview.kind
-            setPreview(undefined)
-            setEditing(previous => ({ ...previous, [kind]: true }))
-          },
+        : h(MaterialDialog, {
+          key: 'doc',
+          kind: docDialog.kind,
+          title: docDialog.kind === 'resume' ? '简历' : 'JD 正文',
+          text: docDialog.kind === 'resume' ? resumeText : jdText,
+          initialMode: docDialog.mode,
+          initialText: docDialog.initialText,
+          linked: (session?.session?.resumeId ?? '') !== '',
+          suggestedTitle: resumeNameSuggestion,
+          onSave: saveDocument,
+          onUpload: docDialog.kind === 'resume' ? extractResumeFile : extractJdFile,
+          onClose: () => setDocDialog(undefined),
         })
 
+      const namingNode = naming === undefined
+        ? null
+        : h(NameResumeDialog, {
+          key: 'naming',
+          defaultTitle: naming.defaultTitle,
+          onClose: () => setNaming(undefined),
+          onSave: saveNaming,
+        })
+
+      // 岗位链接那一行：抓取、请助手去抓。**没有说明文字**——
+      // 按钮的 title 里有完整解释，抓不到时的出路写在下面的提示条里。
+      const jdLinkRow = h('div', {
+        key: 'link',
+        style: { ...S.row, marginBottom: 12, alignItems: 'flex-end' },
+      }, [
+        h('div', { key: 'f', style: { flex: '1 1 260px', minWidth: 0 } }, h(Field, {
+          key: 'url',
+          label: '岗位链接',
+          value: jdUrl,
+          placeholder: 'https://…',
+          onChange: setJdUrl,
+        })),
+        h('button', { key: 'fetch', style: S.btn(false, busy || jdUrl.trim() === ''), onClick: fetchJd }, '抓取'),
+        h('button', {
+          key: 'agent',
+          style: S.btn(false, busy || jdUrl.trim() === ''),
+          title: '把链接发给 DSH 对话里的助手，让它把正文抄回来',
+          onClick: askAgent,
+        }, '让助手去抓'),
+      ])
+
+      // **抓不到不是死路：**把卡在哪、以及两条能走的路都摆出来。
+      const jdNoteBlock = jdNote === undefined
+        ? null
+        : h(Quiet, {
+          key: 'note',
+          tone: jdNote.ok === true ? 'ok' : 'warn',
+          style: {
+            display: 'block', lineHeight: 1.65,
+            marginBottom: 12, padding: '10px 13px', borderRadius: RADIUS.sm,
+            border: `1px solid ${jdNote.ok === true ? TONES.jade.edge : TONES.amber.edge}`,
+            background: jdNote.ok === true ? TONES.jade.wash : TONES.amber.wash,
+          },
+        }, [
+          h('div', {
+            key: 't',
+            style: { ...TYPE.sub, color: jdNote.ok === true ? C.jade : C.amber },
+          }, jdNote.text),
+          jdNote.canAsk === true
+            ? h('div', { key: 'a', style: { ...S.row, marginTop: 8 } }, [
+              h('button', { key: 'b', style: S.btn(false, busy), onClick: askAgent }, '让助手去抓'),
+              h('span', {
+                key: 'h',
+                style: { ...TYPE.sub, color: C.boneFaint },
+              }, '或者直接把正文粘进下面的框里。'),
+            ])
+            : null,
+        ])
+
+      // 底稿收起时只留计数与主行动；调整次数是仪表读数，理由在 title 里。
+      const checklistExtra = h('div', { key: 'x', style: S.row }, [
+        checklist.length > 0 ? h(Meta, { key: 'c' }, `考点 ${probed}/${checklist.length}`) : null,
+        session?.stats?.adjustments > 0
+          ? h(Meta, {
+            key: 'adj',
+            title: '每一次调整都记了理由，事后复盘会用到',
+          }, `调整 ${session.stats.adjustments}`)
+          : null,
+      ])
+
+      // 空档案时不留说明书：把「档案怎么来的」写成一条出路（对话里怎么归档）。
+      const profileEmpty = h('div', {
+        key: 'empty',
+        style: { display: 'flex', flexDirection: 'column', gap: 8 },
+      }, [
+        h(Empty, { key: 'e', title: '还没有岗位档案' }),
+        h(Quiet, { key: 'q' }, '在 DSH 对话里让助手用 interview_save_profile 归档；或用 interview_sync_profile 把这一场回写进档案。'),
+      ])
+
       return h('div', { style: { maxWidth: 1180 } }, [
-        previewDialog,
+        docDialogNode,
+        namingNode,
         h(FlowSpine, { key: 'spine', current: flowStep }),
 
         // ── 这场面试叫什么 ────────────────────────────────────────────
-        //
-        // **公司 · 岗位是从 JD 正文里提炼出来的。** 提炼不出来就留空，
-        // 让用户自己写——但**认错了必须能改**，所以这三个框一直都在。
-        h(Section, { key: 'id',
+        h(Section, {
+          key: 'identity',
           title: '这场面试',
-          extra: h('span', { style: { ...S.row } }, [
-            // 归档了却还在主区显示着，得让人一眼看出来——
-            // 否则「这场已经收起来了」这件事就没人知道。
+          index: 0,
+          // 保存放在标题行右端：三格输入 + 一个孤零零的按钮会空出一大片，
+          // 那一大片正是「薄纸感」的来源。
+          extra: h('div', { key: 'x', style: { display: 'flex', alignItems: 'center', gap: 10 } }, [
             session?.session?.archived === true
-              ? h('span', { key: 'a', style: S.pill('amber') }, '已归档')
+              ? h(Pill, { key: 'a', tone: 'amber' }, '已归档')
               : null,
-            h('span', { key: 'h', style: S.hint }, '归档 JD 后自动提炼；认不出来就自己写'),
+            h('button', { key: 'b', style: S.btn('primary', busy), onClick: saveIdentity }, '保存'),
           ]),
         }, [
           h('div', {
@@ -3073,28 +4483,27 @@ window.__ModuleLoader__.load({
               gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
             },
           }, [
-            h(Field, { key: 'c',
+            h(Field, {
+              key: 'c',
               label: '公司',
               value: identity.company,
               placeholder: '例如：字节跳动',
               onChange: value => { identityTouched.current = true; setIdentity(previous => ({ ...previous, company: value })) },
             }),
-            h(Field, { key: 'p',
+            h(Field, {
+              key: 'p',
               label: '岗位',
               value: identity.position,
               placeholder: '例如：前端工程师',
               onChange: value => { identityTouched.current = true; setIdentity(previous => ({ ...previous, position: value })) },
             }),
-            h(Field, { key: 't',
+            h(Field, {
+              key: 't',
               label: '标题',
               value: identity.title,
               placeholder: '这场面试叫什么',
               onChange: value => { identityTouched.current = true; setIdentity(previous => ({ ...previous, title: value })) },
             }),
-          ]),
-          h('div', { key: 'act', style: { ...S.row, marginTop: 12 } }, [
-            h('button', { key: 'b', style: S.btn('primary', busy), onClick: saveIdentity }, '保存'),
-            h('span', { key: 'h', style: S.hint }, '列表会按岗位分组——同一个岗位的几场聚在一起。'),
           ]),
         ]),
 
@@ -3102,114 +4511,67 @@ window.__ModuleLoader__.load({
           key: 'grid',
           style: {
             display: 'grid', gap: 16,
-            gridTemplateColumns: 'repeat(auto-fit, minmax(430px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(430px, 100%), 1fr))',
             alignItems: 'start',
           },
         }, [
           // ── 左栏：卷内材料 ──────────────────────────────────────────
           h('div', { key: 'left' }, [
-            h(Section, {key: 'k5', 
+            h(Section, {
+              key: 'resume',
               step: '01',
               title: '简历',
-              extra: h('span', { style: S.hint }, resumeArchived ? `已归档 ${session.documents.resumeChars} 字` : '待归档'),
-            }, [libraryStrip, resumeSlot]),
+              index: 1,
+              extra: h('div', { key: 'x', style: { ...S.row, gap: 8 } }, [
+                h(Meta, { key: 'chars' }, resumeArchived ? `${session.documents.resumeChars} 字` : '待归档'),
+                libraryControl,
+              ]),
+            }, [resumeSlot]),
 
-            h(Section, {key: 'k6', 
+            h(Section, {
+              key: 'jd',
               step: '02',
               title: '目标岗位 JD',
-              extra: h('span', { style: S.hint }, jdArchived ? `已归档 ${session.documents.jdChars} 字` : '待归档'),
-            }, [
-              h('div', { key: 'link', style: { ...S.row, marginBottom: 14, alignItems: 'flex-end' } }, [
-                h('div', { key: 'f', style: { flex: '1 1 260px' } }, [
-                  h(Field, {key: 'k7',
-                    label: '岗位链接（抓不到会自动给手动兜底）',
-                    value: jdUrl,
-                    placeholder: 'https://…',
-                    onChange: setJdUrl,
-                  }),
-                ]),
-                h('button', { key: 'f2', style: S.btn(false, busy || jdUrl.trim() === ''), onClick: fetchJd }, '抓取'),
-                // 直连抓不动的时候，就**请助手去拿**——宿主里的助手有浏览器，
-                // 能把登录墙、验证码、前端渲染的正文都对付过去。
-                h('button', {
-                  key: 'f3',
-                  style: S.btn(false, busy || jdUrl.trim() === ''),
-                  title: '把链接发给 DSH 对话里的助手，让它把正文抄回来',
-                  onClick: askAgent,
-                }, '让助手去抓'),
-              ]),
-              jdNote !== undefined
-                ? h('div', {
-                  key: 'note',
-                  style: {
-                    padding: '10px 13px', borderRadius: 9, marginBottom: 14, fontSize: 12, lineHeight: 1.6,
-                    border: `1px solid ${jdNote.ok ? TONES.jade.edge : TONES.amber.edge}`,
-                    background: jdNote.ok ? TONES.jade.wash : TONES.amber.wash,
-                    color: jdNote.ok ? C.jade : C.amber,
-                  },
-                }, [
-                  h('span', { key: 't' }, jdNote.text),
-                  jdNote.canAsk === true
-                    ? h('div', { key: 'a', style: { ...S.row, marginTop: 9 } }, [
-                      h('button', {
-                        key: 'b',
-                        style: S.btn(false, busy),
-                        onClick: askAgent,
-                      }, '让助手去抓'),
-                      h('span', { key: 'h', style: S.hint }, '或者直接把正文粘进下面的框里。'),
-                    ])
-                    : null,
-                ])
-                : null,
-              jdSlot,
-            ]),
+              index: 2,
+              extra: h(Meta, { key: 'chars' }, jdArchived ? `${session.documents.jdChars} 字` : '待归档'),
+            }, [jdLinkRow, jdNoteBlock, jdSlot]),
           ]),
 
           // ── 右栏：底稿与档案 ────────────────────────────────────────
           h('div', { key: 'right' }, [
-            h(Section, {key: 'k8', 
+            h(Section, {
+              key: 'checklist',
               step: '03',
               title: '面试官底稿',
-              extra: h('span', { style: S.hint }, '考点清单 · 面试官才看得到'),
+              index: 3,
+              extra: checklistExtra,
             }, [
-              h(Disclosure, {key: 'k10', 
-                summary: '考点清单',
-                badge: `${probed}/${checklist.length}`,
-                defaultOpen: false,
-              }, [
-                h('div', { key: 'note', style: { ...S.hint, marginBottom: 12, lineHeight: 1.7 } },
-                  '这是面试官的底稿。真实面试里你看不到它——所以默认收起，需要时再展开。'),
-                // **限高容器。** 清单长短不一是美的，但不能让 200 条考点
-                // 把整页撑坏——超过一屏就装进容器里滚，信息一条也不少。
-                h('div', {
-                  key: 'list',
-                  style: {
-                    maxHeight: 'min(56vh, 520px)', overflowY: 'auto',
-                    paddingRight: 6, overscrollBehavior: 'contain',
-                  },
-                }, checklist.map(item => h(ChecklistRow, { key: item.id, item }))),
-                session?.stats?.adjustments > 0
-                  ? h('div', { key: 'adj', style: { ...S.hint, marginTop: 12 } },
-                    `面试中调整过 ${session.stats.adjustments} 次——每一次调整都记了理由，事后复盘会用到。`)
-                  : null,
-              ]),
-              // 收起状态也得有话说，否则这张卡是空的。
-              h('div', { key: 'status', style: { ...S.hint, marginTop: 12, lineHeight: 1.7 } },
-                checklist.length === 0
-                  ? '还没有底稿。底稿由助手按简历与 JD 调研产出，写回这一场。'
-                  : `底稿共 ${checklist.length} 项，已问 ${probed} 项。面试中助手按它动态深挖——具体题目你看不到，那才是真实面试的样子。`),
               checklist.length === 0
-                ? h('div', { key: 'ask', style: { marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 } }, [
-                  h('div', { key: 'w', style: { ...S.hint, fontFamily: F.mono, fontSize: 10.5, wordBreak: 'break-all' } },
-                    `助手会话工作区：${config?.workspaceRoot?.path ?? ''}`),
-                  h('button', {
-                    key: 'b',
+                ? h(Empty, {
+                  key: 'empty',
+                  title: '还没有底稿',
+                  action: h('button', {
+                    key: 'ask',
                     style: S.btn('primary', busy),
+                    title: config?.workspaceRoot?.path ?? '',
                     onClick: askChecklist,
                   }, busy ? '派活中…' : '让助手出底稿'),
-                ])
+                })
+                : h(Disclosure, {
+                  key: 'disclosure',
+                  summary: '考点清单',
+                }, [
+                  h('div', {
+                    key: 'list',
+                    style: {
+                      maxHeight: 'min(56vh, 520px)', overflowY: 'auto',
+                      paddingRight: 6, overscrollBehavior: 'contain',
+                    },
+                  }, checklist.map(item => h(ChecklistRow, { key: item.id, item }))),
+                ]),
+              checklist.length === 0
+                ? null
                 : h('div', { key: 'next', style: { ...S.row, marginTop: 14 } }, [
-                  // 清单出来了，流程还没结束——把下一步摆在手边。
                   h('button', {
                     key: 'go',
                     style: S.btn('primary', false),
@@ -3218,6 +4580,8 @@ window.__ModuleLoader__.load({
                   h('button', {
                     key: 're',
                     style: S.btn(regenArm ? 'tally' : false, busy),
+                    // 破坏性操作的后果写在悬停里：点下去会覆盖现有清单。
+                    title: regenArm ? '会覆盖现有清单' : '让助手重新调研，生成新清单',
                     onClick: () => {
                       if (!regenArm) {
                         setRegenArm(true)
@@ -3227,35 +4591,54 @@ window.__ModuleLoader__.load({
                       setRegenArm(false)
                       void askChecklist()
                     },
-                  }, regenArm ? '确认重新生成（会覆盖现有清单）' : '重新生成'),
+                  }, regenArm ? '确认重新生成' : '重新生成'),
                 ]),
             ]),
 
-            h(Section, {key: 'k9', 
+            h(Section, {
+              key: 'profiles',
               title: '岗位档案',
-              extra: h('span', { style: S.hint }, '同一个岗位第二次面试，直接继承上次的底稿'),
+              index: 4,
+              extra: profiles.length > 0
+                ? h(Meta, { key: 'n' }, `${profiles.length} 份`)
+                : null,
             }, [
               profiles.length === 0
-                ? h('div', {key: 'k27',  style: S.hint },
-                  '还没有岗位档案。面试完一场后，在 DSH 对话里让助手用 interview_save_profile 把它归档下来；或者用 interview_sync_profile 回写。')
+                ? profileEmpty
                 : h('div', { key: 'list' }, profiles.map(profile => h('div', {
                   key: profile.id,
                   style: {
-                    display: 'flex', gap: 14, alignItems: 'center', padding: '12px 0',
+                    display: 'flex', gap: 12, alignItems: 'center', padding: '11px 0',
                     borderBottom: `1px solid ${C.ruleSoft}`,
                   },
                 }, [
-                  h('div', { key: 'body', style: { flex: '1 1 auto', minWidth: 0 } }, [
-                    h('div', { key: 't', style: { fontSize: 13, color: C.bone } }, profile.title),
-                    h('div', { key: 'm', style: { fontSize: 11, color: C.boneFaint, marginTop: 3, fontFamily: F.mono } },
-                      `${profile.checklistCount} 考点 · ${profile.sessions.length} 场 · JD ${profile.jdChars} 字`),
+                  h('div', { key: 'b', style: { flex: '1 1 auto', minWidth: 0 } }, [
+                    h('div', {
+                      key: 't',
+                      style: {
+                        ...TYPE.body, color: C.bone,
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      },
+                    }, profile.title),
+                    h('div', { key: 'm', style: { ...S.row, marginTop: 4 } }, [
+                      h(Meta, { key: 'c' }, `${profile.checklistCount} 考点`),
+                      h(Meta, { key: 's' }, `${profile.sessions.length} 场`),
+                    ]),
                   ]),
-                  h('button', { key: 'b', style: S.btn(false, busy), onClick: () => applyProfile(profile.id) }, '继承底稿'),
+                  h('button', {
+                    key: 'apply',
+                    style: S.btn(false, busy),
+                    onClick: () => { void applyProfile(profile.id) },
+                  }, '继承'),
                 ]))),
               session?.session?.profileId !== undefined && session?.session?.profileId !== ''
                 ? h('div', { key: 'sync', style: { ...S.row, marginTop: 14 } }, [
-                  h('span', { key: 'n', style: S.hint }, `本场已关联档案 ${session.session.profileId}`),
-                  h('button', { key: 'b', style: S.btn(false, busy), onClick: () => syncProfile(session.session.profileId) }, '把本场回写进档案'),
+                  h(Meta, { key: 'n', title: '本场已关联的岗位档案' }, `档案 ${session.session.profileId}`),
+                  h('button', {
+                    key: 'b',
+                    style: S.btn(false, busy),
+                    onClick: () => { void syncProfile(session.session.profileId) },
+                  }, '回写'),
                 ])
                 : null,
             ]),
@@ -3487,7 +4870,15 @@ window.__ModuleLoader__.load({
        */
       const hostCamera = useHostCamera()
       const hasHostVideo = hostCamera.active
-      const hasAnyVideo = hasVideo || hasHostVideo
+      /**
+       * 宿主画面是不是真的接上了。
+       *
+       * **MJPEG 握手失败时 `<img>` 会变成一张破图**，而用户看到的是「画面坏了」。
+       * 那时应该退回有设计的未接通板，并说清下一步——而不是在舞台中间留一张碎图。
+       */
+      const [hostVideoFailed, setHostVideoFailed] = useState(false)
+      useEffect(() => { setHostVideoFailed(false) }, [hasHostVideo])
+      const hasAnyVideo = hasVideo || (hasHostVideo && !hostVideoFailed)
 
       /**
        * 一条按钮走完整条链路：浏览器麦克风 → 宿主摄像头。
@@ -3551,6 +4942,17 @@ window.__ModuleLoader__.load({
         : ttsInfo?.mode === 'none'
           ? '播报已关闭'
           : '浏览器音色'
+      // Pill 里只放得下**一家的名字**。状态条不是日志，链路的完整理由在 Hint 里。
+      const ttsShort = ttsInfo?.mode === 'server'
+        ? ({
+          mimo: 'MiMo',
+          openai: 'OpenAI',
+          minimax: 'MiniMax',
+          baidu: '百度',
+          edge: 'Edge',
+          host: '宿主',
+        }[ttsInfo.provider] ?? '模型')
+        : (ttsInfo?.mode === 'none' ? '关' : '音色')
       const needsPrepare = asrMode === 'host' && asrInfo?.host?.needsPreparation === true
 
       /**
@@ -3589,60 +4991,65 @@ window.__ModuleLoader__.load({
 
       // 窄容器里**纵向堆叠**：舞台在上、回答在中、控件在下，整页内部滚动。
       //
-      // 为什么不是「让右栏变窄」——右栏一窄，「识别链路」「朗读问题」这些
-      // 控件就挤成两行字，等于把功能藏起来；而舞台是这一页的主角，
-      // 窄的时候更该它占满，而不是被压成一条缝。
-      //
-      // 阈值 700 是算出来的：并排时舞台至少要留 300px，
-      // 加右栏 396 和 16 的间距，一共要 712。
+      // 为什么不是「让右栏变窄」——右栏一窄，控件就挤成两行字，等于把功能
+      // 藏起来；而舞台是这一页的主角，窄的时候更该它占满。
       const [liveRef, liveWidth] = useContainerWidth()
-      const stacked = liveWidth > 0 && liveWidth < 700
+      const stacked = liveWidth > 0 && liveWidth < 760
 
-      /**
-       * 计时器 + REC 灯的 props。
-       *
-       * 组件在模块作用域（`ClockBadge`），key 由**调用点**给——
-       * `scripts/fix-keys.mjs` 会盯着这件事。
-       */
-      const clockProps = (absolute) => ({
+      /** 计时器 + REC 灯。组件在模块作用域，key 由调用点给。 */
+      const clockProps = absolute => ({
         absolute,
         durationMs: session?.stats?.durationMs ?? 0,
-        recording: recorder.recording,
+        recording: recorder.recording || hostCamera.recording,
       })
 
+      // 麦克风是否真的接通：看音轨，不看流存不存在。
+      const micOn = media.stream !== undefined
+        && typeof media.stream.getAudioTracks === 'function'
+        && media.stream.getAudioTracks().length > 0
+
       /**
-       * The **lower third**: the question, laid over the bottom of the frame.
+       * 提问：**压在画面下缘的下三分之一**。
        *
-       * 为什么提问要压在画面上而不是放在旁边的框里——因为在真实的线上面试里，
-       * 提问是**对面那个人说的**，它和你的人像在同一块画面上。把它挪进侧栏，
-       * 它就变成了「界面上的一个字段」，面试的现场感就没了。
+       * 为什么提问要压在画面上而不是放在旁边的框里——真实线上面试里，
+       * 提问是**对面那个人说的**，它和你的人像在同一块画面上。挪进侧栏，
+       * 它就变成「界面上的一个字段」，现场感就没了。
        *
-       * **但没有摄像头时不能压。** 没接通的时候，舞台里放的是「未接通板」
-       * （monogram + 说明 + 申请按钮）。提问条要是也压上去，两者会重叠——
-       * 而且压掉的往往是**按钮**：被拒之后那句「在系统设置里放行」的说法，
-       * 恰恰要靠那个按钮兑现。所以那种情况下提问条改成舞台下方的**一条带子**，
-       * 仍然紧贴舞台、仍然占满左半屏，但它不再和板子抢地方。
+       * 没有画面时提问落在舞台下方的带子里（仍然紧贴舞台、仍然吃满左半屏），
+       * 免得和「未接通板」上的申请按钮抢地方——那个按钮是权限被拒时唯一的出口。
        */
       const questionRule = h('div', {
         key: 'rule',
         style: {
+          display: 'flex', gap: 16, alignItems: 'flex-start',
           borderLeft: `3px solid ${questionText === undefined ? C.rule : C.amber}`,
           paddingLeft: 16,
         },
       }, [
-        h('div', {
-          key: 'eyebrow',
-          style: { ...S.eyebrow, color: questionText === undefined ? C.boneFaint : C.amber, marginBottom: 7 },
-        }, questionText === undefined ? '等待提问' : `第 ${questionIndex} 问`),
-        h('div', {
-          key: 'text',
-          style: {
-            fontFamily: F.voice, fontSize: 19, lineHeight: 1.58, color: C.bone,
-            letterSpacing: '0.005em', maxHeight: hasAnyVideo ? 132 : 200, overflow: 'hidden',
-          },
-        }, questionText === undefined
-          ? '助手还没提问。在 DSH 对话区让它开始——它每问一轮，这里就会更新。'
-          : questionText),
+        h('div', { key: 'body', style: { minWidth: 0 } }, [
+          h(Meta, {
+            key: 'eyebrow',
+            tone: questionText === undefined ? undefined : 'amber',
+            style: { display: 'block', marginBottom: 8 },
+          }, questionText === undefined ? '等待提问' : `第 ${questionIndex} 问`),
+          questionText === undefined
+            ? h('div', {
+              key: 'idle',
+              style: { ...TYPE.body, color: C.boneDim },
+            }, '在 DSH 对话区让助手开始这一轮。')
+            : h('div', {
+              key: 'text',
+              style: {
+                fontFamily: F.display, ...TYPE.display,
+                // 窄面板里一句提问会折成三行；22px 的衬线三行会把下三分之一
+                // 撑成一堵墙，反而看不见画面。窄的时候降一档，仍然是最亮的元素。
+                fontSize: liveWidth > 0 && liveWidth < 820 ? 18 : TYPE.display.fontSize,
+                lineHeight: 1.5, color: C.bone,
+                letterSpacing: '0.006em',
+                maxHeight: hasAnyVideo ? 132 : 200, overflow: 'hidden',
+              },
+            }, questionText),
+        ]),
       ])
 
       /** 有画面：压在画面下缘。没有：落在舞台下方的一条带子。 */
@@ -3651,8 +5058,8 @@ window.__ModuleLoader__.load({
           key: 'cue',
           style: {
             position: 'absolute', left: 0, right: 0, bottom: 0,
-            padding: '54px 26px 20px',
-            background: 'linear-gradient(180deg, ' + C.cueTop + ' 0%, ' + C.cueMid + ' 46%, ' + C.cueLow + ' 100%)',
+            padding: '64px 28px 22px',
+            background: 'linear-gradient(180deg, ' + C.cueTop + ' 0%, ' + C.cueMid + ' 52%, ' + C.cueLow + ' 100%)',
             pointerEvents: 'none',
           },
         }, [questionRule])
@@ -3660,25 +5067,36 @@ window.__ModuleLoader__.load({
           key: 'band',
           style: {
             flex: '0 0 auto',
+            // 舞台长高时提问带贴底——它就是「压在画面下三分之一」的那条。
+            marginTop: 'auto',
             padding: '16px 26px 18px',
             background: C.band,
             borderTop: `1px solid ${C.rule}`,
           },
         }, [questionRule])
 
-      /** The stage: video when we have it, a designed "not connected" plate when we don't. */
+      /**
+       * The stage: video when we have it, a designed "standby" plate when we don't.
+       *
+       * 没接通时它不能是一块黑框：姓名章 + 两圈呼吸环 + 还在跳的电平 + 计时，
+       * 让「待机」和「坏了」看起来不一样。
+       */
       const stage = h('div', {
         key: 'stage',
         'data-iv-stage': '1',
         style: {
-          position: 'relative', flex: '1 1 auto', minWidth: 0,
-          // 没摄像头的时候，舞台里装的是「未接通板 + 提问带」两块。
-          // 给它一个够高的下限，免得窄面板下板子被压扁、按钮被裁掉。
-          minHeight: hasAnyVideo ? 260 : (stacked ? 300 : 400),
-          borderRadius: 14, overflow: 'hidden', background: C.stage,
-          border: `1px solid ${C.rule}`,
-          // 有摄像头：舞台就是一块画面，提问压在上面。
-          // 没摄像头：舞台变成上下两段（板子 / 提问带），**各占各的**。
+          position: 'relative', minWidth: 0,
+          // 有画面时舞台吃满可用高度；没画面时**长高不缩短**（flex-grow 1 / shrink 0）：
+          // 高屏上它照样是主位，矮屏上按内容定高、由外层滚动，
+          // 未接通板里的按钮永远不会被压没。
+          flex: hasAnyVideo ? '1 1 auto' : '1 0 auto',
+          minHeight: hasAnyVideo ? 260 : (stacked ? 320 : 360),
+          borderRadius: RADIUS.lg, overflow: 'hidden',
+          background: C.stage,
+          border: `1px solid ${C.ruleSoft}`,
+          // 舞台是这一页**最高的东西**：专用的一级 elevation（不是最重的那级——
+          // 太重的向下投影会把下面的回答框压住，亮色下还会读成一片脏）。
+          boxShadow: C.elevStage,
           display: hasAnyVideo ? 'block' : 'flex',
           flexDirection: hasAnyVideo ? undefined : 'column',
         },
@@ -3694,17 +5112,15 @@ window.__ModuleLoader__.load({
             transform: 'scaleX(-1)', display: hasVideo ? 'block' : 'none',
           },
         }),
-        // Host 侧的摄像头画面。
-        //
-        // **`<img>` 直接吃 multipart/x-mixed-replace 流**——浏览器端一行
-        // JS 都不用写。镜像是镜像的（跟 `<video>` 一样），所以同样
-        // `scaleX(-1)`。
-        hasHostVideo
+        // Host 侧的摄像头画面：`<img>` 直接吃 multipart/x-mixed-replace 流。
+        hasHostVideo && !hostVideoFailed
           ? h('img', {
             key: 'host-v',
             'data-iv-host-video': '1',
             src: '/interviewer/camera/stream',
             alt: '摄像头画面',
+            // 流接不上就退回未接通板，别把一张破图摆在舞台中间。
+            onError: () => setHostVideoFailed(true),
             style: {
               width: '100%', height: '100%', objectFit: 'cover',
               transform: 'scaleX(-1)', display: 'block',
@@ -3717,142 +5133,139 @@ window.__ModuleLoader__.load({
             key: 'plate',
             'data-iv-plate': '1',
             style: {
-              // 这块板子只在**没有摄像头**的时候出现，所以它在**流里**：
-              // 板子占上面一段，提问带占下面一段，两者不可能重叠。
-              position: 'relative',
-              flex: '1 1 auto',
-              minHeight: 0,
-              overflow: 'auto',
+              position: 'relative', flex: '1 1 auto',
               display: 'flex', flexDirection: 'column',
-              gap: 13,
-              padding: '22px 30px',
-              background: 'radial-gradient(circle at 50% 38%, ' + C.plateTop + ' 0%, ' + C.plateMid + ' 62%, ' + C.plateLow + ' 100%)',
+              background: 'radial-gradient(circle at 50% 36%, ' + C.plateTop + ' 0%, ' + C.plateMid + ' 62%, ' + C.plateLow + ' 100%)',
             },
           }, [
-            // **用 auto 外边距居中，不要用 justifyContent: 'center'。**
-            // 居中 + overflow:auto 时，内容超出容器的话上沿会被裁掉、
-            // 而且滚不回去——而这里超出意味着「板子比舞台高」，
-            // 那正是最不该把按钮弄丢的时候。
+            // 板子随舞台长高，内容整体居中；错误说明和按钮在同一列里——
+            // 它们就是「权限被拒」唯一的出口，任何高度下都得点得到。
             h('div', {
-              key: 'scroll',
+              key: 'inner',
               style: {
-                flex: '1 1 auto', minHeight: 0, overflow: 'auto',
-                display: 'flex', flexDirection: 'column',
+                flex: '1 1 auto', margin: 'auto', width: '100%', maxWidth: 540,
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                // 板子比内容高时整体居中——「待机」的主角在画面中间，不是在顶上。
+                justifyContent: 'center',
+                gap: 16, padding: '28px 30px 24px', textAlign: 'center',
               },
             }, [
+              // **有错误时错误本身就是主角，姓名章让位。**
+              // 窄面板下板子里同时塞着姓名章、错误框和按钮，高度不够——
+              // 结果是姓名章被裁成半个圆，看着像坏了。
+              media.error === undefined
+                ? h('div', {
+                  key: 'mono',
+                  style: {
+                    position: 'relative', width: 92, height: 92, flex: '0 0 auto',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  },
+                }, [
+                  h('span', {
+                    key: 'r1',
+                    className: 'iv-breathe',
+                    style: {
+                      position: 'absolute', inset: 0,
+                      borderRadius: RADIUS.pill, border: `1px solid ${C.rule}`,
+                    },
+                  }),
+                  h('span', {
+                    key: 'r2',
+                    style: {
+                      position: 'absolute', inset: 9, borderRadius: RADIUS.pill,
+                      border: `1px solid ${C.ruleSoft}`, background: C.ink850,
+                    },
+                  }),
+                  h('span', {
+                    key: 'm',
+                    style: { position: 'relative', fontFamily: F.display, ...TYPE.display, color: C.boneDim },
+                  }, initialsOf(title)),
+                ])
+                : null,
               h('div', {
-                key: 'inner',
+                key: 'hdr',
                 style: {
-                  margin: 'auto', width: '100%', maxWidth: 520,
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 13,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  gap: 12, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%',
                 },
               }, [
-                // **有错误时不画 monogram，也不写那句「摄像头未接通」的安慰话。**
-                //
-                // 窄面板下（比如真实宿主里 1000×700 的那块地方），
-                // 板子里同时塞着姓名章、说明、错误框和按钮，高度不够——
-                // 结果是姓名章被裁成半个圆，看着像坏了。
-                // 出错的时候，错误本身就是主角：姓名章让位，安慰话让位。
-                media.error === undefined
-                  ? h('div', {
-                    key: 'mono',
-                    style: {
-                      width: 68, height: 68, borderRadius: 999, display: 'flex',
-                      alignItems: 'center', justifyContent: 'center',
-                      border: `1px solid ${C.rule}`, background: C.ink850,
-                      fontFamily: F.voice, fontSize: 20, color: C.boneFaint, letterSpacing: '0.04em',
-                    },
-                  }, initialsOf(title))
-                  : null,
-                // 标题行：标题 + 计时器。
-                //
-                // 计时器在**没摄像头**的时候进标题行——原来它绝对定位在舞台
-                // 右上角，而板子的标题也是居中的，窄面板下两者正好撞在一起。
                 h('div', {
-                  key: 'hdr',
-                  style: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, width: '100%' },
-                }, [
-                  h('div', {
-                    key: 't',
-                    style: {
-                      fontFamily: F.voice, fontSize: 16, color: C.boneDim,
-                      // 窄的时候省略，不要把标题折成两行吃掉竖向空间。
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 240,
-                    },
-                  }, title),
-                  h(ClockBadge, { key: 'clock-plate', ...clockProps(false) }),
-                ]),
-                media.error === undefined
-                  ? h('div', { key: 's', style: { ...S.hint, marginTop: 6 } },
-                    '摄像头未接通——面试照常进行，键盘输入随时可用')
-                  : null,
+                  key: 't',
+                  style: {
+                    fontFamily: F.display, ...TYPE.title, color: C.bone,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260,
+                  },
+                }, title),
+                h(ClockBadge, { key: 'clock', ...clockProps(false) }),
               ]),
-            ]),
-            // **错误说明和按钮钉在板子底部，不跟内容一起被顶走。**
-            //
-            // 这一块是整个「权限被拒」流程的出口：它说「在系统设置里放行」，
-            // 靠的就是下面的「重新检测授权状态」按钮。窄面板下板子一挤，
-            // 这两样要是被推出可视区，那句话就变成了一句空话。
-            h('div', {
-              key: 'foot',
-              style: { flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 13 },
-            }, [
+              // 电平表：没画面也在跳，证明机器活着。出错时让位给错误说明。
+              media.error === undefined
+                ? h('div', {
+                  key: 'level',
+                  style: { display: 'flex', alignItems: 'center', gap: 10, flex: '0 0 auto' },
+                }, [
+                  h(Meta, { key: 'l' }, '输入电平'),
+                  h(SegmentedMeter, { key: 'm', level: media.level }),
+                ])
+                : null,
+              media.error === undefined
+                ? h(Quiet, { key: 'q' }, hostVideoFailed
+                  ? '宿主画面没接上——再点一次「关宿主摄像头」重开，或改用浏览器摄像头。'
+                  : '摄像头未接通——面试照常进行，键盘输入随时可用')
+                : null,
               // **桌面端：浏览器的摄像头是被宿主挡住的，改系统设置没用。**
-              //
-              // 所以桌面端要说清「还有一条路」——Host 侧用 ffmpeg 直接采。
-              // 这不是安慰话，是真的能出画面的路。
+              // 所以这里说清「还有一条路」——Host 侧用 ffmpeg 直接采。
               hostCamera.error !== undefined
                 ? h('div', {
                   key: 'herr',
                   style: {
-                    width: '100%', maxWidth: 460, textAlign: 'center', padding: '11px 15px', borderRadius: 10,
-                    border: `1px solid ${TONES.amber.edge}`, background: TONES.amber.wash,
+                    width: '100%', maxWidth: 460,
+                    padding: '10px 14px', borderRadius: RADIUS.sm,
+                    border: `1px solid ${TONES.amber.edge}`,
+                    background: TONES.amber.wash,
                   },
                 }, [
-                  h('div', {
-                    key: 't',
-                    style: { fontSize: 12.5, color: C.amber, marginBottom: 5 },
-                  }, hostCamera.error.text),
-                  h('div', { key: 'a', style: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.65 } }, hostCamera.error.action),
+                  h('div', { key: 't', style: { ...TYPE.sub, color: C.amber, marginBottom: 4 } }, hostCamera.error.text),
+                  h('div', { key: 'a', style: { ...TYPE.sub, color: C.boneFaint, lineHeight: 1.65 } }, hostCamera.error.action),
                 ])
                 : null,
+              // 权限错误说清是谁挡的，以及现在能做什么（AGENTS §7 的红线）。
               media.error !== undefined
                 ? h('div', {
                   key: 'err',
                   style: {
-                    width: '100%', maxWidth: 460, textAlign: 'center', padding: '11px 15px', borderRadius: 10,
+                    width: '100%', maxWidth: 460,
+                    padding: '10px 14px', borderRadius: RADIUS.sm,
                     border: `1px solid ${media.error.kind === 'denied' ? TONES.tally.edge : TONES.amber.edge}`,
                     background: media.error.kind === 'denied' ? TONES.tally.wash : TONES.amber.wash,
                   },
                 }, [
                   h('div', {
                     key: 't',
-                    style: { fontSize: 12.5, color: media.error.kind === 'denied' ? C.tally : C.amber, marginBottom: 5 },
+                    style: { ...TYPE.sub, color: media.error.kind === 'denied' ? C.tally : C.amber, marginBottom: 4 },
                   }, media.error.text),
-                  h('div', { key: 'a', style: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.65 } }, media.error.action),
+                  h('div', { key: 'a', style: { ...TYPE.sub, color: C.boneFaint, lineHeight: 1.65 } }, media.error.action),
                 ])
                 : null,
-              h('div', { key: 'act', style: S.row }, [
+              h('div', {
+                key: 'act',
+                style: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 2 },
+              }, [
                 h('button', {
                   key: 'ask',
                   style: S.btn('primary', media.busy),
                   onClick: () => { void acquireMedia() },
                 }, media.busy || hostCamera.busy
                   ? '正在申请…'
-                  // 麦克风已经通了的时候，这按钮是去**补摄像头**的，
-                  // 别再写「申请摄像头与麦克风」——麦克风不需要再申请了。
+                  // 麦克风已经通了的时候，这按钮是去**补摄像头**的。
                   : (media.stream !== undefined && !hasVideo ? '补上摄像头' : '申请摄像头与麦克风')),
-                // **桌面端的第二条路：让 Host 侧采。**
-                //
-                // 浏览器的摄像头在桌面端被宿主挡死了，但 Host 侧能直接开
-                // 设备。摄像头是独占的，所以这条按钮只在**浏览器没拿到画面**
-                // 的时候出现——两边不会同时开。
+                // 桌面端的第二条路：让 Host 侧采。摄像头独占，只在没画面时出现。
                 inDesktopHost() && !hasAnyVideo
                   ? h('button', {
                     key: 'host-cam',
                     style: S.btn(false, hostCamera.busy),
                     onClick: () => { void hostCamera.start() },
-                  }, hostCamera.busy ? '正在开摄像头…' : '用宿主摄像头')
+                  }, hostCamera.busy ? '正在开摄像头…' : (hostCamera.active ? '重连宿主摄像头' : '用宿主摄像头'))
                   : null,
                 media.permission?.camera === 'denied' || media.permission?.microphone === 'denied'
                   ? h('button', {
@@ -3865,19 +5278,316 @@ window.__ModuleLoader__.load({
             ]),
           ]),
         // 录制指示灯：只有真正在录的时候才亮。
-        //
-        // 两边都算：浏览器的 MediaRecorder，和 Host 侧的录像。
         (recorder.recording || hostCamera.recording)
-          ? h('div', {
-            key: 'rec',
-            style: { position: 'absolute', top: 16, left: 16 },
-          }, h(Tally, { on: true }))
+          ? h('div', { key: 'rec', style: { position: 'absolute', top: 14, left: 16 } }, h(Tally, { on: true }))
           : null,
-        // 计时器：右上角，等宽数字。
-        // **只在有摄像头时压在画面上**——没摄像头时它进板子的标题行，
-        // 否则窄面板下会跟标题撞在一起。
+        // 计时器：有画面时压在右上角；没画面时它进板子的标题行（见上）。
         hasAnyVideo ? h(ClockBadge, { key: 'clock-stage', ...clockProps(true) }) : null,
         lowerThird,
+      ])
+
+      /**
+       * 右栏状态条：**一条，不是五行说明。**
+       *
+       * 每项一个 Pill，详情（谁的错、怎么改）在 `Hint` 里点开才看。
+       * Pill 的颜色只说明状态：青玉=接通，灰=没接通，琥珀=有情况要处理。
+       *
+       * 数据驱动（`.map()`）而不是直接调用工厂：数组里的每个元素都要由
+       * React 直接拿得到 `key`——手写工厂调用拿不到。
+       */
+
+      const micDetail = [
+        h('div', { key: 's' }, micOn ? '麦克风已接通。' : '麦克风未接通。'),
+        media.error !== undefined && !micOn
+          ? h('div', { key: 'e', style: { color: C.amber } }, `${media.error.text}${media.error.action}`)
+          : null,
+        h('div', { key: 'k', style: { color: C.boneFaint } }, '麦克风不通也能面试：提问照常，回答用键盘。'),
+      ]
+
+      const cameraDetail = [
+        h('div', { key: 's' }, hasAnyVideo
+          ? (hasHostVideo ? '摄像头已接通（宿主采集）。' : '摄像头已接通（浏览器采集）。')
+          : '摄像头未接通。'),
+        hasAnyVideo
+          ? null
+          : h('div', { key: 'e' }, hostCamera.error !== undefined
+            ? `${hostCamera.error.text}${hostCamera.error.action}`
+            : media.error !== undefined
+              ? `${media.error.text}${media.error.action}`
+              : (inDesktopHost()
+                ? '桌面端的浏览器摄像头被宿主挡下——点「用宿主摄像头」让 Host 直接采；也可以用键盘完成面试。'
+                : '点「申请摄像头与麦克风」允许后会自动接上；没有画面也能面试，语音提问与文字回答照常。')),
+      ]
+
+      const asrDetail = [
+        h('div', { key: 'm' }, `现在用：${asrLabel}`),
+        asrInfo?.reason !== undefined ? h('div', { key: 'r' }, asrInfo.reason) : null,
+        asr.error !== undefined ? h('div', { key: 'e', style: { color: C.amber } }, asr.error) : null,
+        needsPrepare && asrInfo?.hint !== undefined
+          ? h('div', { key: 'h', style: { color: C.amber } }, asrInfo.hint)
+          : null,
+        serverAsr && segmentAsr.timing !== undefined
+          ? h('div', { key: 't', style: { color: C.jade } },
+            `上一段：${segmentAsr.timing.audioSeconds.toFixed(1)}s 音频 → ${segmentAsr.timing.inferenceSeconds.toFixed(2)}s 转写`)
+          : null,
+        h('div', { key: 'k', style: { color: C.boneFaint } }, '识别不可用时用键盘，面试不会中断。'),
+      ]
+
+      const ttsDetail = [
+        h('div', { key: 'm' }, `现在用：${ttsLabel}`),
+        tts.notice !== undefined ? h('div', { key: 'n', style: { color: C.amber } }, tts.notice) : null,
+        h('div', { key: 'k', style: { color: C.boneFaint } }, '播不出来时，问题仍以文字显示。'),
+      ]
+
+      // 宿主画面握手失败的实情要**压过**「已接入」的乐观反馈——
+      // 否则右栏写着「✓ 摄像头已通过宿主接入」，舞台上却是一块未接通板。
+      const acquireText = hostVideoFailed && hostCamera.active
+        ? '宿主画面没出帧——重开一次「用宿主摄像头」，或改用浏览器摄像头。'
+        : (acquireStage === undefined ? undefined : acquireStage.text)
+
+      const statusRows = [
+        { key: 'mic', tone: micOn ? 'jade' : 'faint', label: `${micOn ? '●' : '○'} 麦克风`, title: '麦克风状态与出路', detail: micDetail },
+        { key: 'cam', tone: hasAnyVideo ? 'jade' : 'faint', label: `${hasAnyVideo ? '●' : '○'} 摄像头`, title: '摄像头状态与出路', detail: cameraDetail, narrow: true },
+        { key: 'asr', tone: asr.error !== undefined ? 'amber' : 'faint', label: `${asr.error === undefined ? '○' : '●'} 识别 ${asrMode === 'host' ? '宿主' : asrMode === 'server' ? '服务端' : asrMode === 'none' ? '关' : '浏览器'}`, title: '识别链路与出路', detail: asrDetail },
+        { key: 'tts', tone: tts.notice !== undefined ? 'amber' : 'faint', label: `${tts.notice === undefined ? '○' : '●'} 播报 ${ttsShort}`, title: '播报链路与出路', detail: ttsDetail, narrow: true },
+      ]
+
+      const statusStrip = h('div', {
+        key: 'status',
+        // 2×2 的仪表簇：右栏只有 396px，四个状态一行排不下——
+        // 与其让它们自顾自折行，不如排成对齐的两列。
+        style: {
+          display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          gap: 8, alignItems: 'center',
+        },
+      }, statusRows.map(row => h(Hint, {
+        key: row.key,
+        label: h(Pill, {
+          tone: row.tone,
+          // 品牌名保留自己的大小写：`MINIMAX` 是代码，`MiniMax` 才是产品。
+          ...(row.key === 'tts' ? { style: { textTransform: 'none', letterSpacing: '0.06em' } } : {}),
+        }, row.label),
+        title: row.title,
+        // 右栏在 `overflow: hidden` 的容器里：**右列**的 Pill 只有半栏宽度，
+        // 弹层要按那个宽度收窄，否则右边缘会把文字裁掉。
+        children: h('div', { style: row.narrow === true ? { width: 150 } : undefined }, row.detail),
+      })))
+
+      const mediaButtons = h('div', { key: 'gr', style: S.row }, [
+        h('button', {
+          key: 'cam',
+          style: S.btn(false, false),
+          onClick: () => (media.stream === undefined ? void acquireMedia() : void media.stop()),
+        }, media.stream === undefined
+          ? (media.busy || hostCamera.busy ? '正在申请…' : '开摄像头与麦克风')
+          : (hasVideo ? '关摄像头' : '关麦克风')),
+        inDesktopHost()
+          ? h('button', {
+            key: 'host-cam',
+            style: S.btn(hasHostVideo ? 'primary' : false, hostCamera.busy),
+            onClick: () => (hasHostVideo ? void hostCamera.stop() : void hostCamera.start()),
+          }, hasHostVideo ? '关宿主摄像头' : '开宿主摄像头')
+          : null,
+        config?.recordVideo === false
+          ? null
+          : hasHostVideo
+            ? h('button', {
+              key: 'host-rec',
+              style: S.btn(hostCamera.recording ? 'tally' : false, false),
+              onClick: () => {
+                const sessionId = session?.session?.id ?? ''
+                if (hostCamera.recording) {
+                  void hostCamera.stopRecording(sessionId).then(result => {
+                    if (result !== undefined) {
+                      notify('录像已存到本机', `${result.name} 留在本场面试的卷宗目录里。`, 'ok')
+                      onChanged?.()
+                    }
+                  })
+                } else {
+                  void hostCamera.startRecording(sessionId)
+                }
+              },
+            }, hostCamera.recording ? '停止录制' : '开始录制')
+            : h('button', {
+              key: 'rec',
+              style: S.btn(recorder.recording ? 'tally' : false, media.stream === undefined),
+              onClick: () => (recorder.recording ? recorder.stop() : recorder.start()),
+            }, recorder.recording ? '停止录制' : (hasVideo ? '开始录制' : '开始录音')),
+        recorder.clip !== undefined && config?.recordVideo !== false
+          ? h('button', { key: 'save', style: S.btn('primary', false), onClick: saveClip }, hasVideo ? '保存录像' : '保存录音')
+          : null,
+      ])
+
+      const voiceButtons = h('div', { key: 'gr', style: S.row }, [
+        config?.recordAudio === false
+          ? null
+          : h('button', {
+            key: 'arec',
+            style: S.btn(audioRecorder.recording ? 'tally' : false, media.stream === undefined),
+            onClick: () => (audioRecorder.recording ? audioRecorder.stop() : audioRecorder.start()),
+          }, audioRecorder.recording ? '停止录音' : '录一段'),
+        h('button', {
+          key: 'asr',
+          style: S.btn(asr.active ? 'tally' : false, !asr.supported),
+          onClick: () => (asr.active ? asr.stop() : void asr.start()),
+        }, asr.active ? '停止识别' : (serverAsr ? '分段识别' : '语音识别')),
+        h('button', {
+          key: 'tts',
+          style: S.btn(false, !tts.supported),
+          onClick: speakButton,
+        }, speaking ? '关闭朗读' : '朗读问题'),
+        needsPrepare
+          ? h('button', { key: 'prep', style: S.btn('primary', false), onClick: prepareSpeech }, '准备语音模型')
+          : null,
+        audioRecorder.clip !== undefined
+          ? h('button', { key: 'trans', style: S.btn('primary', false), onClick: transcribeClip }, '识别这段录音')
+          : null,
+      ])
+
+      const fluencyLine = lastFluency === undefined
+        ? null
+        : h('div', {
+          key: 'flu',
+          title: `长停顿 ${lastFluency.pauseCount} 次（最长 ${(lastFluency.longestPauseMs / 1000).toFixed(1)}s）`
+            + ` · 口头语 ${lastFluency.fillerCount} 次 · 重复 ${lastFluency.repeats} 次`
+            + ' · 观察值，不是评分',
+          style: { display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' },
+        }, [
+          h(Meta, { key: 'l' }, '语流'),
+          h('span', {
+            key: 'v',
+            style: { ...TYPE.sub, fontFamily: F.mono, color: C.boneDim, letterSpacing: '0.02em' },
+          }, `说 ${(lastFluency.speechMs / 1000).toFixed(1)}s · 停 ${(lastFluency.silenceMs / 1000).toFixed(1)}s · 语速 ${lastFluency.speechRate}`),
+        ])
+
+      const controlPanel = h(Panel, {
+        key: 'ctrl',
+        tone: 'raised',
+        pad: 16,
+        style: { flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 12 },
+      }, [
+        statusStrip,
+        h('div', { key: 'hair1', style: { height: 1, background: C.ruleSoft } }),
+        h('div', { key: 'g-cam' }, [
+          h(Meta, { key: 'l', style: { display: 'block', marginBottom: 6 } }, '画面'),
+          mediaButtons,
+        ]),
+        h('div', { key: 'g-voice' }, [
+          h(Meta, { key: 'l', style: { display: 'block', marginBottom: 6 } }, '声音'),
+          voiceButtons,
+        ]),
+        h('div', { key: 'hair2', style: { height: 1, background: C.ruleSoft } }),
+        h('div', {
+          key: 'meter',
+          style: { display: 'flex', alignItems: 'center', gap: 10 },
+        }, [
+          h(Meta, { key: 'l' }, '输入电平'),
+          h('div', { key: 'm', style: { flex: '1 1 auto', minWidth: 0 } }, h(SegmentedMeter, { level: media.level })),
+          h(Meta, { key: 's', tone: asr.active ? 'jade' : undefined }, asr.active ? '识别中' : '待命'),
+        ]),
+        acquireText === undefined
+          ? null
+          : h(Quiet, {
+            key: 'stage',
+            tone: acquireText.startsWith('✓') ? 'ok' : 'muted',
+          }, acquireText),
+        fluencyLine,
+        asr.error !== undefined ? h(Quiet, { key: 'ae', tone: 'warn' }, asr.error) : null,
+        // 播报回落**说出来**：不静默换链路，也不让人以为听到的是模型。
+        tts.notice !== undefined ? h(Quiet, { key: 'tn', tone: 'warn' }, tts.notice) : null,
+        asr.interim !== ''
+          ? h('div', {
+            key: 'ai',
+            style: { ...TYPE.sub, color: C.boneFaint, fontStyle: 'italic' },
+          }, asr.interim)
+          : null,
+      ])
+
+      const transcriptPanel = h(Panel, {
+        key: 'tr',
+        tone: 'raised',
+        pad: 16,
+        style: stacked
+          ? { maxHeight: 420, overflowY: 'auto' }
+          : { flex: '1 1 auto', minHeight: 240, overflowY: 'auto' },
+      }, [
+        h('div', {
+          key: 'h',
+          style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 },
+        }, [
+          h(Meta, { key: 't' }, '速记'),
+          h(Meta, { key: 'n' }, `${transcript.length} 轮`),
+        ]),
+        transcript.length === 0
+          // 空速记不能只是一行小字挂在半空的浮起面板里——那会让右栏
+          // 「只剩按钮 + 一大片空」，立体感整个塌掉。给一个占满的凹位。
+          ? h('div', {
+            key: 'e',
+            style: {
+              flex: '1 1 auto', minHeight: 96, display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+            },
+          }, h(Empty, { key: 'empty', title: '还没有速记' }))
+          : h('div', { key: 'l' }, transcript.map((row, index) => {
+            const asked = row.role === 'interviewer'
+            const answered = row.role === 'candidate'
+            return h('div', {
+              key: `${row.ts}-${index}`,
+              style: {
+                display: 'flex', gap: 10, alignItems: 'baseline', padding: '7px 0',
+                borderBottom: `1px solid ${C.ruleSoft}`,
+              },
+            }, [
+              h(Meta, { key: 'r', tone: asked ? 'amber' : answered ? 'jade' : undefined },
+                asked ? '问' : answered ? '答' : '系统'),
+              h('span', {
+                key: 'x',
+                style: { flex: '1 1 auto', minWidth: 0, ...TYPE.sub, color: C.boneDim, lineHeight: 1.7 },
+              }, row.text),
+              h(Meta, { key: 't', style: { flex: '0 0 auto' } }, formatTime(row.ts)),
+            ])
+          })),
+      ])
+
+      const answerCard = h(Panel, {
+        key: 'ans',
+        tone: 'raised',
+        pad: 16,
+        style: { flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 8 },
+      }, [
+        h('div', {
+          key: 'h',
+          style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
+        }, [
+          h(Meta, { key: 'l' }, '我的回答'),
+          h(Meta, { key: 's', tone: running ? 'jade' : undefined }, running ? '进行中' : '未开始'),
+        ]),
+        h('textarea', {
+          key: 't',
+          style: { ...S.textarea, minHeight: 92 },
+          value: answer,
+          placeholder: '说话或打字…',
+          onChange: event => setAnswer(event.target.value),
+        }),
+        h('div', { key: 'a', style: { ...S.row } }, [
+          h('button', { key: 's', style: S.btn('primary', answer.trim() === ''), onClick: submitAnswer }, '提交回答'),
+          h('button', { key: 'c', style: S.btn(false, answer.trim() === ''), onClick: copyAnswer }, '复制'),
+          h('div', { key: 'sp', style: { marginLeft: 'auto', display: 'flex', gap: 8 } }, [
+            running
+              ? h('button', { key: 'f', style: S.btn(false, false), onClick: finishInterview }, '结束面试')
+              : h('button', { key: 's', style: S.btn('primary', false), onClick: startInterview }, '开始面试'),
+            !running && !reportReady
+              ? h('button', {
+                key: 'report',
+                style: S.btn(tooShortForReport ? false : 'primary', false),
+                title: tooShortForReport
+                  ? '这场太短，报告分析不出什么；真需要可以让助手在对话里写'
+                  : '让助手写事后分析报告',
+                onClick: () => { void dispatchReport() },
+              }, tooShortForReport ? '太短，仍可生成' : '生成事后报告')
+              : null,
+          ]),
+        ]),
       ])
 
       return h('div', {
@@ -3886,7 +5596,9 @@ window.__ModuleLoader__.load({
         style: stacked
           // 窄：一列，舞台在上、控件在下，整页内部滚。
           ? { display: 'flex', flexDirection: 'column', gap: 14, flex: '1 1 auto', minHeight: 0, overflowY: 'auto' }
-          : { display: 'flex', gap: 16, flex: '1 1 auto', minHeight: 0 },
+          // 宽：左右两栏。**内容放不下时整块可滚**（高度不够时总有路走），
+          // 但舞台有 minHeight，不会被压成一条。
+          : { display: 'flex', gap: 16, flex: '1 1 auto', minHeight: 0, overflowY: 'auto' },
       }, [
         // ── 左：舞台 + 回答 ────────────────────────────────────────────
         h('div', {
@@ -3896,266 +5608,34 @@ window.__ModuleLoader__.load({
             minWidth: 0,
             display: 'flex', flexDirection: 'column', gap: 14,
           },
-        }, [
-          stage,
-          h('div', {
-            key: 'ans',
-            style: {
-              flex: '0 0 auto',
-              background: C.ink850, border: `1px solid ${C.rule}`, borderRadius: 12, padding: '14px 16px',
-            },
-          }, [
-            h('div', { key: 'h', style: { ...S.eyebrow, marginBottom: 9 } }, '我的回答'),
-            h('textarea', {
-              key: 't',
-              style: { ...S.textarea, minHeight: 96 },
-              value: answer,
-              placeholder: '说话或打字。提交后进入速记，成为事后分析的事实来源。',
-              onChange: event => setAnswer(event.target.value),
-            }),
-            h('div', { key: 'a', style: { ...S.row, marginTop: 11 } }, [
-              h('button', { key: 's', style: S.btn('primary', answer.trim() === ''), onClick: submitAnswer }, '提交回答'),
-              h('button', { key: 'c', style: S.btn(false, answer.trim() === ''), onClick: copyAnswer }, '复制'),
-              h('div', { key: 'sp', style: { marginLeft: 'auto', display: 'flex', gap: 8 } }, [
-                running
-                  ? h('button', { key: 'f', style: S.btn(false, false), onClick: finishInterview }, '结束面试')
-                  : h('button', { key: 's', style: S.btn('primary', false), onClick: startInterview }, '开始面试'),
-                !running && !reportReady
-                  ? h('button', {
-                    key: 'report',
-                    style: S.btn(tooShortForReport ? false : 'primary', tooShortForReport),
-                    title: tooShortForReport ? '这场太短，报告分析不出什么；真需要可以让助手在对话里写' : '让助手写事后分析报告',
-                    onClick: () => { void dispatchReport() },
-                  }, tooShortForReport ? '太短，先不生成报告' : '生成事后报告')
-                  : null,
-              ]),
-            ]),
-          ]),
-        ]),
+        }, [stage, answerCard]),
 
-        // ── 右：控件 + 速记 ────────────────────────────────────────────
+        // ── 右：状态条 + 控件 + 速记 ──────────────────────────────────
         h('div', {
           key: 'rail',
           'data-iv-rail': '1',
           style: stacked
-            // 窄：整宽，排在舞台下面。
             ? { flex: '0 0 auto', width: '100%', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }
-            // 宽：右栏固定一栏。
-            //
-            // **它不许收缩**——右栏里的按钮（「开摄像头」「开始录制」
-            // 「录一段」「语音识别」「朗读问题」）和「识别链路」那段说明
-            // 都是按 396px 排的，挤到 255px 就得折行，功能反而更难找。
-            //
-            // 之前这里写的是「可以收缩」，结果右栏被压成 255px、
-            // 舞台撑到 448px——主次正好反了。现在舞台是那个「让出空间」的一方
-            // （flex: 1 1 auto），右栏保底 396px；
-            // 而窄到放不下时早就切成纵向堆叠了，不会再把舞台挤没。
-            : { flex: '0 0 396px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 },
-        }, [
-          h('div', {
-            key: 'ctrl',
-            style: {
+            // 宽：右栏**按比例让位**。舞台才是这一页的主角——以前这里写死 396px，
+            // 宿主侧边栏一展开，被压扁的永远是视频区，而控件区一寸不让。
+            // 现在：最窄 268（按钮还排得下），最宽 396（宽屏不浪费），中间取 32%。
+            : {
               flex: '0 0 auto',
-              background: C.ink850, border: `1px solid ${C.rule}`, borderRadius: 12,
-              padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 13,
+              width: 'clamp(268px, 32%, 396px)',
+              display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0,
             },
-          }, [
-            // 画面这一组：摄像头 + 录像。
-            h('div', { key: 'g1' }, [
-              // **组名跟着实际情况走。** 只有麦克风的时候，这组里根本没有画面，
-              // 还叫「画面」就是骗人。
-              h('div', { key: 'gh', style: { ...S.eyebrow, marginBottom: 8 } }, hasAnyVideo ? '画面' : '设备'),
-              h('div', { key: 'gr', style: S.row }, [
-                // **浏览器摄像头**：能用就用它，它更省事（不用 ffmpeg）。
-                h('button', {
-                  key: 'cam',
-                  style: S.btn(false, false),
-                  onClick: () => (media.stream === undefined ? void acquireMedia() : void media.stop()),
-                  // 麦克风通了、摄像头没通的时候，关掉的其实是麦克风——
-                  // 按钮得说它真正会关掉什么。
-                }, media.stream === undefined
-                  ? (media.busy || hostCamera.busy ? '正在申请…' : '开摄像头与麦克风')
-                  : (hasVideo ? '关摄像头' : '关麦克风')),
-                // **Host 摄像头**：桌面端的第二条路。
-                //
-                // 摄像头是独占设备，两边不能同时开——所以只在浏览器的摄像头
-                // 没拿到画面时才亮这个按钮。
-                inDesktopHost()
-                  ? h('button', {
-                    key: 'host-cam',
-                    style: S.btn(hasHostVideo ? 'primary' : false, hostCamera.busy),
-                    onClick: () => (hasHostVideo ? void hostCamera.stop() : void hostCamera.start()),
-                  }, hasHostVideo ? '关宿主摄像头' : '开宿主摄像头')
-                  : null,
-                // **录像走哪一边，取决于画面在哪一边。**
-                //
-                // 画面在 Host（桌面端），录像就该由 Host 写盘——它手里本来
-                // 就握着一帧帧的图像，转成 mp4 是最短的路。浏览器那边的
-                // MediaRecorder 只能录到麦克风。
-                // 隐私开关：关掉录像入口，就不该再出现"开始录制"。
-                config?.recordVideo === false ? null : hasHostVideo
-                  ? h('button', {
-                    key: 'host-rec',
-                    style: S.btn(hostCamera.recording ? 'tally' : false, false),
-                    onClick: () => {
-                      const sessionId = session?.session?.id ?? ''
-                      if (hostCamera.recording) {
-                        void hostCamera.stopRecording(sessionId).then(result => {
-                          if (result !== undefined) {
-                            notify('录像已存到本机', `${result.name} 留在本场面试的卷宗目录里。`, 'ok')
-                            onChanged?.()
-                          }
-                        })
-                      } else {
-                        void hostCamera.startRecording(sessionId)
-                      }
-                    },
-                  }, hostCamera.recording ? '停止录制' : '开始录制')
-                  : h('button', {
-                    key: 'rec',
-                    style: S.btn(recorder.recording ? 'tally' : false, media.stream === undefined),
-                    onClick: () => (recorder.recording ? recorder.stop() : recorder.start()),
-                  }, recorder.recording ? '停止录制' : (hasVideo ? '开始录制' : '开始录音')),
-                recorder.clip !== undefined && config?.recordVideo !== false
-                  ? h('button', { key: 'save', style: S.btn('primary', false), onClick: saveClip }, hasVideo ? '保存录像' : '保存录音')
-                  : null,
-              ]),
-              // 分步反馈放在**栏里**，不在"未接通板"里：板子会在接通后卸载。
-              acquireStage === undefined
-                ? null
-                : h('div', {
-                  key: 'stage',
-                  style: { ...S.hint, marginTop: 8, color: acquireStage.text.startsWith('✓') ? C.jade : C.boneFaint },
-                }, acquireStage.text),
-            ]),
-
-            // 声音这一组：录音 + 识别 + 朗读。
-            h('div', { key: 'g2' }, [
-              h('div', { key: 'gh', style: { ...S.eyebrow, marginBottom: 8 } }, '声音'),
-              h('div', { key: 'gr', style: S.row }, [
-                config?.recordAudio === false ? null : h('button', {
-                  key: 'arec',
-                  style: S.btn(audioRecorder.recording ? 'tally' : false, media.stream === undefined),
-                  onClick: () => (audioRecorder.recording ? audioRecorder.stop() : audioRecorder.start()),
-                }, audioRecorder.recording ? '停止录音' : '录一段'),
-                h('button', {
-                  key: 'asr',
-                  style: S.btn(asr.active ? 'tally' : false, !asr.supported),
-                  onClick: () => (asr.active ? asr.stop() : void asr.start()),
-                }, asr.active ? '停止识别' : (serverAsr ? '分段识别' : '语音识别')),
-                h('button', {
-                  key: 'tts',
-                  style: S.btn(false, !tts.supported),
-                  onClick: speakButton,
-                }, speaking ? '关闭朗读' : '朗读问题'),
-                needsPrepare
-                  ? h('button', {
-                    key: 'prep',
-                    style: S.btn('primary', false),
-                    onClick: prepareSpeech,
-                  }, '准备语音模型')
-                  : null,
-              ]),
-              audioRecorder.clip !== undefined
-                ? h('button', {
-                  key: 'trans',
-                  style: { ...S.btn('primary', false), marginTop: 9 },
-                  onClick: transcribeClip,
-                }, '识别这段录音')
-                : null,
-            ]),
-
-            h('div', { key: 'meter' }, [
-              h('div', {
-                key: 'h',
-                style: { ...S.label, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-              }, [
-                h('span', { key: 'l' }, asr.active ? '正在聆听…' : '输入电平'),
-                h('span', { key: 'r', style: { color: asr.active ? C.jade : C.boneFaint } }, asr.active ? '识别中' : '待命'),
-              ]),
-              h(SegmentedMeter, { key: 'm', level: media.level }),
-            ]),
-
-            // 语流：上一轮回答的「怎么说」。观察值，不是评分。
-            lastFluency !== undefined
-              ? h('div', { key: 'flu', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7 } },
-                `语流：说 ${(lastFluency.speechMs / 1000).toFixed(1)}s · 停 ${(lastFluency.silenceMs / 1000).toFixed(1)}s`
-                + `（长停顿 ${lastFluency.pauseCount} 次，最长 ${(lastFluency.longestPauseMs / 1000).toFixed(1)}s）`
-                + ` · 语速 ${lastFluency.speechRate} 字/秒`
-                + ` · 口头语 ${lastFluency.fillerCount} 次 · 重复 ${lastFluency.repeats} 次`)
-              : null,
-
-            // 权限错误**不在这里再说一遍**——舞台上的红框已经把话说全了，
-            // 同一句话出现在两个地方只会让人以为出了两个问题。
-            asr.error !== undefined
-              ? h('div', { key: 'ae', style: { fontSize: 11.5, color: C.amber, lineHeight: 1.6 } }, asr.error)
-              : null,
-            asr.interim !== ''
-              ? h('div', { key: 'ai', style: { fontSize: 11.5, color: C.boneFaint, fontStyle: 'italic' } }, asr.interim)
-              : null,
-            // 链路状态：**面板必须说清现在用的是哪条**，以及为什么用它。
-            // 「静默换了链路」比换个链路更糟——用户会以为在用模型，实际是系统音色。
-            h('div', { key: 'chain', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7 } }, [
-              h('div', { key: 'a' }, `识别：${asrLabel}`),
-              h('div', { key: 't' }, `播报：${ttsLabel}`),
-              asrInfo?.reason !== undefined
-                ? h('div', { key: 'ar', style: { fontStyle: 'italic' } }, asrInfo.reason)
-                : null,
-              serverAsr && segmentAsr.timing !== undefined
-                ? h('div', { key: 'at', style: { color: C.jade } },
-                  `上一段：${segmentAsr.timing.audioSeconds.toFixed(1)}s 音频 → ${segmentAsr.timing.inferenceSeconds.toFixed(2)}s 转写`)
-                : null,
-              tts.notice !== undefined
-                ? h('div', { key: 'tn', style: { color: C.amber } }, tts.notice)
-                : null,
-              needsPrepare && asrInfo?.hint !== undefined
-                ? h('div', { key: 'ah', style: { color: C.amber } }, asrInfo.hint)
-                : null,
-            ]),
-          ]),
-
-          // 速记：右栏的常驻滚动区。
-          h('div', {
-            key: 'tr',
-            style: {
-              flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-              background: C.ink850, border: `1px solid ${C.rule}`, borderRadius: 12, padding: '14px 16px',
-            },
-          }, [
-            h('div', {
-              key: 'h',
-              style: { ...S.eyebrow, marginBottom: 10, display: 'flex', justifyContent: 'space-between' },
-            }, [
-              h('span', { key: 't' }, '速记'),
-              h('span', { key: 'n', style: { color: C.boneFaint } }, `${transcript.length} 轮`),
-            ]),
-            transcript.length === 0
-              ? h('div', { key: 'e', style: S.hint }, '还没有转录。')
-              : h('div', { key: 'l' }, transcript.map((row, index) => h('div', {
-                key: `${row.ts}-${index}`,
-                style: {
-                  display: 'flex', gap: 10, padding: '7px 0', alignItems: 'flex-start',
-                  borderBottom: `1px solid ${C.ruleSoft}`,
-                },
-              }, [
-                h('span', {
-                  key: 't',
-                  style: { ...S.mono, fontSize: 10.5, color: C.boneFaint, flex: '0 0 auto', paddingTop: 2 },
-                }, formatTime(row.ts)),
-                h('span', {
-                  key: 'r',
-                  style: S.pill(row.role === 'interviewer' ? 'amber' : row.role === 'candidate' ? 'jade' : 'faint'),
-                }, row.role === 'interviewer' ? '问' : row.role === 'candidate' ? '答' : '系统'),
-                h('span', { key: 'x', style: { fontSize: 12.5, color: C.boneDim, lineHeight: 1.65 } }, row.text),
-              ]))),
-          ]),
-        ]),
+        }, [controlPanel, transcriptPanel]),
       ])
     }
 
-    /** The report view. */
+    /**
+     * The report view: reading layout first, instrument readings second.
+     *
+     * 报告是**评估表**：衬线大标题 + 13.5/1.85 的正文，一列读下来；
+     * 统计收成一行仪表读数，别让数字和正文抢注意力。
+     */
     function ReportView(props) {
-      const { session, onChanged, notify } = props
+      const { session, notify } = props
       const report = session?.report ?? ''
       const durationMs = session?.stats?.durationMs ?? 0
       const tooShortForReport = durationMs > 0 && durationMs < 3 * 60 * 1000
@@ -4168,61 +5648,93 @@ window.__ModuleLoader__.load({
         }
       }
 
-      return h('div', { style: { maxWidth: 1180 } }, [
+      const stats = [
+        { key: 'st-asked', label: '提问', value: session?.stats?.asked ?? 0 },
+        { key: 'st-answered', label: '回答', value: session?.stats?.answered ?? 0 },
+        { key: 'st-cover', label: '考点覆盖', value: `${session?.stats?.checklistProbed ?? 0}/${session?.stats?.checklistTotal ?? 0}` },
+        { key: 'st-adj', label: '底稿调整', value: session?.stats?.adjustments ?? 0 },
+        { key: 'st-dur', label: '时长', value: formatClock(durationMs) },
+      ]
+
+      const recordings = session?.recordings ?? []
+
+      return h('div', {
+        style: { maxWidth: 840, margin: '0 auto', width: '100%' },
+      }, [
         h('div', {
-          key: 'grid',
-          style: {
-            display: 'grid', gap: 16,
-            gridTemplateColumns: 'repeat(auto-fit, minmax(430px, 1fr))',
-            alignItems: 'start',
-          },
+          key: 'head',
+          style: { display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', marginBottom: 18 },
         }, [
-        h('div', { key: 'body' }, [
-        h(Section, {key: 'k12', 
-          title: '评估表',
-          extra: h('span', { style: S.hint }, report !== '' ? `已生成 ${report.length} 字` : '待生成'),
-        }, [
-          report !== ''
-            ? h(Markdown, { key: 'md', text: report })
-            : h('div', { key: 'e', style: { ...S.hint, lineHeight: 1.8 } }, [
-              h('div', { key: 't' }, tooShortForReport
-                ? `这场只有 ${formatClock(durationMs)}，太短了——报告分析不出什么，先不生成。`
-                : '还没有报告。可以现在让助手写一份，产出后会自动出现在这里。'),
-              !tooShortForReport
-                ? h('div', { key: 'b', style: { marginTop: 10 } }, h('button', {
-                  key: 'r',
-                  style: S.btn('primary', false),
-                  onClick: () => { void dispatchReport() },
-                }, '生成事后报告'))
-                : null,
+          h('div', { key: 'l', style: { minWidth: 0, flex: '1 1 auto' } }, [
+            h(Meta, { key: 'e', className: 'iv-tick' }, '评估表'),
+            h('div', {
+              key: 't',
+              style: { ...S.title, marginTop: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+            }, session?.session?.title ?? '面试报告'),
+            h('div', { key: 'm', style: { ...S.row, marginTop: 8 } }, [
+              h(Meta, { key: 'd' }, formatClock(durationMs)),
+              h(Meta, { key: 'c' }, report !== '' ? `${report.length} 字` : '待生成'),
             ]),
+          ]),
+          report === ''
+            ? null
+            : h('button', {
+              key: 're',
+              style: { ...S.btn(false, false), marginLeft: 'auto' },
+              title: '让助手重新写一份',
+              onClick: () => { void dispatchReport() },
+            }, '重新生成'),
         ]),
-        ]),
-        h('div', { key: 'side' }, [
-        h(Section, {key: 'k13',  title: '卷内统计' }, [
-          h('div', {key: 'k15',  style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 } },
-            [
-              { key: 'st-asked', label: '提问', value: session?.stats?.asked ?? 0 },
-              { key: 'st-answered', label: '回答', value: session?.stats?.answered ?? 0 },
-              { key: 'st-cover', label: '考点覆盖', value: `${session?.stats?.checklistProbed ?? 0}/${session?.stats?.checklistTotal ?? 0}` },
-              { key: 'st-adj', label: '底稿调整', value: session?.stats?.adjustments ?? 0 },
-              { key: 'st-dur', label: '时长', value: formatClock(session?.stats?.durationMs ?? 0) },
-            ].map(row => statTile(row))),
-        ]),
-        h(Section, {key: 'k14',  title: '卷宗材料' }, [
-          (session?.recordings ?? []).length === 0
-            ? h('div', {key: 'k16',  style: S.hint }, '没有保存过录像或录音片段。')
-            : h('div', { key: 'l' }, (session.recordings ?? []).map(item => h('div', {
+
+        h('div', {
+          key: 'stats',
+          style: { display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 },
+        }, stats.map(row => statTile(row))),
+
+        report !== ''
+          ? h(Panel, {
+            key: 'body',
+            tone: 'plain',
+            pad: 0,
+            style: { padding: '28px 34px' },
+          }, h(Markdown, { key: 'md', text: report }))
+          : h('div', { key: 'empty', style: { display: 'flex', flexDirection: 'column', gap: 12 } }, [
+            h(Empty, {
+              key: 'e',
+              title: tooShortForReport ? `这场只有 ${formatClock(durationMs)}` : '还没有报告',
+              action: h('button', {
+                key: 'go',
+                style: S.btn('primary', false),
+                onClick: () => { void dispatchReport() },
+              }, tooShortForReport ? '仍然生成' : '让助手写报告'),
+            }),
+            tooShortForReport
+              ? h(Quiet, { key: 'q', tone: 'warn' }, '太短的一场分析不出什么；真需要就点「仍然生成」。')
+              : null,
+          ]),
+
+        recordings.length === 0
+          ? null
+          : h('div', { key: 'files', style: { marginTop: 18 } }, [
+            h(Meta, { key: 'h', style: { display: 'block', marginBottom: 6 } }, '卷宗材料'),
+            h('div', { key: 'l' }, recordings.map(item => h('div', {
               key: item.name,
-              style: { display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.ruleSoft}` },
+              style: {
+                display: 'flex', gap: 12, alignItems: 'center', padding: '7px 0',
+                borderBottom: `1px solid ${C.ruleSoft}`,
+              },
             }, [
-              h('span', { key: 'k', style: S.pill(item.kind === 'video' ? 'amber' : 'jade') }, item.kind === 'video' ? '录像' : '录音'),
-              h('span', { key: 'n', style: { flex: '1 1 auto', color: C.boneDim, fontSize: 12 } }, item.name),
-              h('span', { key: 's', style: { ...S.mono, color: C.boneFaint, fontSize: 11 } }, formatBytes(item.bytes)),
+              h(Pill, { key: 'k', tone: item.kind === 'video' ? 'amber' : 'jade' }, item.kind === 'video' ? '录像' : '录音'),
+              h('span', {
+                key: 'n',
+                style: {
+                  flex: '1 1 auto', minWidth: 0, ...TYPE.sub, color: C.boneDim,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                },
+              }, item.name),
+              h(Meta, { key: 's' }, formatBytes(item.bytes)),
             ]))),
-        ]),
-        ]),
-        ]),
+          ]),
       ])
     }
 
@@ -4237,9 +5749,14 @@ window.__ModuleLoader__.load({
  *
  * 写入走 `POST /settings`（白名单 + 规格校验）；**配置文件里显式写过的项
  * 会拒绝面板覆盖，并说明原因**，不会假装保存成功。
+ *
+ * 语音两区按 `docs/DESIGN.md §9` 做成「配 → 存 → 测 → 用」闭环：
+ *   现在用（一行） / 服务下拉（来自 `GET voice/presets`，前端不硬编码）
+ *   / 端点·模型·语言 / 凭据（已有下拉 + 替换 + 清除，密钥只进不出）
+ *   / 一个真跑的测试按钮（失败给具体原因与下一步）。
  */
 function SettingsView(props) {
-  const { session, notify } = props
+  const { session, notify, theme, themeFollow, hostScheme, onChangeTheme, onChangeThemeFollow } = props
   const sessionId = session?.session?.id
   const snapshot = usePoll(
     () => apiGet('settings', sessionId === undefined ? undefined : { session: sessionId }),
@@ -4252,6 +5769,15 @@ function SettingsView(props) {
   // 空场次清理同样两步确认。
   const [purgeArm, setPurgeArm] = useState(false)
   const [form, setForm] = useState(undefined)
+  // 语音测试的最近一次结果（成功/失败都要留在界面上，失败是出路不是弹窗）。
+  const [asrTest, setAsrTest] = useState(undefined)
+  const [ttsTest, setTtsTest] = useState(undefined)
+  // 正在录 2 秒样本（测试识别用）。
+  const [recording, setRecording] = useState(false)
+  // 替换密钥：{kind, ref, value}。value 只在这里活到保存成功为止。
+  const [secretEdit, setSecretEdit] = useState(undefined)
+  // 清除要两步（防手滑，不是防呆）。
+  const [clearArm, setClearArm] = useState('')
 
   // 首次拿到快照时，用**面板设置**填表单（没设置过的项留空，让 placeholder 显示生效值）。
   useEffect(() => {
@@ -4259,16 +5785,17 @@ function SettingsView(props) {
     const settings = data.settings ?? {}
     setForm({
       asrProvider: settings.asrProvider ?? 'auto',
-      asrEndpoint: settings.asrEndpoint ?? '',
       asrBaseUrl: settings.asrBaseUrl ?? '',
       asrModel: settings.asrModel ?? '',
       asrApiKeyEnv: settings.asrApiKeyEnv ?? '',
+      asrGroupId: settings.asrGroupId ?? '',
       asrLanguage: settings.asrLanguage ?? '',
       ttsProvider: settings.ttsProvider ?? 'auto',
       ttsModel: settings.ttsModel ?? '',
       ttsVoice: settings.ttsVoice ?? '',
       ttsBaseUrl: settings.ttsBaseUrl ?? '',
       ttsApiKeyEnv: settings.ttsApiKeyEnv ?? '',
+      ttsGroupId: settings.ttsGroupId ?? '',
       ttsFormat: settings.ttsFormat ?? '',
       ttsRate: settings.ttsRate === undefined ? '' : String(settings.ttsRate),
       ttsStyle: settings.ttsStyle ?? '',
@@ -4283,16 +5810,19 @@ function SettingsView(props) {
 
   const set = useCallback((key, value) => setForm(previous => ({ ...previous, [key]: value })), [])
 
-  const save = useCallback(async (patch, label) => {
+  const save = useCallback(async (patch, label, options = {}) => {
     const cleaned = {}
     for (const [key, value] of Object.entries(patch)) {
-      if (value === '' || value === undefined) continue
+      if (value === undefined) continue
       if (key === 'ttsRate') {
+        if (value === '') continue
         const number = Number(value)
-        if (!Number.isFinite(number)) { notify('保存失败', '语速必须是数字', 'error'); return }
+        if (!Number.isFinite(number)) { notify('没保存', '语速必须是数字', 'error'); return }
         cleaned[key] = number
         continue
       }
+      // 语音区允许把某一项改回空（= 用该服务默认值）；其余区空串 = 不动。
+      if (value === '' && options.allowEmpty !== true) continue
       cleaned[key] = value
     }
     setBusy(label)
@@ -4302,15 +5832,13 @@ function SettingsView(props) {
       const ignored = result?.ignored ?? []
       const problems = [...invalid, ...ignored]
       notify(
-        problems.length === 0 ? '设置已保存' : '部分设置没保存',
-        problems.length === 0
-          ? '下一次操作就会按新设置执行。'
-          : problems.map(item => item.reason).join('；'),
+        problems.length === 0 ? '已保存' : '部分没保存',
+        problems.length === 0 ? undefined : problems.map(item => item.reason).join('；'),
         problems.length === 0 ? 'ok' : 'error',
       )
       snapshot.refresh()
     } catch (failure) {
-      notify('保存失败', failure instanceof Error ? failure.message : String(failure), 'error')
+      notify('没保存', failure instanceof Error ? failure.message : String(failure), 'error')
     } finally {
       setBusy('')
     }
@@ -4321,7 +5849,7 @@ function SettingsView(props) {
     try {
       const result = await apiGet('camera/diagnose')
       setDiagnosis(result)
-      notify(result.ok ? '摄像头可用' : '摄像头不可用', result.ok ? `采集后端：${result.backend ?? '未知'}` : (result.reason ?? ''), result.ok ? 'ok' : 'error')
+      notify(result.ok ? '摄像头可用' : '摄像头不可用', result.ok ? undefined : (result.hint ?? result.reason ?? ''), result.ok ? 'ok' : 'error')
     } catch (failure) {
       notify('自检失败', failure instanceof Error ? failure.message : String(failure), 'error')
     } finally {
@@ -4360,10 +5888,158 @@ function SettingsView(props) {
       setBusy('')
       snapshot.refresh()
     }
-  }, [notify])
+  }, [notify, snapshot])
+
+  /** 写一把密钥到宿主凭据存储。成功立刻清空输入框（值不留在这个页面的状态里）。 */
+  const saveSecret = useCallback(async () => {
+    const edit = secretEdit
+    if (edit === undefined) return
+    if (edit.ref === '') { notify('没保存', '先选一个服务或凭据名。', 'error'); return }
+    if (String(edit.value).trim() === '') {
+      notify('没保存', '密钥是空的；要删除已保存的密钥请用「清除」。', 'error')
+      return
+    }
+    setBusy('secret')
+    try {
+      const result = await apiPost('voice/credentials', { action: 'set', ref: edit.ref, value: edit.value })
+      setSecretEdit(undefined)
+      if (result?.ok === false) {
+        notify('没保存', [result.reason, result.hint].filter(part => part !== undefined && part !== '').join(' '), 'error')
+        return
+      }
+      notify('已保存', undefined, 'ok')
+      snapshot.refresh()
+    } catch (failure) {
+      notify('没保存', failure instanceof Error ? failure.message : String(failure), 'error')
+    } finally {
+      setBusy('')
+    }
+  }, [secretEdit, notify, snapshot])
+
+  /** 清除凭据：第一次点只是上膛。 */
+  const clearCredential = useCallback(async (kind, ref) => {
+    if (ref === '') { notify('没清除', '先选一个服务或凭据名。', 'error'); return }
+    if (clearArm !== kind) {
+      setClearArm(kind)
+      setTimeout(() => setClearArm(''), 5000)
+      return
+    }
+    setClearArm('')
+    setBusy('secret')
+    try {
+      const result = await apiPost('voice/credentials', { action: 'clear', ref })
+      if (result?.ok === false) {
+        notify('没清掉', [result.reason, result.hint].filter(part => part !== undefined && part !== '').join(' '), 'error')
+        return
+      }
+      notify('已清除', result?.hint, result?.configured === true ? 'error' : 'ok')
+      snapshot.refresh()
+    } catch (failure) {
+      notify('没清掉', failure instanceof Error ? failure.message : String(failure), 'error')
+    } finally {
+      setBusy('')
+    }
+  }, [clearArm, notify, snapshot])
+
+  /** 现场录 2 秒 → 16 kHz 单声道 WAV（识别服务要的是波形，不是 webm）。 */
+  const recordTestSample = useCallback(async () => {
+    if (typeof navigator === 'undefined' || navigator.mediaDevices === undefined
+      || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      throw new Error('这个环境没有麦克风接口。')
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    try {
+      const Recorder = typeof window === 'undefined' ? undefined : window.MediaRecorder
+      if (typeof Recorder !== 'function') throw new Error('这个环境不支持录音（MediaRecorder）。')
+      const chunks = []
+      const recorder = new Recorder(stream)
+      const stopped = new Promise(resolve => {
+        recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }))
+      })
+      recorder.ondataavailable = event => {
+        if (event.data !== undefined && event.data !== null && event.data.size > 0) chunks.push(event.data)
+      }
+      recorder.start()
+      setRecording(true)
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      recorder.stop()
+      const blob = await stopped
+      const decoded = await decodeToMono16k(await blob.arrayBuffer())
+      return { dataBase64: bufferToBase64(encodeWav(decoded.samples, decoded.sampleRate)), mimeType: 'audio/wav' }
+    } finally {
+      setRecording(false)
+      stream.getTracks().forEach(track => track.stop())
+    }
+  }, [])
+
+  /** 播报测试：**真跑**当前链路；浏览器音色那条 Host 合成不了，就用面板自己的语音播一句。 */
+  const testTts = useCallback(async () => {
+    setBusy('tts-test')
+    setTtsTest(undefined)
+    try {
+      const result = await apiPost('voice/test', { kind: 'tts' })
+      if (result?.ok === true && typeof result.audioBase64 === 'string' && result.audioBase64 !== '') {
+        const url = URL.createObjectURL(base64ToBlob(result.audioBase64, result.mimeType))
+        const audio = new Audio(url)
+        audio.onended = () => URL.revokeObjectURL(url)
+        await audio.play().catch(() => { /* 自动播放被拦：链路本身已通，如实说 */ })
+        setTtsTest({
+          ok: true,
+          line: `${result.label || result.provider || '模型'} · ${Math.round(result.ms ?? 0)} ms · 已播放`,
+          detail: [result.model, result.voice].filter(part => part !== undefined && part !== '').join(' · '),
+        })
+        return
+      }
+      // Host 侧没有可合成音频 = 这条链路是浏览器系统音色：**真播一次**再回报。
+      if (result?.mode === 'browser' && typeof window !== 'undefined'
+        && typeof window.speechSynthesis?.speak === 'function'
+        && typeof SpeechSynthesisUtterance === 'function') {
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance('这是一次语音播报测试。听到这句话，说明面试官的声音已经接通。'))
+        setTtsTest({ ok: true, line: '浏览器系统音色 · 已播放', detail: result.reason ?? '' })
+        return
+      }
+      setTtsTest({
+        ok: false,
+        line: `失败 · ${result?.mode ?? '未知链路'}${result?.provider === undefined ? '' : ` · ${result.provider}`}`,
+        detail: [result?.reason, result?.hint].filter(part => part !== undefined && part !== '').join(' '),
+      })
+    } catch (failure) {
+      setTtsTest({ ok: false, line: '失败', detail: failure instanceof Error ? failure.message : String(failure) })
+    } finally {
+      setBusy('')
+    }
+  }, [])
+
+  /** 识别测试：录 2 秒 → 走完整回落链 → 回显结果、链路、耗时、每次尝试。 */
+  const testAsr = useCallback(async () => {
+    setBusy('asr-test')
+    setAsrTest(undefined)
+    try {
+      const sample = await recordTestSample()
+      const result = await apiPost('voice/test', { kind: 'asr', dataBase64: sample.dataBase64, mimeType: sample.mimeType })
+      const attempts = Array.isArray(result?.attempts) ? result.attempts : []
+      const attemptText = attempts.map(item => `${item.mode === 'host' ? '宿主' : '服务端'}：${item.ok ? '通过' : (item.reason ?? '失败')}`).join('；')
+      setAsrTest({
+        ok: result?.ok === true,
+        line: result?.ok === true
+          ? `${result.protocol === undefined ? (result.mode ?? '') : result.protocol} · ${Math.round(result.ms ?? 0)} ms`
+          : `失败 · ${result?.mode ?? '未知链路'}`,
+        text: result?.ok === true ? (result.text ?? '') : '',
+        detail: [result?.reason, result?.hint, attemptText].filter(part => part !== undefined && part !== '').join(' '),
+      })
+    } catch (failure) {
+      setAsrTest({
+        ok: false,
+        line: '录不到音频',
+        detail: failure instanceof Error ? failure.message : String(failure),
+      })
+    } finally {
+      setBusy('')
+    }
+  }, [recordTestSample])
 
   if (data === undefined || form === undefined) {
-    return h('div', { style: { ...S.card, padding: '18px 20px', color: C.boneFaint, fontSize: 12.5, lineHeight: 1.8 } },
+    return h('div', { style: { ...S.card, padding: '18px 20px', color: C.boneFaint, ...TYPE.sub } },
       snapshot.error === undefined ? '正在读取…' : `读不到设置：${snapshot.error}`)
   }
 
@@ -4374,44 +6050,92 @@ function SettingsView(props) {
   const camera = data.camera ?? {}
   const backends = data.backends ?? {}
   const model = data.speechModel ?? {}
+  // 预设表与凭据清单都来自 Host（`GET voice/presets` / `GET voice/credentials`），
+  // 设置快照里已经带了一份，页面不再硬编码 provider。
+  const allPresets = Array.isArray(data.presets) ? data.presets : []
+  const asrPresets = allPresets.filter(preset => preset.kind === 'asr')
+  const ttsPresets = allPresets.filter(preset => preset.kind === 'tts')
+  const credentials = Array.isArray(data.credentials) ? data.credentials : []
+  const asrPreset = asrPresets.find(preset => preset.id === form.asrProvider)
+  const ttsPreset = ttsPresets.find(preset => preset.id === form.ttsProvider)
+  const asrRef = form.asrApiKeyEnv !== '' ? form.asrApiKeyEnv : (asrPreset?.apiKeyEnv ?? '')
+  const ttsRef = form.ttsApiKeyEnv !== '' ? form.ttsApiKeyEnv : (ttsPreset?.apiKeyEnv ?? '')
+
+  /** 一行「现在用」：值 + 来源/理由（理由点开才看，不占常驻版面）。 */
+  const nowRow = (key, label, value, reason) => h('div', {
+    key,
+    style: { display: 'flex', gap: 12, alignItems: 'center', padding: '0 0 10px', minWidth: 0 },
+  }, [
+    h(Meta, { key: 'l', style: { flex: '0 0 auto' } }, label),
+    typeof reason === 'string' && reason !== ''
+      ? h(Hint, { key: 'v', label: value }, reason)
+      : h('span', {
+        key: 'v',
+        style: { ...TYPE.body, color: C.bone, minWidth: 0, wordBreak: 'break-word', fontFamily: F.mono },
+      }, value),
+  ])
 
   /** 一行「标签 → 值（+ 来源/理由）」，只读。 */
   const line = (key, label, value, hint) => h('div', {
     key,
     style: { display: 'flex', gap: 12, alignItems: 'baseline', padding: '7px 0', borderBottom: `1px solid ${C.ruleSoft}` },
   }, [
-    h('span', { key: 'l', style: { ...S.label, width: 96, flex: '0 0 auto', marginBottom: 0 } }, label),
-    h('span', { key: 'v', style: { flex: '1 1 auto', minWidth: 0, fontSize: 12.5, color: C.bone, wordBreak: 'break-all', fontFamily: F.mono } }, value),
-    hint !== undefined ? h('span', { key: 'h', style: { flex: '0 0 auto', fontSize: 11, color: C.boneFaint } }, hint) : null,
+    h(Meta, { key: 'l', style: { width: 96, flex: '0 0 auto', whiteSpace: 'normal', lineHeight: 1.5 } }, label),
+    h('span', { key: 'v', style: { ...TYPE.sub, fontFamily: F.mono, flex: '1 1 auto', minWidth: 0, color: C.bone, wordBreak: 'break-all' } }, value),
+    hint !== undefined ? h(Meta, { key: 'h', style: { flex: '0 0 auto' } }, hint) : null,
   ])
 
-  /** 表单字段：label + 控件 + 生效值提示。 */
-  const field = (key, label, control, effectiveText) => h('div', { key }, [
+  /** 表单字段：label + 控件。生效值只进 placeholder，不另写一行小字。 */
+  const field = (key, label, control) => h('div', { key }, [
     h('div', { key: 'l', style: S.label }, label),
     control,
-    effectiveText !== undefined
-      ? h('div', { key: 'e', style: { fontSize: 10.5, color: C.boneFaint, marginTop: 4, fontFamily: F.mono } }, `生效：${effectiveText}`)
-      : null,
   ])
 
-  const input = (key, placeholder) => h('input', {
+  const input = (key, placeholder, extra) => h('input', {
     key: 'i',
     style: S.input,
     value: form[key],
     placeholder,
+    ...(extra ?? {}),
     onChange: event => set(key, event.target.value),
   })
 
-  const select = (key, options) => h('select', {
-    key: 's',
-    style: S.input,
-    value: form[key],
-    onChange: event => set(key, event.target.value),
-  }, options.map(option => h('option', { key: option.value, value: option.value }, option.label)))
+  /**
+   * 服务下拉：选项全部来自预设表。
+   *
+   * **换服务要清掉旧服务的覆盖值。** 上一版把 provider 与 baseUrl/model 分开存：
+   * 从 MiMo 切到 MiniMax 时，上一家的端点覆盖还在，于是"选了 A 却打 B 的端点"。
+   * 换服务 = 从这一家的默认值重新开始；要自定义就在新服务上再填。
+   */
+  const presetSelect = (key, presets, resetKeys) => {
+    const current = String(form[key] ?? '')
+    const options = presets.length > 0
+      ? presets.map(preset => ({ id: preset.id, label: preset.label, title: preset.notes }))
+      : [{ id: current === '' ? 'auto' : current, label: current === '' ? '默认' : current, title: '' }]
+    const hasCurrent = options.some(option => option.id === current)
+    return h('select', {
+      key: 's',
+      style: S.input,
+      value: current,
+      onChange: event => {
+        const value = event.target.value
+        setForm(previous => {
+          const next = { ...previous, [key]: value }
+          for (const resetKey of resetKeys ?? []) next[resetKey] = ''
+          return next
+        })
+        // 换了服务之后，旧的"替换密钥"目标就不对了——直接收起。
+        setSecretEdit(undefined)
+      },
+    }, [
+      ...options.map(option => h('option', { key: option.id, value: option.id, title: option.title }, option.label)),
+      hasCurrent ? null : h('option', { key: '__current', value: current }, current),
+    ].filter(option => option !== null))
+  }
 
   const checkbox = (key, label) => h('label', {
     key,
-    style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, color: C.boneDim, cursor: 'pointer', padding: '4px 0' },
+    style: { display: 'flex', gap: 8, alignItems: 'center', ...TYPE.sub, color: C.boneDim, cursor: 'pointer', padding: '4px 0' },
   }, [
     h('input', {
       key: 'c',
@@ -4422,73 +6146,271 @@ function SettingsView(props) {
     h('span', { key: 's' }, label),
   ])
 
-  const section = (key, title, children, hint) => h('div', { key, style: { ...S.card, padding: '16px 18px' } }, [
+  const section = (key, title, children) => h(Panel, { key, tone: 'plain', pad: 16 }, [
     h('div', { key: 'h', style: { ...S.cardHead, marginBottom: 10 } }, [
-      h('span', { key: 'e', style: S.eyebrow }, title),
-      hint !== undefined ? h('span', { key: 's', style: { fontSize: 11, color: C.boneFaint } }, hint) : null,
+      h('span', { key: 't', style: S.cardTitle }, title),
     ]),
     ...children,
   ])
 
-  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, [
-    section('asr', '语音识别', [
-      h('div', { key: 'g', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 } }, [
-        field('asrProvider', '识别来源', select('asrProvider', [
-          { value: 'auto', label: 'auto（宿主 → 服务端 → 浏览器）' },
-          { value: 'host', label: 'host（只用宿主）' },
-          { value: 'browser', label: 'browser（浏览器识别）' },
-          { value: 'minimax', label: 'minimax（服务端）' },
-          { value: 'openai', label: 'openai（服务端）' },
-          { value: 'none', label: 'none（关闭）' },
-        ]), asr.mode),
-        field('asrEndpoint', '识别端点（可选）', input('asrEndpoint', effective.asrEndpoint || '例如 https://api.example.com/v1/audio/transcriptions'), effective.asrEndpoint || '内置'),
-        field('asrBaseUrl', 'Base URL（可选）', input('asrBaseUrl', effective.asrBaseUrl || '留空 = 该来源默认'), effective.asrBaseUrl || '默认'),
-        field('asrModel', '识别模型', input('asrModel', effective.asrModel || '留空 = 该来源默认'), effective.asrModel || '默认'),
-        field('asrApiKeyEnv', '凭据变量名', input('asrApiKeyEnv', effective.asrApiKeyEnv || '例如 MIMO_API_KEY'), effective.asrApiKeyEnv || '默认'),
-        field('asrLanguage', '识别语言', input('asrLanguage', effective.asrLanguage || 'zh'), effective.asrLanguage || 'zh'),
+  /**
+   * 外观：明暗用哪一套。
+   *
+   * 两条路只能选一条：自己选，或者完全跟随 DSH。勾了「跟随」之后，
+   * 页头的 ◐ 按钮会失效（点了会说明原因），这里的亮/暗也不再可点——
+   * 否则同一件事有两个入口，且其中一个不生效。
+   */
+  const themeRow = () => {
+    const themeChip = (value, label) => h('button', {
+      key: value,
+      type: 'button',
+      'aria-pressed': themeFollow !== true && theme === value,
+      disabled: themeFollow === true,
+      style: {
+        ...S.btn(themeFollow !== true && theme === value ? 'primary' : false, themeFollow === true),
+        padding: '7px 14px',
+        ...(themeFollow === true ? { opacity: 0.5 } : {}),
+      },
+      onClick: () => { if (themeFollow !== true) onChangeTheme?.(value) },
+    }, label)
+    const followToggle = h('button', {
+      key: 'follow',
+      type: 'button',
+      'aria-pressed': themeFollow === true,
+      title: '勾上之后，明暗完全由 DSH 决定；页头的切换按钮会失效',
+      style: {
+        ...S.btn(themeFollow === true ? 'primary' : false, false),
+        padding: '7px 14px', gap: 8,
+      },
+      onClick: () => onChangeThemeFollow?.(themeFollow !== true),
+    }, [
+      h('span', {
+        key: 'box',
+        'aria-hidden': true,
+        style: {
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 14, height: 14, borderRadius: 4, flex: '0 0 auto',
+          border: `1px solid ${themeFollow === true ? 'transparent' : C.rule}`,
+          background: themeFollow === true ? C.primaryText : 'transparent',
+          color: C.primaryTop, fontSize: 10, lineHeight: 1,
+          boxShadow: themeFollow === true ? 'none' : `inset 0 1px 0 ${C.hiSoft}`,
+        },
+      }, themeFollow === true ? '✓' : ''),
+      h('span', { key: 't' }, '跟随 DSH 主题'),
+    ])
+    return h('div', {
+      key: 'appearance',
+      style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+    }, [
+      h(Meta, { key: 'l' }, '明暗'),
+      themeChip('light', '亮色'),
+      themeChip('dark', '暗色'),
+      h('div', { key: 'sp', style: { flex: '1 1 auto', minWidth: 8 } }),
+      themeFollow === true
+        ? h(Meta, { key: 'host', tone: 'faint' }, `由 DSH 决定 · 当前${hostScheme === 'dark' ? '暗色' : '亮色'}`)
+        : null,
+      followToggle,
+    ])
+  }
+
+  const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }
+
+  const actions = children => h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } }, children)
+
+  /**
+   * 凭据行：已有凭据下拉 + 替换（粘贴）+ 清除。
+   *
+   * 密钥**永不回显**：输入框是 `type=password`、`autocomplete=off`，
+   * 保存成功后立刻清空；界面上只有「已配置 / 未配置 + 来源」。
+   */
+  const credentialRow = (key, kind, label) => {
+    const refKey = kind === 'asr' ? 'asrApiKeyEnv' : 'ttsApiKeyEnv'
+    const selectedRef = kind === 'asr' ? asrRef : ttsRef
+    const status = credentials.find(item => item.ref === selectedRef)
+    const sourceLabel = status?.source === 'host'
+      ? '宿主凭据'
+      : (status?.source === 'env' ? '环境变量' : '')
+    const editing = secretEdit !== undefined && secretEdit.kind === kind
+    const options = credentials.map(item => ({ id: item.ref, label: `${item.ref}${item.configured === true ? ' · 已配置' : ''}` }))
+    if (selectedRef !== '' && !options.some(option => option.id === selectedRef)) {
+      options.push({ id: selectedRef, label: selectedRef })
+    }
+    return h('div', { key, style: { marginTop: 6 } }, [
+      h('div', { key: 'l', style: S.label }, label),
+      h('div', { key: 'row', style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } }, [
+        h('select', {
+          key: 'sel',
+          style: { ...S.input, flex: '1 1 220px', minWidth: 0 },
+          value: form[refKey] ?? '',
+          onChange: event => {
+            set(refKey, event.target.value)
+            setSecretEdit(undefined)
+          },
+        }, [
+          h('option', { key: '__default', value: '' }, asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset)),
+          ...options.map(option => h('option', { key: option.id, value: option.id }, option.label)),
+        ]),
+        h(Pill, { key: 'state', tone: status?.configured === true ? 'jade' : 'faint' },
+          status?.configured === true ? `已配置 · ${sourceLabel}` : '未配置'),
+        h('button', {
+          key: 'replace',
+          style: S.btn(false, false),
+          onClick: () => setSecretEdit({ kind, ref: selectedRef, value: '' }),
+        }, '替换…'),
+        h('button', {
+          key: 'clear',
+          style: S.btn(clearArm === kind ? 'tally' : false, false),
+          onClick: () => clearCredential(kind, selectedRef),
+        }, clearArm === kind ? '再次点击确认清除' : '清除'),
       ]),
-      h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } }, [
+      editing ? h('div', { key: 'edit', style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } }, [
+        h('input', {
+          key: 'secret',
+          type: 'password',
+          autoComplete: 'off',
+          spellCheck: false,
+          style: { ...S.input, flex: '1 1 240px', minWidth: 0 },
+          placeholder: selectedRef === '' ? '先选凭据名' : `${selectedRef} 的密钥`,
+          value: secretEdit.value,
+          onChange: event => setSecretEdit({ ...secretEdit, value: event.target.value }),
+        }),
+        h('button', {
+          key: 'save',
+          style: S.btn('primary', busy === 'secret' || selectedRef === ''),
+          onClick: saveSecret,
+        }, busy === 'secret' ? '保存中…' : '写入凭据'),
+        h('button', { key: 'cancel', style: S.btn(false, false), onClick: () => setSecretEdit(undefined) }, '取消'),
+      ]) : null,
+    ])
+  }
+
+  /** 测试结果行：走哪条链路、耗时、失败的具体原因与下一步。 */
+  const testLine = (key, state) => {
+    if (state === undefined) return null
+    return h('div', {
+      key,
+      style: {
+        marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.ruleSoft}`,
+        ...TYPE.sub, color: state.ok ? C.jade : C.amber, wordBreak: 'break-word',
+      },
+    }, [
+      h('div', { key: 'l' }, [
+        h(Meta, { key: 'k', tone: state.ok ? 'jade' : 'amber' }, state.ok ? '通过' : '失败'),
+        h('span', { key: 'v', style: { marginLeft: 8 } }, state.line ?? ''),
+      ]),
+      state.text !== undefined && state.text !== ''
+        ? h('div', { key: 't', style: { color: C.boneDim, marginTop: 4 } }, `识别结果：${state.text}`)
+        : null,
+      state.detail !== undefined && state.detail !== ''
+        ? h('div', { key: 'd', style: { color: C.boneFaint, marginTop: 4 } }, state.detail)
+        : null,
+    ])
+  }
+
+  /** 识别区的一条出路：没走服务端时说清现在是什么、要自己的模型怎么配。 */
+  const asrQuiet = asr.mode === 'server'
+    ? undefined
+    : asr.mode === 'none'
+      ? '识别已关闭；需要时把服务改回「自动」。'
+      : '现在走浏览器识别；要自己的模型就选「服务端 · OpenAI 兼容」，填一个 /audio/transcriptions 端点并配凭据。识别不通时用键盘输入，面试照常进行。'
+
+  const ttsQuiet = tts.mode === 'server'
+    ? undefined
+    : tts.mode === 'none'
+      ? '播报已关闭；问题只以文字显示。'
+      : '现在会用浏览器系统音色；要模型音色就选一个服务并配凭据，也可以用免密钥的百度朗读。'
+
+  // 「现在用」只放**认得出是哪条链路**的最短一组词：
+  // 服务 → 协议 → 模型。端点已经在下面那一格填着了，再抄一遍是把一行撑成三段。
+  const joinParts = parts => parts.filter(part => typeof part === 'string' && part.trim() !== '').join(' · ')
+
+  const asrSummary = asr.mode === 'host'
+    ? joinParts(['宿主语音服务', asr.host?.provider?.name])
+    : asr.mode === 'server'
+      ? joinParts(['服务端', asr.server?.protocol, asr.server?.model])
+      : asr.mode === 'none'
+        ? '已关闭'
+        : '浏览器 Web Speech'
+
+  const ttsSummary = tts.mode === 'server'
+    ? joinParts([tts.label ?? tts.provider ?? '模型', tts.model, tts.voice])
+    : tts.mode === 'none'
+      ? '已关闭'
+      : '浏览器系统音色'
+
+  // 只有用得上的字段才出现。空着的格子不是"可选"，是噪音——
+  // 用户会以为必须填，或者以为填错了。
+  const asrNeedsGroupId = (asrPreset?.protocol ?? '') === 'minimax'
+  const ttsNeedsGroupId = (ttsPreset?.protocol ?? '') === 'minimax'
+  const ttsNeedsStyle = (ttsPreset?.protocol ?? '') === 'chat-audio'
+
+  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, [
+    section('appearance', '外观', [themeRow()]),
+
+    section('asr', '语音识别', [
+      nowRow('now', '现在用', asrSummary, asr.reason),
+      h('div', { key: 'g', style: grid }, [
+        field('asrProvider', '服务', presetSelect('asrProvider', asrPresets, ['asrBaseUrl', 'asrModel', 'asrGroupId', 'asrApiKeyEnv'])),
+        field('asrBaseUrl', '端点', input('asrBaseUrl', effective.asrBaseUrl || asrPreset?.baseUrl || '留空用该服务默认')),
+        field('asrModel', '模型', input('asrModel', effective.asrModel || asrPreset?.model || '留空用该服务默认')),
+        field('asrLanguage', '语言', input('asrLanguage', effective.asrLanguage || 'zh')),
+        // Group ID 只有 MiniMax 的两套协议用得着。**别的服务上不显示这一格**——
+        // 一个永远空着的字段，用户会以为必须填，或者以为坏了。
+        asrNeedsGroupId
+          ? field('asrGroupId', 'Group ID（MiniMax 可选）', input('asrGroupId', effective.asrGroupId || '留空 = 不带 GroupId'))
+          : null,
+      ]),
+      credentialRow('cred', 'asr', '凭据'),
+      actions([
         h('button', {
           key: 'save',
           style: S.btn('primary', busy === 'asr'),
           onClick: () => save({
             asrProvider: form.asrProvider,
-            asrEndpoint: form.asrEndpoint,
             asrBaseUrl: form.asrBaseUrl,
             asrModel: form.asrModel,
             asrApiKeyEnv: form.asrApiKeyEnv,
+            asrGroupId: form.asrGroupId,
             asrLanguage: form.asrLanguage,
-          }, 'asr'),
+          }, 'asr', { allowEmpty: true }),
         }, busy === 'asr' ? '保存中…' : '保存识别设置'),
+        h('button', {
+          key: 'test',
+          style: S.btn(false, busy === 'asr-test' || recording),
+          onClick: testAsr,
+        }, busy === 'asr-test' || recording ? '录音 2 秒…' : '测试识别'),
       ]),
-    ], asr.reason ?? ''),
+      testLine('test', asrTest),
+      asrQuiet === undefined ? null : h(Quiet, { key: 'q', tone: 'muted', style: { marginTop: 6, alignItems: 'flex-start' } }, asrQuiet),
+    ]),
 
     section('tts', '语音播报', [
-      h('div', { key: 'g', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 } }, [
-        field('ttsProvider', '播报来源', select('ttsProvider', [
-          { value: 'auto', label: 'auto（模型 → 免密钥自然音 → 浏览器）' },
-          { value: 'host', label: 'host（只用宿主）' },
-          { value: 'mimo', label: 'mimo' },
-          { value: 'openai', label: 'openai' },
-          { value: 'minimax', label: 'minimax' },
-          { value: 'baidu', label: 'baidu（免密钥）' },
-          { value: 'edge', label: 'edge（免密钥）' },
-          { value: 'browser', label: 'browser（系统音色）' },
-          { value: 'none', label: 'none（不播报）' },
-        ]), tts.mode),
-        field('ttsModel', '播报模型', input('ttsModel', effective.ttsModel || '留空 = 该来源默认'), effective.ttsModel || '默认'),
-        field('ttsVoice', '音色', input('ttsVoice', effective.ttsVoice || '留空 = 默认音色'), effective.ttsVoice || '默认'),
-        field('ttsBaseUrl', 'Base URL（可选）', input('ttsBaseUrl', effective.ttsBaseUrl || '留空 = 该来源默认'), effective.ttsBaseUrl || '默认'),
-        field('ttsApiKeyEnv', '凭据变量名', input('ttsApiKeyEnv', effective.ttsApiKeyEnv || '例如 MIMO_API_KEY'), effective.ttsApiKeyEnv || '默认'),
-        field('ttsFormat', '音频格式', select('ttsFormat', [
-          { value: '', label: '默认' },
-          { value: 'mp3', label: 'mp3' },
-          { value: 'wav', label: 'wav' },
-        ]), effective.ttsFormat),
-        field('ttsRate', '语速', input('ttsRate', String(effective.ttsRate ?? 1)), String(effective.ttsRate ?? 1)),
-        field('ttsStyle', '风格指令（可选）', input('ttsStyle', effective.ttsStyle || '例如：语速偏慢、沉稳'), effective.ttsStyle || '无'),
+      nowRow('now', '现在用', ttsSummary, tts.reason),
+      h('div', { key: 'g', style: grid }, [
+        field('ttsProvider', '服务', presetSelect('ttsProvider', ttsPresets, ['ttsBaseUrl', 'ttsModel', 'ttsVoice', 'ttsGroupId', 'ttsApiKeyEnv'])),
+        field('ttsBaseUrl', '端点', input('ttsBaseUrl', effective.ttsBaseUrl || ttsPreset?.baseUrl || '留空用该服务默认')),
+        field('ttsModel', '模型', input('ttsModel', effective.ttsModel || ttsPreset?.model || '留空用该服务默认')),
+        field('ttsVoice', '音色', input('ttsVoice', effective.ttsVoice || ttsPreset?.voice || '留空用默认音色')),
+        field('ttsFormat', '音频格式', h('select', {
+          key: 's',
+          style: S.input,
+          value: form.ttsFormat,
+          onChange: event => set('ttsFormat', event.target.value),
+        }, [
+          h('option', { key: 'd', value: '' }, '默认'),
+          h('option', { key: 'm', value: 'mp3' }, 'mp3'),
+          h('option', { key: 'w', value: 'wav' }, 'wav'),
+        ])),
+        field('ttsRate', '语速', input('ttsRate', String(effective.ttsRate ?? 1))),
+        ttsNeedsGroupId
+          ? field('ttsGroupId', 'Group ID（MiniMax 可选）', input('ttsGroupId', effective.ttsGroupId || '留空 = 不带 GroupId'))
+          : null,
+        ttsNeedsStyle
+          ? field('ttsStyle', '风格指令（可选）', input('ttsStyle', effective.ttsStyle || '例如：语速偏慢、沉稳'))
+          : null,
       ]),
-      h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } }, [
+      credentialRow('cred', 'tts', '凭据'),
+      actions([
         h('button', {
           key: 'save',
           style: S.btn('primary', busy === 'tts'),
@@ -4498,27 +6420,39 @@ function SettingsView(props) {
             ttsVoice: form.ttsVoice,
             ttsBaseUrl: form.ttsBaseUrl,
             ttsApiKeyEnv: form.ttsApiKeyEnv,
+            ttsGroupId: form.ttsGroupId,
             ttsFormat: form.ttsFormat,
             ttsRate: form.ttsRate,
             ttsStyle: form.ttsStyle,
-          }, 'tts'),
+          }, 'tts', { allowEmpty: true }),
         }, busy === 'tts' ? '保存中…' : '保存播报设置'),
+        h('button', {
+          key: 'test',
+          style: S.btn(false, busy === 'tts-test'),
+          onClick: testTts,
+        }, busy === 'tts-test' ? '合成中…' : '测试播报'),
       ]),
-    ], tts.reason ?? ''),
+      testLine('test', ttsTest),
+      ttsQuiet === undefined ? null : h(Quiet, { key: 'q', tone: 'muted', style: { marginTop: 6, alignItems: 'flex-start' } }, ttsQuiet),
+    ]),
 
     section('camera', '摄像头', [
-      h('div', { key: 'g', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 } }, [
-        field('cameraBackend', '采集后端', select('cameraBackend', [
-          { value: 'auto', label: 'auto（ffmpeg 优先，失败回落浏览器）' },
-          { value: 'ffmpeg', label: 'ffmpeg（只用 DirectShow）' },
-          { value: 'chromium-mf', label: 'Chromium（Media Foundation）优先' },
-        ]), camera.backend === 'chromium-mf' ? 'Chromium（Media Foundation）' : (camera.backend === 'ffmpeg' ? 'ffmpeg' : '未接通')),
-        field('ffmpegPath', 'ffmpeg 路径', input('ffmpegPath', backends.ffmpeg?.found === true ? backends.ffmpeg.path : 'D:\\tools\\ffmpeg\\bin\\ffmpeg.exe'),
-          backends.ffmpeg?.found === true ? `${backends.ffmpeg.path}（${backends.ffmpeg.source}）` : '未找到'),
-        field('chromiumPath', 'Chrome / Edge 路径', input('chromiumPath', backends.chromium?.found === true ? backends.chromium.path : 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'),
-          backends.chromium?.found === true ? `${backends.chromium.path}（${backends.chromium.source}）` : '未找到'),
+      nowRow('now', '现在用', camera.running === true ? `已接通 · ${camera.backend === 'chromium-mf' ? 'Chromium（Media Foundation）' : (camera.backend === 'ffmpeg' ? 'ffmpeg' : '未知后端')}` : '未接通', camera.reason),
+      h('div', { key: 'g', style: grid }, [
+        field('cameraBackend', '采集后端', h('select', {
+          key: 's',
+          style: S.input,
+          value: form.cameraBackend,
+          onChange: event => set('cameraBackend', event.target.value),
+        }, [
+          h('option', { key: 'a', value: 'auto' }, 'auto（ffmpeg 优先，失败回落浏览器）'),
+          h('option', { key: 'f', value: 'ffmpeg' }, 'ffmpeg（只用 DirectShow）'),
+          h('option', { key: 'c', value: 'chromium-mf' }, 'Chromium（Media Foundation）优先'),
+        ])),
+        field('ffmpegPath', 'ffmpeg 路径', input('ffmpegPath', backends.ffmpeg?.found === true ? backends.ffmpeg.path : 'D:\\tools\\ffmpeg\\bin\\ffmpeg.exe')),
+        field('chromiumPath', 'Chrome / Edge 路径', input('chromiumPath', backends.chromium?.found === true ? backends.chromium.path : 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe')),
       ]),
-      h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } }, [
+      actions([
         h('button', {
           key: 'save',
           style: S.btn('primary', busy === 'camera'),
@@ -4532,19 +6466,22 @@ function SettingsView(props) {
           busy === 'diagnose' ? '正在自检…' : '自检摄像头'),
       ]),
       diagnosis !== undefined
-        ? h('div', { key: 'diag', style: { paddingTop: 10, fontSize: 11.5, lineHeight: 1.8, color: diagnosis.ok ? C.jade : C.amber } }, [
+        ? h('div', {
+          key: 'diag',
+          style: { paddingTop: 10, ...TYPE.sub, lineHeight: 1.8, color: diagnosis.ok ? C.jade : C.amber },
+        }, [
           h('div', { key: 'a' }, diagnosis.ok ? `可用 · 后端 ${diagnosis.backend ?? '未知'}` : `不可用 · ${diagnosis.reason ?? ''}`),
           diagnosis.hint !== undefined && diagnosis.hint !== '' ? h('div', { key: 'b', style: { color: C.boneFaint } }, diagnosis.hint) : null,
           (diagnosis.probes ?? []).map(probe => h('div', { key: probe.name, style: { color: C.boneFaint, fontFamily: F.mono } },
             `${probe.name}: ${probe.ok ? '抓帧成功' : (probe.detail ?? '失败')}`)),
         ])
         : null,
-    ], camera.running === true ? '画面已接通' : '未接通'),
+    ]),
 
     section('privacy', '录像与录音', [
       checkbox('recordVideo', '允许录像（关掉 = 面板不出现录像入口）'),
       checkbox('recordAudio', '允许录音（关掉 = 面板不出现录音入口）'),
-      h('div', { key: 'b', style: { marginTop: 10 } }, [
+      actions([
         h('button', {
           key: 'save',
           style: S.btn('primary', busy === 'privacy'),
@@ -4556,18 +6493,18 @@ function SettingsView(props) {
     section('guard', '面试间保护', [
       checkbox('guardEnabled', '离开面试间前确认（关闭后直接释放设备，不再提示）'),
       line('gq', '退出提醒', data.settings?.guardQuiet === true ? '已关闭（以后不再提醒）' : '开启'),
-      h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } }, [
+      actions([
         h('button', { key: 'save', style: S.btn('primary', busy === 'guard'), onClick: () => save({ guardEnabled: form.guardEnabled }, 'guard') },
           busy === 'guard' ? '保存中…' : '保存保护设置'),
         h('button', { key: 'reset', style: S.btn(false, data.settings?.guardQuiet !== true), onClick: () => save({ guardQuiet: false }, 'guard') }, '恢复退出提醒'),
       ]),
-      h('div', { key: 'note', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7, paddingTop: 6 } },
+      h(Hint, { key: 'note', label: '退出保护' },
         '面试中退出会强制二次确认；面板内切页签/切面试与侧栏切到其他面板都会被拦下。'),
     ]),
 
     section('env', '环境（只读）', [
       line('root', '数据根', data.dataRoot?.path ?? '', data.dataRoot?.source),
-      h('div', { key: 'why', style: { fontSize: 11.5, color: C.boneFaint, lineHeight: 1.7, padding: '4px 0 8px' } }, data.dataRoot?.reason ?? ''),
+      h('div', { key: 'why', style: { ...TYPE.sub, color: C.boneFaint, padding: '4px 0 8px' } }, data.dataRoot?.reason ?? ''),
       line('sessions', '面试目录', data.sessionsDir ?? ''),
       line('profiles', '岗位档案', data.profilesDir ?? ''),
       line('settings', '设置文件', data.settingsFile ?? ''),
@@ -4580,18 +6517,18 @@ function SettingsView(props) {
       (data.emptySessions ?? []).length > 0
         ? h('div', { key: 'empty', style: { paddingTop: 8 } }, [
           line('ec', '空场次', `${data.emptySessions.length} 场`, '没有任何内容'),
-          h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } }, [
+          actions([
             h('button', {
               key: 'purge',
               style: S.btn(purgeArm ? 'tally' : 'primary', busy === 'purge'),
               onClick: purgeEmpty,
             }, busy === 'purge' ? '清理中…' : (purgeArm ? '再次点击确认清理' : `清理 ${data.emptySessions.length} 场空场次`)),
           ]),
-          h('div', { key: 'n', style: { fontSize: 11, color: C.boneFaint, lineHeight: 1.7, paddingTop: 6 } },
+          h(Hint, { key: 'n', label: '清理范围' },
             '只删没有任何内容的场次；有简历 / JD / 考点 / 转录 / 报告的一场都不会动。'),
         ])
         : null,
-      h('div', { key: 'b', style: { marginTop: 8 } }, [
+      actions([
         h('button', { key: 'prep', style: S.btn(false, busy === 'model'), onClick: prepareModel }, busy === 'model' ? '正在准备…' : '准备语音模型'),
       ]),
       session === undefined ? null : h('div', { key: 'session' }, [
@@ -4608,45 +6545,205 @@ function SettingsView(props) {
   ])
 }
 
+/** 「凭据 = 服务默认」那一行的文案：告诉用户默认是哪个 ref，但值留空。 */
+function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
+  const preset = kind === 'asr' ? asrPreset : ttsPreset
+  if (preset === undefined || preset.apiKeyEnv === undefined || preset.apiKeyEnv === '') return '服务默认（免密钥）'
+  return `服务默认 · ${preset.apiKeyEnv}`
+}
+
     // ── panel ─────────────────────────────────────────────────────────────
 
     /**
-     * 按岗位给场次分组。
+     * 按**公司**给场次分组。
      *
-     * **为什么按岗位，不按标题。** 标题是给人看的（随时能改），
-     * 岗位是给列表分组的——同一个岗位投了三家、或者同一家面了两轮，
-     * 聚在一起才看得出「我在跟谁谈」。认不出岗位的场次单独归到
-     * 「未整理」，放在最后，而不是混在有名字的组里。
+     * **为什么是公司，不是岗位。** 左栏只有 244px，一个「公司 · 岗位」的
+     * 组头在这里必然被截断——截断之后既认不出公司，也认不出岗位，
+     * 那行字就白占了。公司名短，一行放得下，而且「我在跟谁谈」本来就是
+     * 整理时第一层的分类。岗位留给行内的第二行小字。
+     *
+     * 认不出公司的场次归到「未整理」，放在最后，而不是混在有名字的组里。
      *
      * @param {Array<object>} rows
      * @returns {Array<{key: string, label: string, items: Array<object>}>}
      */
     function groupSessions(rows) {
+      const LOOSE = '\u0000unfiled'
       const buckets = new Map()
       for (const row of rows) {
-        const company = typeof row.company === 'string' ? row.company.trim() : ''
-        const position = typeof row.position === 'string' ? row.position.trim() : ''
-        const key = `${company}\u0000${position}`
+        const raw = typeof row.company === 'string' ? row.company.trim() : ''
+        // 占位公司（`新建公司 2026-11-17`）不是真名字：归到「未整理」，
+        // 别让每一天都长出一个「新建公司」分组。
+        const company = isPlaceholderCompany(raw) ? '' : raw
+        const key = company !== '' ? company : LOOSE
         if (!buckets.has(key)) {
-          buckets.set(key, {
-            key,
-            label: company !== '' && position !== ''
-              ? `${company} · ${position}`
-              : (position !== '' ? position : (company !== '' ? company : '未整理')),
-            items: [],
-          })
+          buckets.set(key, { key, label: company !== '' ? company : '未整理', items: [] })
         }
         buckets.get(key).items.push(row)
       }
       const groups = [...buckets.values()]
-      // 有名字的组按最近一场的时间排前面；「未整理」永远垫底。
+      // 组内最近一场排前面；有名字的组按最近一场的时间排， 「未整理」永远垫底。
+      for (const group of groups) {
+        group.items.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+      }
       groups.sort((a, b) => {
-        const aLoose = a.label === '未整理'
-        const bLoose = b.label === '未整理'
+        const aLoose = a.key === LOOSE
+        const bLoose = b.key === LOOSE
         if (aLoose !== bLoose) return aLoose ? 1 : -1
         return (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0)
       })
       return groups
+    }
+
+    /**
+     * 页签：顺序就是面试的流程顺序。
+     *
+     * **为什么是常量而不是每次渲染现拼。** 页签是壳层的骨架，
+     * 它不该跟着任何一次轮询重建；而且「设置」必须和另外三个一样
+     * 是一等页签——截图闸门与布局闸门都按这张表点。
+     */
+    const PANEL_TABS = [
+      { key: 'prepare', label: '准备', guard: '切换到「准备」' },
+      { key: 'live', label: '面试中', guard: '切换到「面试中」' },
+      { key: 'report', label: '报告', guard: '切换到「报告」' },
+      { key: 'settings', label: '设置', guard: '切换到「设置」' },
+    ]
+
+    /**
+     * 品牌记号：**一个卷宗折角 + 一道声波**。
+     *
+     * 整个插件只出现这一次。它是「一份卷宗」和「一场面试」的共同形状——
+     * 记号长对了，页头就不用再写一句「简历 + JD → 一场有准备的面试」
+     * 来解释自己是什么。
+     *
+     * 用内联 SVG 而不是图片文件：它要跟着主题取色（`currentColor`），
+     * 而且在两套主题下都得是同一种笔画粗细。
+     */
+    function BrandMark(props) {
+      const size = props.size ?? 24
+      return h('svg', {
+        width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+        xmlns: 'http://www.w3.org/2000/svg', 'aria-hidden': true, focusable: 'false',
+        style: { display: 'block', pointerEvents: 'none' },
+      }, [
+        // 卷宗：一张纸，右上角折起来。
+        h('path', {
+          key: 'case',
+          d: 'M5.5 4h7.1L18 9.4v10.1A1.5 1.5 0 0 1 16.5 21h-11A1.5 1.5 0 0 1 4 19.5v-14A1.5 1.5 0 0 1 5.5 4Z',
+          stroke: 'currentColor', strokeWidth: 1.4, strokeLinejoin: 'round',
+        }),
+        h('path', {
+          key: 'fold',
+          d: 'M12.5 4.2v5.3h5.2',
+          stroke: 'currentColor', strokeWidth: 1.4, strokeLinejoin: 'round',
+        }),
+        // 一道声波：面试是「说」出来的，不是填表填出来的。
+        h('path', {
+          key: 'wave',
+          d: 'M7.4 16.4c1.1-2.3 1.9-2.3 3 0s1.9 2.3 3 0 1.9-2.3 3 0',
+          stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', opacity: 0.82,
+        }),
+      ])
+    }
+
+    /** 行内小图标：归档（盒子 + 向下的箭头）。 */
+    function ArchiveGlyph() {
+      return h('svg', {
+        width: 12, height: 12, viewBox: '0 0 16 16', fill: 'none',
+        xmlns: 'http://www.w3.org/2000/svg', 'aria-hidden': true,
+        style: { display: 'block', pointerEvents: 'none' },
+      }, [
+        h('path', {
+          key: 'box',
+          d: 'M2.6 5.6h10.8v7a1 1 0 0 1-1 1H3.6a1 1 0 0 1-1-1z',
+          stroke: 'currentColor', strokeWidth: 1.3, strokeLinejoin: 'round',
+        }),
+        h('path', { key: 'lid', d: 'M2 3.6h12v2H2z', stroke: 'currentColor', strokeWidth: 1.3, strokeLinejoin: 'round' }),
+        h('path', {
+          key: 'arrow',
+          d: 'M8 7.4v3.4m-1.4-1.4L8 10.8l1.4-1.4',
+          stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round',
+        }),
+      ])
+    }
+
+    /** 行内小图标：删除（垃圾桶）。 */
+    function TrashGlyph() {
+      return h('svg', {
+        width: 12, height: 12, viewBox: '0 0 16 16', fill: 'none',
+        xmlns: 'http://www.w3.org/2000/svg', 'aria-hidden': true,
+        style: { display: 'block', pointerEvents: 'none' },
+      }, [
+        h('path', {
+          key: 'lid',
+          d: 'M3 4.5h10M6.2 4.5V3.2h3.6v1.3',
+          stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round',
+        }),
+        h('path', {
+          key: 'can',
+          d: 'M4.4 4.5l.6 8a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9l.6-8',
+          stroke: 'currentColor', strokeWidth: 1.3, strokeLinejoin: 'round',
+        }),
+      ])
+    }
+
+    /**
+     * 页头上只显示路径的**末两段**。
+     *
+     * AGENTS.md §3 要求界面能回答「数据存到哪儿、为什么」——它要求的是
+     * 这个能力不许消失，**不是**要求路径常驻占掉两行。完整路径与来源理由
+     * 在芯片的 `title=` 里，点一下就是宿主的目录选择器。
+     */
+    function shortRootPath(path) {
+      const text = String(path ?? '')
+      const parts = text.split(/[\\/]+/).filter(part => part !== '')
+      if (parts.length === 0) return ''
+      const separator = text.includes('\\') ? '\\' : '/'
+      const tail = parts.slice(-2).join(separator)
+      return parts.length > 2 ? `…${separator}${tail}` : tail
+    }
+
+    /** 场次状态 → 语气：running 用琥珀（进行中），done 用青玉（已完成）。 */
+    function statusTone(status) {
+      if (status === 'running') return 'amber'
+      if (status === 'done') return 'jade'
+      return 'faint'
+    }
+
+    /**
+     * 面板外的一次点击，是不是**宿主的窗口陈设**？
+     *
+     * 保护只该拦「离开面试间」的动作——换场次、切到别的插件面板。
+     * 而侧栏的**折叠/展开**、窗口那一排图标、顶部标签，点完人还在面试间里，
+     * 拦下来纯属误伤（用户点一下「收起侧栏」，却弹出一个「确定要离开？」）。
+     *
+     * 三条判据：
+     *   ① 窗口顶部那一条（y ≤ 44）：宿主的标题栏按钮都在这里；
+     *   ② 语义容器：header / titlebar / topbar / sidebar 头部；
+     *   ③ 文案语义：aria-label / title / data-testid 里有「收起 / 展开 /
+     *      折叠 / 侧栏 / sidebar / collapse / toggle」。不同 DSH 版本起名
+     *      不一样，所以按语义认，不写死某一个 id。
+     *
+     * @param {MouseEvent} event
+     */
+    const HOST_CHROME_HINT = /收起|展开|折叠|侧栏|侧边栏|sidebar|collapse|expand|toggle|collapse-panel/i
+    function isHostChromeClick(event) {
+      if (typeof event.clientY === 'number' && event.clientY <= 44) return true
+      const target = event.target
+      if (target === null || target === undefined || typeof target.closest !== 'function') return false
+      const container = target.closest(
+        'header, [role="banner"], [data-dsh-titlebar], [class*="titlebar"], [class*="title-bar"], '
+        + '[class*="topbar"], [class*="top-bar"], [class*="app-header"], '
+        + '[class*="sidebar-header"], [class*="sidebar-head"], [class*="side-bar-head"]',
+      )
+      if (container !== null) return true
+      const labelled = target.closest('[aria-label], [title], [data-testid], [data-tooltip]')
+      if (labelled === null || typeof labelled.getAttribute !== 'function') return false
+      const text = ['aria-label', 'title', 'data-testid', 'data-tooltip']
+        .map(name => labelled.getAttribute(name))
+        .filter(item => typeof item === 'string' && item !== '')
+        .join(' ')
+      return text !== '' && HOST_CHROME_HINT.test(text)
     }
 
     /** The whole panel. */
@@ -4654,12 +6751,69 @@ function SettingsView(props) {
       const [tab, setTab] = useState('prepare')
       const [selected, setSelected] = useState(undefined)
       const [notice, setNotice] = useState(undefined)
-      // 主题：暗色是原来的样子，亮色是纸面。用户的选择会被记住。
-      const [theme, setTheme] = useState(readTheme)
-
-      const notify = useCallback((title, detail, kind = 'info') => {
-        setNotice({ title, detail, kind, at: Date.now() })
+      // ── 主题 ──────────────────────────────────────────────────────────
+      //
+      // 两条路，用户选一条：
+      //   ① 自己选亮/暗（默认**亮色**：白面 + 灰缝 + 暖影，层次最清楚）；
+      //   ② 勾「跟随 DSH 主题」——那就完全听宿主的，切换按钮失效。
+      // 勾了②之后 `themeChoice` 仍在内存里留着，取消勾选时立刻回到原来的选择。
+      const [themeChoice, setThemeChoice] = useState(readTheme)
+      const [themeFollow, setThemeFollowState] = useState(readThemeFollow)
+      const [hostScheme, setHostScheme] = useState(() => hostColorScheme() ?? 'light')
+      const theme = themeFollow ? hostScheme : themeChoice
+      const setTheme = useCallback(next => {
+        const value = typeof next === 'function' ? next(themeChoice) : next
+        setThemeChoice(value)
+        saveTheme(value)
+      }, [themeChoice])
+      const setThemeFollow = useCallback(follow => {
+        setThemeFollowState(follow)
+        saveThemeFollow(follow)
+        // 刚打开「跟随」时先对齐一次宿主，避免要等到下一次宿主换主题才生效。
+        if (follow) {
+          const scheme = hostColorScheme()
+          if (scheme !== undefined) setHostScheme(scheme)
+        }
       }, [])
+
+      // 跟随宿主时，盯住宿主的明暗切换（MutationObserver，不轮询）。
+      useEffect(() => {
+        if (!themeFollow) return undefined
+        return watchHostScheme(scheme => setHostScheme(scheme))
+      }, [themeFollow])
+
+      const notify = useCallback((title, detail, kind = 'info', action = undefined) => {
+        setNotice({ title, detail, kind, action, at: Date.now() })
+      }, [])
+
+      /**
+       * 成功/信息通知 **4 秒后自己退场**，并且分两步：先淡出，再卸载。
+       *
+       * 为什么不直接卸载：卸载是瞬间的，一条从页头落下来的提醒条
+       * 会"啪"地消失。先标 `leaving`，让 CSS 过渡把它推上去、淡掉，
+       * 260ms 后再从树上摘掉。
+       *
+       * 失败要常驻（AGENTS.md §7：失败必须给出路，用户还没读完不能消失），
+       * 带动作的也不自动关（「撤销新建」「放弃修改并关闭」这些动作
+       * 需要一个稳定的落点，不能被计时器抢走）。
+       *
+       * 这是**一次性定时器**，不是轮询：通知出现才计时，消失即清掉——
+       * 空闲时它一次都不跑（`render-probe` 的重渲染必须仍是 0）。
+       */
+      useEffect(() => {
+        if (notice === undefined) return undefined
+        if (notice.leaving === true) {
+          const gone = setTimeout(() => {
+            setNotice(current => (current === notice ? undefined : current))
+          }, 280)
+          return () => clearTimeout(gone)
+        }
+        if (notice.kind === 'error' || notice.action !== undefined) return undefined
+        const fade = setTimeout(() => {
+          setNotice(current => (current === notice ? { ...current, leaving: true } : current))
+        }, 3400)
+        return () => clearTimeout(fade)
+      }, [notice])
 
       const sessionsPoll = usePoll(
         () => apiGet('sessions'),
@@ -4676,6 +6830,8 @@ function SettingsView(props) {
       const [guard, setGuard] = useState(undefined)
       // 删除要两步：第一次点只是"上膛"，四秒内再点才真删。
       const [pendingDelete, setPendingDelete] = useState(undefined)
+      // 哪一行的「⋯」菜单是打开的（同一时刻只开一个）。
+      const [rowMenu, setRowMenu] = useState(undefined)
       const settingsPoll = usePoll(() => apiGet('settings'), 8000, [])
       const guardQuiet = settingsPoll.data?.settings?.guardQuiet === true
       // 保护总开关：关掉后不再弹确认，但**设备仍然在离开时释放**。
@@ -4726,24 +6882,42 @@ function SettingsView(props) {
         () => (showArchived ? rows : rows.filter(row => row.archived !== true)),
         [rows, showArchived],
       )
-      /** 按岗位分组：同一岗位的几场聚在一起。 */
+      // 按公司分组：同一家的几场聚在一起。
       const groups = useMemo(() => groupSessions(visibleRows), [visibleRows])
+      // 哪几个组是收起的。默认全展开——收起来是为了让列表短，
+      // 但刚打开时用户还在找最近的场次，不该先让他点两下。
+      const [collapsedGroups, setCollapsedGroups] = useState({})
 
       /**
-       * 一行下面的那串小字。
-       *
-       * 窄布局没有组头，所以公司 · 岗位得写在这一行里；
-       * 宽布局有组头，就不重复写了。
+       * 行里显示的标题：组头已经写了公司，行内就不再重复一遍
+       * （「字节跳动 / 字节 · 高级后端工程师」是同一件事说两次）。
+       * 完整标题一直在 `title=` 里，悬停能看全。
        */
-      const rowMeta = (row, withPosition) => {
-        const base = `${row.status} · 考点 ${row.probedCount}/${row.checklistCount}`
-        if (!withPosition) return base
+      const shortTitle = row => {
+        const title = String(row.title ?? '')
         const company = (row.company ?? '').trim()
-        const position = (row.position ?? '').trim()
-        const label = company !== '' && position !== ''
-          ? `${company} · ${position}`
-          : (position !== '' ? position : company)
-        return label === '' ? base : `${label} · ${base}`
+        if (company === '') return title
+        const prefix = `${company} · `
+        return title.startsWith(prefix) ? title.slice(prefix.length).trim() : title
+      }
+
+      /**
+       * 一行下面的那串小字：**只写标题里没有的东西**。
+       *
+       * 标题通常已经带了公司 / 岗位，再重复一遍只会把两行都挤到截断。
+       * 只有当用户把标题改成认不出岗位的名字时，才把岗位补到这里。
+       *
+       * @param {object} row
+       * @param {string} shownTitle 这一行实际显示出来的标题
+       */
+      const rowMeta = (row, shownTitle) => {
+        const parts = []
+        const rawPosition = (row.position ?? '').trim()
+        // 占位岗位也不是真名字，别把「新建岗位 2026-11-17」当第二行小字。
+        const position = isPlaceholderPosition(rawPosition) ? '' : rawPosition
+        if (position !== '' && !shownTitle.includes(position)) parts.push(position)
+        parts.push(`${row.status ?? 'draft'} · 考点 ${row.probedCount}/${row.checklistCount}`)
+        return parts.join(' · ')
       }
 
       // 默认选中最近一场。
@@ -4958,6 +7132,8 @@ function SettingsView(props) {
           // 只拦**面板左侧**的点击（DSH 侧栏是导航入口）；顶部菜单与面板内放行。
           const rect = root.getBoundingClientRect()
           if (event.clientX >= rect.left) return
+          // 宿主的窗口陈设（折叠侧栏、标题栏图标、顶部标签）不会离开面试间——放行。
+          if (isHostChromeClick(event)) return
           event.preventDefault()
           event.stopPropagation()
           const point = { x: event.clientX, y: event.clientY }
@@ -4988,114 +7164,583 @@ function SettingsView(props) {
       }, [])
       const narrow = pageWidth > 0 && pageWidth < 760
 
+      // ── 页头要用的派生值 ──────────────────────────────────────────────
+      //
+      // 全部由**已有状态**算出来（会话快照 + 页签 + 主题），不新增任何取数。
+      // 页头是每 1.5 秒跟着轮询重绘的那一层，多一个请求就是多一份卡顿。
+      const current = session?.session
+      const tabIndex = Math.max(0, PANEL_TABS.findIndex(item => item.key === tab))
+      const probedCount = session?.stats?.checklistProbed ?? 0
+      const checklistTotal = session?.stats?.checklistTotal
+        ?? (Array.isArray(session?.checklist?.items) ? session.checklist.items.length : 0)
+      const statusChipText = checklistTotal > 0 ? `考点 ${probedCount}/${checklistTotal}` : ''
+      const nextThemeLabel = theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'
+      const rootInfo = config?.workspaceRoot
+
+      // 页签：分段控件 + 一条**滑动**的 2px 指示条。
+      //
+      // 指示条不是每格画一条，而是一条跟着 index 走：四格等宽，
+      // 所以位置能用百分比算出来，不需要量 DOM——没有 ResizeObserver、
+      // 没有额外 state，切换时只改一个行内样式。
+      const tabStrip = h('div', {
+        key: 'tabs',
+        role: 'tablist',
+        'aria-label': '面试阶段',
+        style: {
+          ...S.tabs,
+          marginLeft: 0,
+          position: 'relative',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          gap: 2,
+          flex: narrow ? '1 1 260px' : '0 0 auto',
+        },
+      }, [
+        h('span', {
+          key: 'indicator',
+          'aria-hidden': true,
+          style: {
+            position: 'absolute', bottom: 3, height: 2, width: 22, borderRadius: RADIUS.pill,
+            background: C.accent,
+            // 四格等宽：第 i 格的中心 = padding + (内容宽 × (i + .5) / 4)。
+            left: `calc(4px + (100% - 8px) * ${(tabIndex + 0.5) / 4} - 11px)`,
+            boxShadow: `0 0 10px ${C.accentWash}`,
+            transition: 'left 260ms var(--iv-ease)',
+            pointerEvents: 'none',
+          },
+        }),
+        ...PANEL_TABS.map(item => h('div', {
+          key: item.key,
+          role: 'tab',
+          tabIndex: 0,
+          'aria-selected': tab === item.key,
+          title: item.label,
+          style: {
+            ...S.tab(tab === item.key),
+            // 选中项：**从槽里抬起来的那一格**——用统一的 elev-1（内高光 +
+            // 接触影 + 环境影三件套），而不是手写一句投影。
+            boxShadow: tab === item.key ? C.elev1 : 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '6px 10px',
+          },
+          onClick: () => guardRun(item.guard, () => setTab(item.key)),
+          onKeyDown: event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            guardRun(item.guard, () => setTab(item.key))
+          },
+        }, item.label)),
+      ])
+
+      // 主题切换：**一个图标**，不写「亮色/暗色」四个字。
+      // 可见的 ◐ 是「半明半暗」；切到哪套写在 title / aria-label 里。
+      //
+      // 勾了「跟随 DSH 主题」之后这个按钮**失效**（但还在原位，不跳）：
+      // 明暗由宿主决定，点它不会有结果，所以点下去要**说明为什么**，
+      // 而不是让按钮毫无反应——没反应的按钮会被当成坏了。
+      const themeButton = h(IconBtn, {
+        key: 'theme',
+        label: themeFollow ? '主题跟随 DSH（设置页可关）' : nextThemeLabel,
+        title: themeFollow
+          ? `主题跟随 DSH：现在是${theme === 'dark' ? '暗色' : '亮色'}（在设置页取消「跟随 DSH 主题」才能自己选）`
+          : `${nextThemeLabel}（当前：${theme === 'dark' ? '暗色' : '亮色'}）`,
+        // **不真 disable**：真 disable 的按钮点不动，也就没法解释"为什么不生效"。
+        // 视觉上已经淡下去（看得见它失效），点下去给一句说明（知道该去哪儿改）。
+        style: {
+          flex: '0 0 auto', minWidth: 34, minHeight: 34, borderRadius: RADIUS.md,
+          border: `1px solid ${C.ruleSoft}`,
+          color: themeFollow ? C.boneFaint : C.boneDim,
+          opacity: themeFollow ? 0.55 : 1,
+          cursor: 'help',
+        },
+        onClick: themeFollow
+          ? () => notify('主题在跟随 DSH', '现在由 DSH 的明暗决定。想自己选，去设置页取消「跟随 DSH 主题」。', 'info')
+          : () => setTheme(previous => (previous === 'dark' ? 'light' : 'dark')),
+      }, h('span', {
+        key: 'glyph',
+        'aria-hidden': true,
+        style: { fontSize: TYPE.body.fontSize, lineHeight: 1 },
+      }, theme === 'dark' ? '◑' : '◐'))
+
+      const newSessionButton = h('button', {
+        key: 'new',
+        type: 'button',
+        style: { ...S.btn('primary', false), flex: '0 0 auto', padding: '8px 14px' },
+        onClick: () => guardRun('新建面试', createSession),
+      }, '新建面试')
+
+      /**
+       * 卷宗库：**收进一枚芯片，但仍然可查、可换。**
+       *
+       * `title=` 里是完整路径 + 来源理由（`AGENTS.md §3` 的红线：
+       * 界面必须能回答「数据在哪、为什么是这个目录」），点一下走宿主的
+       * 原生目录选择器——不给用户手打路径的机会，路径是机器上的事实。
+       */
+      const rootChip = rootInfo === undefined ? null : h('button', {
+        key: 'root',
+        type: 'button',
+        'data-iv-root': '1',
+        disabled: picking,
+        title: `${rootInfo.path}\n${rootInfo.reason ?? ''}\n点击用系统目录选择器换一个位置`,
+        'aria-label': `卷宗库位置：${rootInfo.path}。点击更换`,
+        style: {
+          display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0, maxWidth: '100%',
+          padding: '2px 10px', borderRadius: RADIUS.pill, cursor: picking ? 'progress' : 'pointer',
+          background: 'transparent', border: `1px solid ${C.ruleSoft}`, color: C.boneFaint,
+          fontFamily: F.ui,
+        },
+        onClick: pickWorkspaceRoot,
+      }, [
+        h(Meta, {
+          key: 'p',
+          tone: 'faint',
+          style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' },
+        }, `卷宗库 · ${shortRootPath(rootInfo.path)}`),
+        h('span', {
+          key: 'b',
+          style: {
+            fontFamily: F.mono, ...TYPE.meta, color: C.accent,
+            whiteSpace: 'nowrap', letterSpacing: '0.1em', flex: '0 0 auto',
+          },
+        }, picking ? '…' : '浏览…'),
+      ])
+
+      /** 删除是两步：第一次只是「上膛」，四秒内再点才真删。 */
+      const armDelete = row => {
+        if (pendingDelete === row.id) {
+          void deleteSession(row.id)
+          return
+        }
+        setPendingDelete(row.id)
+        setTimeout(() => setPendingDelete(current => (current === row.id ? undefined : current)), 4000)
+      }
+
+      // 菜单打开时，点别处就收起。捕获阶段监听，且**不拦事件**（只观察），
+      // 所以不会影响别处本来要处理的点击。
+      useEffect(() => {
+        if (rowMenu === undefined) return undefined
+        const close = event => {
+          const target = event.target
+          if (target !== null && target !== undefined && typeof target.closest === 'function'
+            && target.closest('[data-iv-rowmenu]') !== null) return
+          setRowMenu(undefined)
+        }
+        const onKey = event => { if (event.key === 'Escape') setRowMenu(undefined) }
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+          document.addEventListener('click', close, true)
+          document.addEventListener('keydown', onKey)
+        }
+        return () => {
+          if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+            document.removeEventListener('click', close, true)
+            document.removeEventListener('keydown', onKey)
+          }
+        }
+      }, [rowMenu])
+
+      /** 菜单里的一项：淡底、悬停提亮，危险项用自己的语气色。 */
+      const menuItemStyle = () => ({
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        padding: '7px 10px', borderRadius: RADIUS.sm, border: '1px solid transparent',
+        background: 'transparent', color: C.boneDim, cursor: 'pointer',
+        fontFamily: F.ui, fontSize: TYPE.sub.fontSize, textAlign: 'left',
+      })
+
+      /**
+       * 左栏的一行：**标题 + 一行 Meta + 一个「⋯」**。
+       *
+       * 归档/删除**必须不挡标题**——上一版把两个图标绝对定位在行尾，
+       * 悬停时正好压在截断的标题上（用户第一眼看到的就是"按钮把字盖住了"）。
+       * 现在改成：常驻一枚 26px 的「⋯」，点开才出现两项动作。
+       * 好处是三重的：不遮挡、不跳动（宽度始终占着）、触屏也点得到。
+       */
+      const sessionRow = row => {
+        const active = row.id === selected
+        const armed = pendingDelete === row.id
+        const open = rowMenu === row.id
+        return h('div', {
+          key: row.id,
+          className: 'iv-row',
+          style: {
+            position: 'relative', display: 'flex', alignItems: 'center',
+            marginBottom: 4, borderRadius: RADIUS.sm,
+            background: active ? C.surface2 : 'transparent',
+            border: `1px solid ${active ? C.ruleSoft : 'transparent'}`,
+            // 选中的那一行是**从列表里抬起来的一张纸**，不是涂深的一格。
+            boxShadow: active ? C.elev1 : 'none',
+            transition: 'background 160ms var(--iv-ease), border-color 160ms var(--iv-ease), box-shadow 160ms var(--iv-ease)',
+          },
+        }, [
+          h('button', {
+            key: 'b',
+            type: 'button',
+            // 标题被省略号截断时，悬停要能看全——这是「可点击的岗位按钮」
+            // 唯一能自证身份的地方（原生 title 悬浮框不会被侧栏的滚动裁掉）。
+            title: row.title,
+            'aria-current': active ? 'true' : undefined,
+            style: {
+              flex: '1 1 auto', minWidth: 0, textAlign: 'left', cursor: 'pointer',
+              padding: '8px 4px 8px 10px', border: 'none', background: 'transparent',
+              fontFamily: F.ui, color: active ? C.bone : C.boneDim,
+            },
+            onClick: () => guardRun('切换面试', () => setSelected(row.id)),
+          }, [
+            h('div', {
+              key: 't',
+              style: {
+                ...TYPE.body, lineHeight: 1.4,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              },
+            }, shortTitle(row)),
+            h(Meta, {
+              key: 'm',
+              tone: 'faint',
+              style: {
+                display: 'block', marginTop: 2, letterSpacing: '0.1em',
+                overflow: 'hidden', textOverflow: 'ellipsis',
+              },
+            }, rowMeta(row, shortTitle(row))),
+          ]),
+          h('div', {
+            key: 'act',
+            'data-iv-rowmenu': '1',
+            style: { position: 'relative', flex: '0 0 auto', display: 'flex', alignItems: 'center', paddingRight: 2 },
+          }, [
+            h(IconBtn, {
+              key: 'more',
+              label: open ? '收起场次操作' : '场次操作',
+              title: '存档、删除这场面试',
+              style: {
+                minWidth: 26, minHeight: 26, padding: '4px',
+                background: open ? C.ink700 : 'transparent',
+                color: open || active ? C.boneDim : C.boneFaint,
+              },
+              onClick: () => setRowMenu(open ? undefined : row.id),
+            }, h('span', {
+              key: 'g',
+              'aria-hidden': true,
+              style: { fontFamily: F.mono, fontSize: 13, lineHeight: 1, letterSpacing: 0 },
+            }, '⋯')),
+            open
+              ? h('div', {
+                key: 'menu',
+                role: 'menu',
+                style: {
+                  position: 'absolute', right: 0, top: 'calc(100% + 2px)', zIndex: 40,
+                  minWidth: 132, padding: 4, display: 'flex', flexDirection: 'column', gap: 2,
+                  ...S.surface('stage'), boxShadow: C.elev4,
+                  animation: 'ivRise 160ms var(--iv-ease) backwards',
+                },
+              }, [
+                h('button', {
+                  key: 'arch',
+                  type: 'button',
+                  title: row.archived ? '取消归档（内容都还在）' : '归档这场面试（只是收起来，内容都还在）',
+                  style: menuItemStyle(),
+                  onClick: () => { setRowMenu(undefined); archiveRow(row) },
+                }, row.archived ? '取消归档' : '归档'),
+                h('button', {
+                  key: 'del',
+                  type: 'button',
+                  title: armed ? '再点一次确认删除（卷宗目录一起删，不可恢复）' : '删除这场面试（连同卷宗目录，不可恢复）',
+                  style: { ...menuItemStyle(), color: armed ? C.tally : C.boneDim },
+                  onClick: () => {
+                    if (armed) { setRowMenu(undefined); void deleteSession(row.id); return }
+                    armDelete(row)
+                  },
+                }, armed ? '确认删除' : '删除'),
+              ])
+              : null,
+          ]),
+        ])
+      }
+
+      /** 窄面板里的横向场次卡：动作常驻（触屏没有 hover，藏起来就点不到）。 */
+      const sessionCard = row => {
+        const active = row.id === selected
+        const armed = pendingDelete === row.id
+        return h('div', {
+          key: row.id,
+          style: {
+            flex: '0 0 184px', width: 184, display: 'flex', alignItems: 'stretch',
+            borderRadius: RADIUS.sm, overflow: 'hidden',
+            background: active ? C.ink750 : 'transparent',
+            border: `1px solid ${active ? C.ruleSoft : 'transparent'}`,
+          },
+        }, [
+          h('button', {
+            key: 'b',
+            type: 'button',
+            title: row.title,
+            'aria-current': active ? 'true' : undefined,
+            style: {
+              flex: '1 1 auto', minWidth: 0, textAlign: 'left', cursor: 'pointer',
+              padding: '7px 8px', border: 'none', background: 'transparent',
+              fontFamily: F.ui, color: active ? C.bone : C.boneDim,
+            },
+            onClick: () => guardRun('切换面试', () => setSelected(row.id)),
+          }, [
+            h('div', {
+              key: 't',
+              style: {
+                ...TYPE.body, lineHeight: 1.35,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              },
+            },
+            // 窄布局没有公司组头，所以标题**保留完整写法**（通常就是「公司 · 岗位」），
+            // 只把状态与考点放进第二行——两行都截断得干干净净。
+            row.title),
+            h(Meta, {
+              key: 'm',
+              tone: 'faint',
+              style: {
+                display: 'block', marginTop: 2,
+                overflow: 'hidden', textOverflow: 'ellipsis',
+              },
+            }, rowMeta(row, row.title)),
+          ]),
+          h('div', {
+            key: 'act',
+            style: { display: 'flex', alignItems: 'center', flex: '0 0 auto', paddingRight: 2 },
+          }, [
+            h(IconBtn, {
+              key: 'arch',
+              label: row.archived ? '取消归档' : '归档这场面试',
+              title: row.archived ? '取消归档（内容都还在）' : '归档这场面试（只是收起来，内容都还在）',
+              style: { minWidth: 22, minHeight: 22, padding: '4px' },
+              onClick: () => archiveRow(row),
+            }, h(ArchiveGlyph, { key: 'g' })),
+            h(IconBtn, {
+              key: 'del',
+              tone: 'tally',
+              label: '删除这场面试',
+              title: armed ? '再点一次确认删除' : '删除这场面试（连同卷宗目录）',
+              style: {
+                minWidth: 22, minHeight: 22, padding: '4px',
+                background: armed ? TONES.tally.wash : 'transparent',
+                borderColor: armed ? TONES.tally.edge : 'transparent',
+              },
+              onClick: () => armDelete(row),
+            }, h(TrashGlyph, { key: 'g' })),
+          ]),
+        ])
+      }
+
       return h('div', {
         ref: pageRef,
         'data-iv-page': '1',
         'data-iv-theme': theme,
+        // 布局闸门用它验证「点了页签，真的换页了」——
+        // 截图闸门曾经把设置页截成准备页，就是因为没人验证这一步。
+        'data-iv-tab': tab,
         className: 'iv-root',
         // **主题变量挂在根节点上。**
         // 自定义属性会被后代继承，所以下面所有 `var(--iv-*)` 都跟着变；
         // 切换主题只需要根节点换一套值，其余元素一个都不用重渲染。
         style: { ...S.page, ...THEMES[theme] },
       }, [
-        h('div', {key: 'k17',  style: narrow
-          // 窄：页头允许换行，页签和按钮不缩成竖排的字。
-          ? { ...S.head, flexWrap: 'wrap', gap: 10, padding: '12px 16px' }
-          : S.head }, [
+        // 点阵层：在页面上半部隐约可见（径向遮罩写在 30-theme 的 .iv-grid 里）。
+        // 它不是装饰网格——它是「这块屏是仪表」的暗示，给页头与舞台一点纵深。
+        h('div', { key: 'grid', className: 'iv-grid', 'aria-hidden': 'true' }),
+        // 页头：**一行的身份 + 一行的仪表**。
+        //
+        // 旧版是三行常驻文字（产品名 / 一句设计说明 / 常驻路径行），
+        // 把页头撑得比内容还高，整页看起来「上面全是小字」。
+        // 现在：第一行 = 记号 + 产品名 + 当前场次 + 控件；
+        //       第二行 = 状态芯片 + 卷宗库芯片。
+        // 「简历 + JD → 一场有准备的面试」是**设计说明书**，删掉——
+        // 记号与页面已经在说这件事（docs/DESIGN.md §1）。
+        h('div', {
+          key: 'head',
+          'data-iv-head': '1',
+          style: {
+            ...S.head,
+            flexDirection: 'column', alignItems: 'stretch', gap: 8,
+            ...(narrow ? { padding: '12px 14px 10px' } : {}),
+            borderBottom: `1px solid ${C.ruleSoft}`,
+          },
+        }, [
           h('div', {
-            key: 'k19',
-            style: narrow
-              // 窄：标题独占一行，页签和「新建面试」并排第二行——
-              // 否则「新建面试」会被挤到第三行，白白吃掉一屏高度。
-              ? { minWidth: 0, flex: '1 1 100%' }
-              : { minWidth: 0, flex: '1 1 auto' },
-          }, [
-            h('div', {key: 'k21',  style: S.title }, '模拟面试间'),
-            h('div', {key: 'k22',  style: S.sub }, '简历 + JD → 一场有准备的面试'),
-            config?.workspaceRoot !== undefined
-              ? h('div', {
-                key: 'w',
-                style: { ...S.workspace, display: 'flex', alignItems: 'center', gap: 10 },
-              }, [
-                h('span', {
-                  key: 'p',
-                  style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-                  title: `${config.workspaceRoot.path}\n${config.workspaceRoot.reason ?? ''}`,
-                }, `卷宗库 · ${config.workspaceRoot.path}`),
-                // 「浏览…」：换成宿主的原生目录选择器。
-                //
-                // **为什么不让用户手打路径。** 路径是机器上的事实，
-                // 让用户手打就是让他凭记忆写一个自己也不确定存在的路径；
-                // 而系统对话框里选出来的路径，是用户**看着**选出来的。
-                h('button', {
-                  key: 'b',
-                  title: '换一个卷宗库目录（用系统目录选择器）',
-                  'aria-label': '换一个卷宗库目录',
-                  style: {
-                    flex: '0 0 auto', padding: '1px 8px', borderRadius: 6, cursor: picking ? 'progress' : 'pointer',
-                    fontFamily: F.ui, fontSize: 10.5, lineHeight: 1.7,
-                    color: C.boneDim, background: 'transparent',
-                    border: `1px solid ${C.rule}`,
-                  },
-                  disabled: picking,
-                  onClick: pickWorkspaceRoot,
-                }, picking ? '正在打开…' : '浏览…'),
-              ])
-              : null,
-          ]),
-          h('div', {key: 'k20',  style: narrow ? { ...S.tabs, marginLeft: 0, flex: '0 0 auto', flexWrap: 'wrap' } : { ...S.tabs, flexWrap: 'wrap' } }, [
-            h('div', { key: 'a', style: S.tab(tab === 'prepare'), onClick: () => guardRun('切换到「准备」', () => setTab('prepare')) }, '准备'),
-            h('div', { key: 'b', style: S.tab(tab === 'live'), onClick: () => guardRun('切换到「面试中」', () => setTab('live')) }, '面试中'),
-            h('div', { key: 'c', style: S.tab(tab === 'report'), onClick: () => guardRun('切换到「报告」', () => setTab('report')) }, '报告'),
-            // 设置页放在这里，**不占 DSH 设置页的位置**：路径、模型、后端、
-            // 保护开关都是这个插件自己的事，混进宿主设置只会让人找不着。
-            h('div', { key: 'd', style: S.tab(tab === 'settings'), onClick: () => guardRun('切换到「设置」', () => setTab('settings')) }, '设置'),
-          ]),
-          h('button', {
-            key: 'theme',
-            // 按钮上写的是**切过去之后**的样子：「亮色」= 点一下变亮色。
-            // 当前是什么主题，写在 title 里（鼠标悬停可见）。
-            title: theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题',
-            'aria-label': theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题',
-            style: { ...S.btn(false, false), marginLeft: narrow ? 0 : 10, padding: '8px 13px' },
-            onClick: () => setTheme(previous => {
-              const next = previous === 'dark' ? 'light' : 'dark'
-              saveTheme(next)
-              return next
-            }),
-          }, theme === 'dark' ? '亮色' : '暗色'),
-          h('button', {
-            key: 'n',
-            style: { ...S.btn('primary', false), marginLeft: narrow ? 0 : 16 },
-            onClick: () => guardRun('新建面试', createSession),
-          }, '新建面试'),
-        ]),
-
-        notice !== undefined
-          ? h('div', {
-            key: 'notice',
+            key: 'top',
             style: {
-              padding: '10px 22px', fontSize: 12, display: 'flex', gap: 12, alignItems: 'center',
-              background: notice.kind === 'error' ? TONES.tally.wash : notice.kind === 'ok' ? TONES.jade.wash : C.ink850,
-              borderBottom: `1px solid ${C.rule}`,
-              color: notice.kind === 'error' ? C.tally : notice.kind === 'ok' ? C.jade : C.boneDim,
+              display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+              gap: narrow ? 10 : 16, minWidth: 0,
             },
           }, [
-            h('span', { key: 't', style: { fontWeight: 600 } }, notice.title),
-            notice.detail !== undefined ? h('span', { key: 'd', style: { color: C.boneFaint } }, notice.detail) : null,
-            // 通知条也能带一个动作（比如「把旧卷宗搬过去」）。
+            h('div', {
+              key: 'id',
+              'data-iv-brand': '1',
+              style: {
+                display: 'flex', alignItems: 'center', gap: 12, minWidth: 0,
+                flex: narrow ? '1 1 100%' : '1 1 auto',
+              },
+            }, [
+              // 记号：一块很薄的「铭牌」托着它，让它在明暗两套底色上
+              // 都像被装上去的，而不是飘在页面上的一个图标。
+              h('div', {
+                key: 'mark',
+                'data-iv-mark': '1',
+                style: {
+                  flex: '0 0 auto', width: 36, height: 36, display: 'grid', placeItems: 'center',
+                  borderRadius: RADIUS.md, color: C.bone,
+                  background: C.surface2, border: `1px solid ${C.ruleSoft}`, boxShadow: C.elev1,
+                },
+              }, [h(BrandMark, { key: 'svg', size: 22 })]),
+              h('div', {
+                key: 'names',
+                style: { display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 },
+              }, [
+                h('span', {
+                  key: 'brand',
+                  style: { ...S.title, flex: '0 0 auto', whiteSpace: 'nowrap' },
+                }, '模拟面试间'),
+                current === undefined
+                  ? null
+                  : h('span', {
+                    key: 'sep',
+                    style: { fontFamily: F.mono, ...TYPE.meta, color: C.boneFaint, flex: '0 0 auto' },
+                  }, '·'),
+                // 当前这场面试的标题：页头要能回答「我现在在哪一场里」。
+                // 窄面板下它会先被省略号吃掉（minWidth: 0 是这条的开关），
+                // 但产品名永远在。
+                current === undefined
+                  ? null
+                  : h('span', {
+                    key: 'name',
+                    title: current.title,
+                    style: {
+                      ...TYPE.body, color: C.boneDim, minWidth: 0,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    },
+                  }, current.title),
+              ]),
+            ]),
+            h('div', {
+              key: 'ctl',
+              style: {
+                display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+                marginLeft: narrow ? 0 : 'auto', minWidth: 0,
+                flex: narrow ? '1 1 100%' : '0 0 auto',
+              },
+            }, [tabStrip, themeButton, newSessionButton]),
+          ]),
+          h('div', {
+            key: 'meta',
+            style: {
+              display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+              minWidth: 0, paddingLeft: narrow ? 0 : 48,
+            },
+          }, [
+            // 状态：一条芯片说完「在不在面试、底稿问到哪了」。
+            current === undefined
+              ? h(Pill, { key: 'status', tone: 'faint' }, '未建场次')
+              : h(Pill, { key: 'status', tone: statusTone(current.status) }, [
+                h('span', {
+                  key: 'dot',
+                  style: {
+                    display: 'inline-block', width: 5, height: 5, borderRadius: RADIUS.pill,
+                    background: 'currentColor', marginRight: 6, verticalAlign: 1,
+                  },
+                }),
+                `${current.status ?? 'draft'}${statusChipText === '' ? '' : ` · ${statusChipText}`}`,
+              ]),
+            rootChip,
+          ]),
+        ]),
+
+        // 通知条：**浮在页面上的一层**，不占布局。
+        //
+        // 旧版把它当一个正常的 flex 行插在页头下面：弹出一条，整页内容
+        // 就往下跳一次，关掉又跳回来——用户感受到的是「页面大幅抖动」。
+        // 现在外层是一个**零高度**的托盘（它自己在页头之后，所以就是页头
+        // 下缘），提醒条按内容宽度居中、浮在内容之上；
+        // 4 秒后先淡出再卸载（见上面的定时器）。
+        notice === undefined
+          ? null
+          : h('div', {
+            key: 'notice-tray',
+            // 零高度 + 不遮挡 ：托盘自己不接收点击，只有那条提醒接收。
+            // `alignItems: flex-start` 不能省——默认 stretch 会把提醒条
+            // 拉成 0 高（托盘只有 0 高）。
+            style: {
+              display: 'flex', justifyContent: 'center', alignItems: 'flex-start',
+              height: 0, flex: '0 0 auto', zIndex: 200, pointerEvents: 'none',
+              padding: '0 16px', boxSizing: 'border-box',
+            },
+          }, h('div', {
+            key: 'notice',
+            'data-iv-notice': notice.kind,
+            role: notice.kind === 'error' ? 'alert' : 'status',
+            'aria-live': notice.kind === 'error' ? 'assertive' : 'polite',
+            style: {
+              // **按内容收窄**：一条「已保存」不该铺满整页宽，那会把
+              // 面板最亮的位置让给一条系统消息。
+              marginTop: 8,
+              width: 'max-content', maxWidth: 'min(640px, 100%)',
+              display: 'flex', alignItems: 'center', gap: 12,
+              flexWrap: narrow ? 'wrap' : 'nowrap',
+              padding: narrow ? '9px 12px' : '9px 12px 9px 14px',
+              // 磨砂 + 一级浮起的影：它盖在内容上，所以必须**看得出来是浮着的**。
+              background: C.glass,
+              backdropFilter: 'blur(12px) saturate(1.1)',
+              WebkitBackdropFilter: 'blur(12px) saturate(1.1)',
+              borderWidth: 1, borderStyle: 'solid',
+              borderColor: notice.kind === 'error' ? TONES.tally.edge
+                : notice.kind === 'ok' ? TONES.jade.edge
+                  : notice.kind === 'warn' ? TONES.amber.edge : C.rule,
+              borderRadius: RADIUS.md,
+              boxShadow: C.elev3,
+              pointerEvents: 'auto',
+              opacity: notice.leaving === true ? 0 : 1,
+              transform: notice.leaving === true ? 'translateY(-6px)' : 'none',
+              transition: 'opacity 240ms var(--iv-ease), transform 240ms var(--iv-ease)',
+              animation: 'ivToastIn 220ms var(--iv-ease) backwards',
+            },
+          }, [
+            // 一条 2px 的语气刻度：颜色只说明「这是什么性质的通知」，
+            // 不整条铺色——铺色会把面板最亮的位置让给一条系统消息。
+            h('span', {
+              key: 'tick',
+              'aria-hidden': 'true',
+              style: {
+                flex: '0 0 auto', width: 2, height: 16, borderRadius: RADIUS.pill,
+                background: notice.kind === 'error' ? C.tally
+                  : notice.kind === 'ok' ? C.jade
+                    : notice.kind === 'warn' ? C.amber : C.accent,
+              },
+            }),
+            h('span', {
+              key: 't',
+              style: {
+                ...TYPE.sub, fontWeight: 600, flex: '0 0 auto',
+                color: notice.kind === 'error' ? C.tally
+                  : notice.kind === 'ok' ? C.jade
+                    : notice.kind === 'warn' ? C.amber : C.bone,
+              },
+            }, notice.title),
+            notice.detail !== undefined
+              ? h('span', {
+                key: 'd',
+                style: {
+                  ...TYPE.sub, color: C.boneFaint, minWidth: 0,
+                  overflow: 'hidden', textOverflow: 'ellipsis',
+                  whiteSpace: narrow ? 'normal' : 'nowrap',
+                },
+              }, notice.detail)
+              : null,
+            // 通知条也能带一个动作（「撤销新建」「放弃修改并关闭」）。
             //
-            // **为什么动作在通知条里，而不是弹一个模态框。** 通知条已经在
-            // 面板最上面了，用户的眼睛本来就在那儿；而模态框会挡住
-            // 面试页——面试进行中弹模态框，是最不该做的事。
+            // **为什么动作在通知里，而不是弹一个模态框。** 通知已经在
+            // 视线最上方；而模态框会挡住面试页——面试进行中弹模态框，
+            // 是最不该做的事。
             notice.action !== undefined
               ? h('button', {
                 key: 'a',
+                type: 'button',
                 style: {
-                  flex: '0 0 auto', padding: '4px 12px', borderRadius: 8, cursor: 'pointer',
-                  fontFamily: F.ui, fontSize: 11.5,
-                  color: C.bone, background: C.ink700,
-                  border: `1px solid ${C.rule}`,
+                  flex: '0 0 auto', padding: '3px 12px', borderRadius: RADIUS.sm,
+                  cursor: 'pointer', fontFamily: F.ui, ...TYPE.sub,
+                  color: C.bone, background: C.ink700, border: `1px solid ${C.rule}`,
                 },
                 onClick: () => {
                   const action = notice.action
@@ -5104,9 +7749,18 @@ function SettingsView(props) {
                 },
               }, notice.action.label)
               : null,
-            h('span', { key: 'x', style: { marginLeft: 'auto', cursor: 'pointer', color: C.boneFaint }, onClick: () => setNotice(undefined) }, '×'),
-          ])
-          : null,
+            h(IconBtn, {
+              key: 'x',
+              label: '关闭通知',
+              title: '关闭通知',
+              onClick: () => setNotice(undefined),
+              style: { marginLeft: 'auto', flex: '0 0 auto', minWidth: 26, minHeight: 26 },
+            }, h('span', {
+              key: 'g',
+              'aria-hidden': true,
+              style: { fontSize: TYPE.body.fontSize, lineHeight: 1 },
+            }, '×')),
+          ])),
 
         h('div', {key: 'k18',  style: narrow ? { ...S.body, flexDirection: 'column' } : S.body }, [
           // 会话列表
@@ -5125,142 +7779,97 @@ function SettingsView(props) {
                 boxSizing: 'border-box',
                 width: '100%', flex: '0 0 auto', display: 'flex', alignItems: 'stretch', gap: 8,
                 overflowX: 'auto', overflowY: 'hidden', padding: '10px 12px',
-                borderRight: 'none', borderBottom: `1px solid ${C.rule}`, background: C.ink850,
+                borderRight: 'none', borderBottom: `1px solid ${C.rule}`, background: C.surface3,
+                boxShadow: `inset 0 -1px 0 ${C.ruleSoft}`,
               }
               : S.rail,
           }, [
             h('div', {
               key: 'h',
               style: narrow
-                ? { ...S.eyebrow, padding: '4px 6px', alignSelf: 'center', flex: '0 0 auto' }
-                : { ...S.eyebrow, padding: '4px 8px 12px', display: 'flex', alignItems: 'center', gap: 8 },
+                ? { display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }
+                : { display: 'flex', alignItems: 'center', gap: 8, padding: '2px 8px 10px' },
             }, [
-              h('span', { key: 'l' }, '面试场次'),
-              // 归档藏起来之后，得有个地方把它再翻出来。
+              h(Meta, { key: 'l', tone: 'faint' }, '面试场次'),
+              // 归档只是「收起来」——收起来之后得有个地方把它再翻出来。
               archivedRows.length > 0
-                ? h('span', {
+                ? h(IconBtn, {
                   key: 'a',
-                  role: 'button',
-                  tabIndex: 0,
+                  label: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
                   title: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
                   style: {
-                    marginLeft: 'auto', cursor: 'pointer', fontSize: 10.5, color: C.boneFaint,
-                    border: `1px solid ${C.rule}`, borderRadius: 6, padding: '1px 6px',
+                    marginLeft: 'auto', flex: '0 0 auto', minWidth: 0, minHeight: 0, padding: '2px 8px',
                   },
                   onClick: () => setShowArchived(value => !value),
-                }, showArchived ? '收起归档' : `归档 ${archivedRows.length}`)
+                }, showArchived ? '收起' : `归档 ${archivedRows.length}`)
                 : null,
             ]),
+            // 空状态：一句话 + 一个动作（Empty 自带虚线框，不写说明书）。
             visibleRows.length === 0
-              ? h('div', { key: 'e', style: { ...S.hint, padding: '0 8px' } }, '还没有面试会话。')
+              ? h('div', { key: 'e', style: { paddingTop: 4 } }, [
+                h(Empty, {
+                  key: 'empty',
+                  title: '还没有面试场次',
+                  action: h('button', {
+                    key: 'new',
+                    type: 'button',
+                    style: S.btn('primary', false),
+                    onClick: () => guardRun('新建面试', createSession),
+                  }, '新建面试'),
+                }),
+              ])
               : narrow
                 // 窄：一条横向的场次带。分组在这种形态里没有意义
                 // （一行放不下一个组头），所以只平铺。
-                ? visibleRows.map(row => h('div', {
-                  key: row.id,
-                  style: {
-                    flex: '0 0 176px', width: 176, display: 'flex', alignItems: 'stretch',
-                    borderRadius: 10, overflow: 'hidden',
-                    background: row.id === selected ? C.ink750 : 'transparent',
-                    border: `1px solid ${row.id === selected ? C.rule : 'transparent'}`,
-                  },
-                }, [
-                  h('button', {
-                    key: 'b',
-                    style: {
-                      flex: '1 1 auto', minWidth: 0, textAlign: 'left', cursor: 'pointer',
-                      padding: '8px 10px', border: 'none', background: 'transparent',
-                      fontFamily: F.ui, color: row.id === selected ? C.bone : C.boneDim,
-                    },
-                    onClick: () => guardRun('切换面试', () => setSelected(row.id)),
-                  }, [
-                    h('div', {
-                      key: 't',
-                      style: { fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-                    }, row.title),
-                    h('div', {
-                      key: 'm',
-                      style: { ...S.mono, fontSize: 10, color: C.boneFaint, marginTop: 4 },
-                    }, rowMeta(row, true)),
-                  ]),
-                  h('button', {
-                    key: 'x',
-                    title: row.archived ? '取消归档' : '归档这场面试',
-                    'aria-label': row.archived ? '取消归档' : '归档这场面试',
-                    style: {
-                      flex: '0 0 auto', cursor: 'pointer', border: 'none', background: 'transparent',
-                      color: C.boneFaint, fontSize: 10, padding: '0 6px',
-                    },
-                    onClick: () => archiveRow(row),
-                  }, row.archived ? '取出' : '归档'),
-                ]))
-                // 宽：按岗位分组。同一岗位的几场聚在一起，
-                // 这才是「整理」——一列平铺的「面试 2026-11-16」谁也认不出来。
-                : groups.map(group => h('div', { key: group.key, style: { marginBottom: 12 } }, [
-                  h('div', {
-                    key: 'gh',
-                    style: {
-                      ...S.eyebrow, fontSize: 10, padding: '2px 8px 6px', display: 'flex', gap: 8,
-                      color: C.boneFaint,
-                    },
-                  }, [
-                    h('span', { key: 'n', style: { color: C.boneDim } }, group.label),
-                    h('span', { key: 'c' }, `${group.items.length} 场`),
-                  ]),
-                  group.items.map(row => h('div', {
-                    key: row.id,
-                    style: {
-                      display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4,
-                      borderRadius: 10,
-                      background: row.id === selected ? C.ink750 : 'transparent',
-                      border: `1px solid ${row.id === selected ? C.rule : 'transparent'}`,
-                    },
-                  }, [
+                ? visibleRows.map(row => sessionCard(row))
+                // 宽：按公司分组。组头 = 公司名 + 场数，可点开/收起。
+                // 行内的岗位名放第二行小字——组头短了，行才认得出。
+                : groups.map(group => {
+                  const collapsed = collapsedGroups[group.key] === true
+                  return h('div', { key: group.key, style: { marginBottom: 12 } }, [
                     h('button', {
-                      key: 'b',
+                      key: 'gh',
+                      type: 'button',
+                      'aria-expanded': !collapsed,
+                      title: collapsed ? `展开「${group.label}」` : `收起「${group.label}」`,
                       style: {
-                        flex: '1 1 auto', minWidth: 0, textAlign: 'left', cursor: 'pointer',
-                        padding: '10px 11px', border: 'none', background: 'transparent',
-                        fontFamily: F.ui, color: row.id === selected ? C.bone : C.boneDim,
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        width: '100%', padding: '3px 6px 6px', minWidth: 0,
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        fontFamily: F.ui, textAlign: 'left',
                       },
-                      onClick: () => guardRun('切换面试', () => setSelected(row.id)),
+                      onClick: () => setCollapsedGroups(previous => ({
+                        ...previous,
+                        [group.key]: !collapsed,
+                      })),
                     }, [
-                      h('div', {
-                        key: 't',
-                        style: { fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-                      }, row.title),
-                      h('div', {
-                        key: 'm',
-                        style: { ...S.mono, fontSize: 10, color: C.boneFaint, marginTop: 4 },
-                      }, rowMeta(row, false)),
+                      h('span', {
+                        key: 'chev',
+                        'aria-hidden': 'true',
+                        style: {
+                          display: 'inline-block', width: 0, height: 0, flex: '0 0 auto',
+                          borderLeft: '4px solid transparent', borderRight: '4px solid transparent',
+                          borderTop: `5px solid ${C.boneFaint}`,
+                          transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                          transition: 'transform 160ms var(--iv-ease)',
+                        },
+                      }),
+                      h('span', {
+                        key: 'n',
+                        style: {
+                          ...TYPE.sub, color: C.boneDim, minWidth: 0,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        },
+                      }, group.label),
+                      h(Meta, {
+                        key: 'c',
+                        tone: 'faint',
+                        style: { marginLeft: 'auto', flex: '0 0 auto' },
+                      }, `${group.items.length} 场`),
                     ]),
-                    h('button', {
-                      key: 'x',
-                      title: row.archived ? '取消归档' : '归档这场面试',
-                      'aria-label': row.archived ? '取消归档' : '归档这场面试',
-                      style: {
-                        flex: '0 0 auto', cursor: 'pointer', border: 'none', background: 'transparent',
-                        color: C.boneFaint, fontSize: 10, padding: '0 8px',
-                      },
-                      onClick: () => archiveRow(row),
-                    }, row.archived ? '取出' : '归档'),
-                    h('button', {
-                      key: 'del',
-                      title: '删除这场面试（连同卷宗目录，不可恢复）',
-                      'aria-label': '删除这场面试',
-                      style: {
-                        flex: '0 0 auto', cursor: 'pointer', border: 'none', background: 'transparent',
-                        color: pendingDelete === row.id ? C.tally : C.boneFaint, fontSize: 10, padding: '0 8px',
-                        fontWeight: pendingDelete === row.id ? 600 : 400,
-                      },
-                      onClick: () => {
-                        if (pendingDelete === row.id) { void deleteSession(row.id); return }
-                        setPendingDelete(row.id)
-                        setTimeout(() => setPendingDelete(current => (current === row.id ? undefined : current)), 4000)
-                      },
-                    }, pendingDelete === row.id ? '确认删除' : '删除'),
-                  ])),
-                ])),
+                    collapsed ? null : group.items.map(row => sessionRow(row)),
+                  ])
+                }),
           ]),
 
           // 主区
@@ -5279,23 +7888,44 @@ function SettingsView(props) {
               ...(tab === 'live' ? { display: 'flex', flexDirection: 'column', overflowY: 'hidden' } : {}),
             },
           }, [
-            session === undefined
-              ? h('div', {key: 'k25',  style: { ...S.hint, padding: 60, textAlign: 'center' } }, '还没有面试。先新建一场，或者从左边选一场。')
-              : tab === 'prepare'
-                ? h(PrepareView, {
-                  key: 'prepare',
-                  session,
-                  config,
-                  onChanged: refreshAll,
-                  notify,
-                  // 清单出来后直接进面试中——不用再让用户自己去点页签。
-                  onGoLive: () => guardRun('进入面试中', () => setTab('live')),
-                })
-                : tab === 'live'
-                  ? h(LiveView, { key: 'live', session, config, onChanged: refreshAll, notify })
-                  : tab === 'report'
-                    ? h(ReportView, { key: 'report', session, config, onChanged: refreshAll, notify })
-                    : h(SettingsView, { key: 'settings', session, config, notify }),
+            // 设置页**不依赖「当前有一场面试」**：卷宗库路径、语音、保护开关
+            // 都是插件级的事实。刚装好、一场都还没建的时候，这一页正是
+            // 用户要进的地方——所以它排在最前面，不受 session 判空影响。
+            tab === 'settings'
+              ? h(SettingsView, {
+                key: 'settings',
+                session,
+                config,
+                notify,
+                // 主题的开关在面板这一层（它要驱动整页的样式变量），
+                // 设置页只是它的一个面板——所以状态通过 props 透传。
+                theme,
+                themeFollow,
+                hostScheme,
+                onChangeTheme: setTheme,
+                onChangeThemeFollow: setThemeFollow,
+              })
+              : session === undefined
+                // 空场次时**左栏已经有「还没有面试场次 + 新建面试」**了，
+                // 主区不再放第二个一模一样的空状态——同一个信息不写两遍。
+                // 这里只留一条状态：「现在没有可看的场次」。
+                ? h('div', {
+                  key: 'k25',
+                  style: { padding: '48px 0', display: 'flex', justifyContent: 'center' },
+                }, h(Meta, { key: 'empty', tone: 'faint' }, '没有进行中的面试'))
+                : tab === 'prepare'
+                  ? h(PrepareView, {
+                    key: 'prepare',
+                    session,
+                    config,
+                    onChanged: refreshAll,
+                    notify,
+                    // 清单出来后直接进面试中——不用再让用户自己去点页签。
+                    onGoLive: () => guardRun('进入面试中', () => setTab('live')),
+                  })
+                  : tab === 'live'
+                    ? h(LiveView, { key: 'live', session, config, onChanged: refreshAll, notify })
+                    : h(ReportView, { key: 'report', session, config, onChanged: refreshAll, notify }),
             sessionPoll.error !== undefined && !sessionGone
               ? h('div', {key: 'k26',  style: { ...S.hint, color: C.amber, marginTop: 12 } }, `读不到会话状态：${sessionPoll.error}`)
               : null,

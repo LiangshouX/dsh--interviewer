@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 走 HTTP 的服务端语音识别（插件自己的链路，不依赖宿主语音服务）。
  *
  * **两套协议，不能混。** ASR 不是一个统一标准：
@@ -17,6 +17,8 @@
  */
 import { resolveSecret } from './credentials.js'
 import { firstString, hostSelection, hostService } from './host.js'
+import { ASR_PROVIDERS } from './presets.js'
+import { redactSecret } from './redact.js'
 
 /** 语音配置的有效值：配置文件 > 面板设置 > 默认（见 InterviewService.voiceConfig）。 */
 async function voiceConfigOf(service) {
@@ -32,8 +34,17 @@ const REQUEST_TIMEOUT_MS = 120000
 /** MiniMax's default base URL (mainland China platform). */
 const DEFAULT_MINIMAX_BASE = 'https://api.minimaxi.com'
 
-/** The credential reference used when nothing else is configured. */
-const DEFAULT_KEY_ENV = 'MINIMAX_API_KEY'
+/**
+ * 各协议默认的凭据名。
+ *
+ * **不能只有一个全局默认。** 上一版在没配 `asrApiKeyEnv` 时一律去找
+ * `MINIMAX_API_KEY`，于是选了 OpenAI 兼容网关也永远报"MINIMAX_API_KEY 未配置"。
+ * 默认凭据名必须跟协议/预设走。
+ */
+const DEFAULT_KEY_ENVS = {
+  minimax: 'MINIMAX_API_KEY',
+  openai: 'OPENAI_API_KEY',
+}
 
 /**
  * Resolve the effective HTTP ASR configuration **including the secret**.
@@ -72,13 +83,21 @@ export async function resolveHttpAsr(service) {
     }
   }
 
-  const protocol = pickProtocol(explicitProvider, explicitBase, host.provider, host.baseUrl)
-  const baseUrl = explicitBase !== '' ? explicitBase : (host.baseUrl !== '' ? host.baseUrl : defaultBase(protocol))
-  const endpoint = endpointFor(protocol, baseUrl, config.asrEndpoint)
+  // 预设：既给默认端点/模型，也决定协议。**名字必须先在预设表里注册**，
+  // 否则用户从一个不存在的地方选了个 provider，解析层只能靠猜。
+  const preset = ASR_PROVIDERS[explicitProvider]
+  const protocol = preset !== undefined
+    ? preset.protocol
+    : pickProtocol(explicitProvider, explicitBase, host.provider, host.baseUrl)
+  const baseUrl = explicitBase !== ''
+    ? explicitBase
+    : (preset?.baseUrl || host.baseUrl || defaultBase(protocol))
+  const groupId = protocol === 'minimax' ? resolveGroupId(config.asrGroupId) : ''
+  const endpoint = endpointFor(protocol, baseUrl, config.asrEndpoint, groupId)
 
   const envName = typeof config.asrApiKeyEnv === 'string' && config.asrApiKeyEnv.trim() !== ''
     ? config.asrApiKeyEnv.trim()
-    : DEFAULT_KEY_ENV
+    : (preset?.apiKeyEnv || defaultKeyEnv(protocol))
   const credential = await resolveSecret(service.ctx, {
     literal: explicitKey,
     envName,
@@ -97,15 +116,28 @@ export async function resolveHttpAsr(service) {
     }
   }
 
+  // **相对端点是没有意义的。** 选了「自定义 OpenAI 兼容」却还没填端点时，
+  // 拼出来的是 `/audio/transcriptions`——请求会死在 URL 解析上。凭据齐了
+  // 才检查它：没凭据时上一条原因（缺凭据）更准确。
+  if (!/^https?:\/\//i.test(endpoint)) {
+    return {
+      mode: 'browser',
+      source: 'none',
+      reason: `选了「${preset?.label ?? protocol}」，但端点还是空的：填一个以 http(s):// 开头的端点（OpenAI 兼容通常是 .../v1）。`,
+      language: config.asrLanguage ?? 'zh',
+    }
+  }
+
   return {
     mode: 'server',
     source: credential.source,
     endpoint,
     apiKey: credential.value,
-    model: explicitModel !== '' ? explicitModel : defaultModel(protocol),
+    model: explicitModel !== '' ? explicitModel : (preset?.model || defaultModel(protocol)),
     protocol,
     provider: explicitProvider !== 'auto' ? explicitProvider : (host.provider !== '' ? host.provider : protocol),
     baseUrl,
+    groupId,
     reason: credential.source === 'host'
       ? `继承 DSH 宿主的 ${host.provider || protocol} 配置（凭据来自 ${credential.detail}）。`
       : credential.source === 'config'
@@ -152,21 +184,48 @@ function defaultModel(protocol) {
   return protocol === 'minimax' ? 'asr-1.0' : 'whisper-1'
 }
 
+/** The default credential name for a protocol. */
+function defaultKeyEnv(protocol) {
+  return DEFAULT_KEY_ENVS[protocol] ?? 'MINIMAX_API_KEY'
+}
+
+/**
+ * Which MiniMax GroupId to send, or '' to omit it.
+ *
+ * 与 TTS 的规则一致：显式配置优先，其次 `MINIMAX_GROUP_ID` 环境变量。
+ *
+ * @param {unknown} explicit
+ * @returns {string}
+ */
+export function resolveGroupId(explicit) {
+  const value = typeof explicit === 'string' ? explicit.trim() : ''
+  if (value !== '') return value
+  const fromEnv = typeof process.env?.MINIMAX_GROUP_ID === 'string' ? process.env.MINIMAX_GROUP_ID.trim() : ''
+  return fromEnv
+}
+
 /**
  * The transcription endpoint for a protocol.
+ *
+ * MiniMax 的 GroupId 走**查询参数**（与 TTS 的 t2a_v2 一样），
+ * 因此它必须拼在端点里，不能放进表单。
  *
  * @param {'minimax'|'openai'} protocol
  * @param {string} baseUrl
  * @param {string|undefined} endpointOverride
+ * @param {string} [groupId]
  */
-export function endpointFor(protocol, baseUrl, endpointOverride) {
+export function endpointFor(protocol, baseUrl, endpointOverride, groupId = '') {
+  let endpoint
   if (typeof endpointOverride === 'string' && endpointOverride.trim() !== '') {
-    return joinEndpoint(baseUrl, endpointOverride.trim())
+    endpoint = joinEndpoint(baseUrl, endpointOverride.trim())
+  } else if (protocol === 'minimax') {
+    endpoint = `${stripVersionSegment(baseUrl)}/v1/speech_to_text`
+  } else {
+    endpoint = joinEndpoint(baseUrl, '/audio/transcriptions')
   }
-  if (protocol === 'minimax') {
-    return `${stripVersionSegment(baseUrl)}/v1/speech_to_text`
-  }
-  return joinEndpoint(baseUrl, '/audio/transcriptions')
+  if (groupId === '' || protocol !== 'minimax') return endpoint
+  return `${endpoint}${endpoint.includes('?') ? '&' : '?'}GroupId=${encodeURIComponent(groupId)}`
 }
 
 /**
@@ -275,12 +334,15 @@ export async function transcribeHttp(service, input = {}, signal = undefined) {
     const response = await fetch(settings.endpoint, { method: 'POST', signal: combined, headers, body: form })
     const raw = await response.text()
     if (!response.ok) {
+      // **网关可能在错误体里回显 Authorization。** 出口统一擦掉凭据值。
+      const detail = redactSecret(raw.slice(0, 200), settings.apiKey)
       return {
         ok: false,
         mode: 'server',
         reason: `识别服务返回 HTTP ${response.status}`,
         text: '',
-        warnings: [`识别服务返回 HTTP ${response.status}：${raw.slice(0, 200)}`],
+        hint: hintForStatus(response.status),
+        warnings: [`识别服务返回 HTTP ${response.status}：${detail}`],
       }
     }
     let text = ''
@@ -300,6 +362,7 @@ export async function transcribeHttp(service, input = {}, signal = undefined) {
         mode: 'server',
         reason: '识别服务没有返回文字',
         text: '',
+        hint: '服务返回了 200 但没有文字：可能是空录音、协议不匹配，或模型不是识别模型。先用键盘继续面试，再换端点/模型重试。',
         warnings: ['识别服务返回的内容里没有文字字段。'],
       }
     }
@@ -314,13 +377,35 @@ export async function transcribeHttp(service, input = {}, signal = undefined) {
       warnings: [],
     }
   } catch (error) {
-    const message = error && error.name === 'AbortError'
-      ? `识别超时（${REQUEST_TIMEOUT_MS}ms）`
-      : `识别请求失败：${error && error.message ? error.message : String(error)}`
-    return { ok: false, mode: 'server', reason: message, text: '', warnings: [message] }
+    const aborted = error && error.name === 'AbortError'
+    return {
+      ok: false,
+      mode: 'server',
+      reason: aborted ? `识别超时（${REQUEST_TIMEOUT_MS}ms）` : `识别请求失败：${error && error.message ? error.message : String(error)}`,
+      text: '',
+      hint: aborted
+        ? '网络慢或端点不可达：检查网络/代理，或先用浏览器识别 + 键盘输入。'
+        : '检查端点是否可达、协议是否匹配（OpenAI 兼容是 /audio/transcriptions，MiniMax 是 /v1/speech_to_text）。',
+      warnings: [aborted ? `识别超时（${REQUEST_TIMEOUT_MS}ms）` : '识别请求失败'],
+    }
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** A next step for a failed HTTP status. */
+function hintForStatus(status) {
+  if (status === 401 || status === 403) {
+    return '识别服务拒绝了这把凭据：确认所选凭据名对应的 key 属于这个服务；也可以先用浏览器识别 + 键盘输入。'
+  }
+  if (status === 404) {
+    return '端点不存在：OpenAI 兼容路径是 /audio/transcriptions，MiniMax 是 /v1/speech_to_text；检查端点/Base URL 是否写错。'
+  }
+  if (status === 400) {
+    return '请求被拒：常见原因是音频格式不被接受（要 wav/mp3，不要 webm）、模型 id 不对，或 MiniMax 缺少 Group ID。'
+  }
+  if (status === 429) return '额度或频率被限：稍后再试，或先用浏览器识别 + 键盘输入。'
+  return '检查凭据、端点与模型；也可以先用浏览器识别 + 键盘输入，面试照常进行。'
 }
 
 /**

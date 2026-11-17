@@ -68,6 +68,51 @@ const ASSERT = () => {
   }
 
   const stage = document.querySelector('[data-iv-stage]')
+
+  // ── 页头：**窄面板下不许塌** ────────────────────────────────────────
+  //
+  // 页头是三样东西的入口：品牌记号（在哪）、页签（去哪）、
+  // 新建/主题/卷宗库（能做什么）。任何一样被压成 0 宽或被盖住，
+  // 面板就变成一张只能看的图。所以每个宽度 × 每个页签都查一遍。
+  const mark = document.querySelector('[data-iv-mark]')
+  if (mark === null) {
+    problems.push('页头没有品牌记号')
+  } else {
+    const box = rect(mark)
+    if (box.w < 18 || box.h < 18) problems.push(`品牌记号被压成 ${Math.round(box.w)}×${Math.round(box.h)}`)
+  }
+  const brandName = byText('模拟面试间')
+  if (brandName === undefined) {
+    problems.push('页头没有产品名')
+  } else {
+    const box = rect(brandName)
+    if (box.w < 20 || box.h < 10) problems.push(`产品名被压成 ${Math.round(box.w)}×${Math.round(box.h)}`)
+  }
+  const headerButtons = [
+    ['新建面试', () => Array.from(document.querySelectorAll('button'))
+      .find(element => (element.textContent ?? '').trim() === '新建面试')],
+    ['主题切换', () => document.querySelector('button[aria-label*="主题"]')],
+    ['卷宗库芯片', () => document.querySelector('[data-iv-root]')],
+  ]
+  for (const [label, find] of headerButtons) {
+    const element = find()
+    if (element === undefined || element === null) {
+      problems.push(`页头找不到「${label}」`)
+      continue
+    }
+    element.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const box = rect(element)
+    if (box.w < 20 || box.h < 16) {
+      problems.push(`页头「${label}」被压成 ${Math.round(box.w)}×${Math.round(box.h)}，点不到`)
+      continue
+    }
+    const hit = document.elementFromPoint(box.x + box.w / 2, box.y + box.h / 2)
+    if (hit === null || !(hit === element || element.contains(hit) || hit.contains(element))) {
+      const who = hit === null ? '（视口外）' : `被「${(hit.textContent ?? '').trim().slice(0, 12)}」盖住`
+      problems.push(`页头「${label}」点不到：${who}`)
+    }
+  }
+
   if (stage !== null) {
     const box = rect(stage)
     // 2. 舞台不能被挤没：它是这一页的主角。
@@ -142,7 +187,10 @@ async function main() {
         // 权限被拒的真实态：错误框和两个按钮都在，才谈得上「点得到」。
         const asked = await requestMediaPermission(page)
         if (!asked) failures.push(`${width}px：点不到「申请摄像头与麦克风」——它被别的东西盖住了`)
-        for (const [tab, label] of [[1, '面试中'], [0, '准备'], [2, '报告'], [3, '设置']]) {
+        // 四个页签都点一遍：**设置也是页签**，不是第四个没人点的按钮。
+        // 每点一次都验证根节点上的 `data-iv-tab` 真的变了——
+        // 「点了但没换页」正是截图闸门把设置页截成准备页的那类缺陷。
+        for (const [key, label] of [['live', '面试中'], ['prepare', '准备'], ['report', '报告'], ['settings', '设置']]) {
           try {
             await page.getByText(label, { exact: true }).first().click({ timeout: 5000 })
           } catch {
@@ -150,6 +198,12 @@ async function main() {
             continue
           }
           await page.waitForTimeout(500)
+          const shown = await page.evaluate(
+            () => document.querySelector('[data-iv-page]')?.getAttribute('data-iv-tab') ?? '',
+          )
+          if (shown !== key) {
+            failures.push(`${width}px：点了页签「${label}」，面板却停在「${shown === '' ? '未知' : shown}」`)
+          }
           const problems = await page.evaluate(ASSERT)
           for (const problem of problems) failures.push(`${width}px / ${label}：${problem}`)
         }
@@ -175,6 +229,13 @@ async function main() {
         }
         if (before === after) {
           failures.push(`${width}px：主题变了但底色没变（${after}）`)
+        }
+        // 切主题不该顺手换页：布局闸门停在「设置」上，切完还得在设置上。
+        const shownAfterTheme = await page.evaluate(
+          () => document.querySelector('[data-iv-page]')?.getAttribute('data-iv-tab') ?? '',
+        )
+        if (shownAfterTheme !== 'settings') {
+          failures.push(`${width}px：切换主题后没停在设置页（停在「${shownAfterTheme === '' ? '未知' : shownAfterTheme}」）`)
         }
         const problems = await page.evaluate(ASSERT)
         for (const problem of problems) failures.push(`${width}px / ${themeAfter}：${problem}`)

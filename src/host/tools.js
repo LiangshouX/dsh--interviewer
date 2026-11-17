@@ -135,31 +135,43 @@ export function registerTools(ctx, service) {
     ),
     tool(
       'interview_prepare',
-      '开一场模拟面试：落盘简历与 JD，建好会话。给 jdUrl 时会先尝试抓取该链接（抓不到会如实说，并让你改用粘贴文本兜底）。',
+      '开一场模拟面试：落盘简历与 JD，建好会话。给 sessionId 时**不会新建**，只更新这一场：标题 / 公司 / 岗位（显式写入，插件不从 JD 里猜）与简历、JD。给 jdUrl 时会先尝试抓取该链接（抓不到会如实说，并让你改用粘贴文本兜底）。',
       {
         sessionId: sessionProperty,
         sessionTitle: { type: 'string', description: '会话标题，例如「字节 · 后端开发 · 2026-11」。' },
+        company: { type: 'string', description: '公司名，例如「字节跳动」。省略或留空时写入带日期的占位值（新建公司 2026-11-17）——想改就直接再调一次本工具。' },
+        position: { type: 'string', description: '岗位名，例如「高级后端工程师」。省略或留空时写入带日期的占位值（新建岗位 2026-11-17）。' },
         role: { type: 'string', description: 'candidate（候选人自测，默认）或 interviewer（面试官主持）。' },
         resumeText: { type: 'string', description: '简历正文（纯文本）。' },
         jdText: { type: 'string', description: 'JD 正文（纯文本）。' },
         jdUrl: { type: 'string', description: '岗位链接。抓取失败时不会写脏数据，会改走手动兜底。' },
       },
       async args => {
-        const session = args.sessionId !== undefined && args.sessionId !== ''
-          ? await service.getSession(args.sessionId)
-          : await service.createSession({
-            title: args.sessionTitle,
+        const existingId = typeof args.sessionId === 'string' ? args.sessionId.trim() : ''
+        // 已有会话：**元信息可以改**。建会话时写过的标题/公司/岗位，
+        // 事后发现错了也得能改——助手能读 JD，最能判断这一场是哪家公司。
+        const metaPatch = {
+          title: args.sessionTitle,
+          company: args.company,
+          position: args.position,
+        }
+        const hasMeta = metaPatch.title !== undefined || metaPatch.company !== undefined || metaPatch.position !== undefined
+        // 只读的时候不碰 updatedAt：改一下列表顺序不是「准备面试」该有的副作用。
+        const session = existingId === ''
+          ? await service.createSession({
+            ...metaPatch,
             role: args.role,
             resumeText: args.resumeText,
             jdText: args.jdText,
             jdUrl: args.jdUrl,
           })
+          : (hasMeta ? await service.updateSession(existingId, metaPatch) : await service.getSession(existingId))
 
         const notes = []
-        if (typeof args.resumeText === 'string' && args.resumeText.trim() !== '' && args.sessionId !== undefined) {
+        if (typeof args.resumeText === 'string' && args.resumeText.trim() !== '' && existingId !== '') {
           await service.setResume(session.id, args.resumeText)
         }
-        if (typeof args.jdText === 'string' && args.jdText.trim() !== '' && args.sessionId !== undefined) {
+        if (typeof args.jdText === 'string' && args.jdText.trim() !== '' && existingId !== '') {
           await service.setJd(session.id, { text: args.jdText, url: args.jdUrl ?? '' })
         }
 
@@ -181,7 +193,9 @@ export function registerTools(ctx, service) {
         const state = await service.getState(session.id)
         return {
           sessionId: session.id,
-          title: session.title,
+          title: state.session.title,
+          company: state.session.company ?? '',
+          position: state.session.position ?? '',
           status: state.session.status,
           resumeChars: documents.resume.length,
           jdChars: documents.jd.length,
@@ -293,13 +307,13 @@ export function registerTools(ctx, service) {
     ),
     tool(
       'interview_list_sessions',
-      '列出所有面试会话（最新在前），含状态、是否有简历/JD、考点数量与是否已有报告。',
+      '列出所有面试会话（最新在前），含标题/公司/岗位、状态、是否有简历/JD、考点数量与是否已有报告。元信息不对时用 interview_prepare 带 sessionId 改。',
       {},
       async () => ({ sessions: await service.listSessions() }),
     ),
     tool(
       'interview_save_jd',
-      '把岗位描述（JD）正文写进一场面试。抓网页抓到正文后调它——正文会落到这场面试的卷内，标题也会按公司·岗位重新提炼。',
+      '把岗位描述（JD）正文写进一场面试。抓网页抓到正文后调它——正文会落到这场面试的卷内。**它只写正文**：标题 / 公司 / 岗位请用 interview_prepare 显式写入，插件不从 JD 里猜。',
       {
         sessionId: { type: 'string', description: '面试会话 id；省略则用最近一场。' },
         text: { type: 'string', description: 'JD 正文全文。', required: true },

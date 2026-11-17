@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Plugin paths and resolved configuration.
  *
  * The plugin ships in two states:
@@ -122,16 +122,18 @@ export const SETTING_SPECS = {
   ffmpegPath: { kind: 'path' },
   chromiumPath: { kind: 'path' },
   // 语音识别
-  asrProvider: { kind: 'enum', values: ['auto', 'host', 'browser', 'none', 'minimax', 'openai'] },
+  asrProvider: { kind: 'enum', values: ['auto', 'host', 'browser', 'none', 'minimax', 'minimax-cn', 'openai', 'openai-custom'] },
   asrEndpoint: { kind: 'string' },
   asrBaseUrl: { kind: 'string' },
   asrModel: { kind: 'string' },
   asrApiKeyEnv: { kind: 'string' },
+  asrGroupId: { kind: 'string' },
   asrLanguage: { kind: 'string' },
   // 语音合成
-  ttsProvider: { kind: 'enum', values: ['auto', 'host', 'mimo', 'openai', 'minimax', 'baidu', 'edge', 'browser', 'none'] },
+  ttsProvider: { kind: 'enum', values: ['auto', 'host', 'mimo', 'openai', 'minimax', 'minimax-cn', 'baidu', 'edge', 'browser', 'none'] },
   ttsBaseUrl: { kind: 'string' },
   ttsApiKeyEnv: { kind: 'string' },
+  ttsGroupId: { kind: 'string' },
   ttsModel: { kind: 'string' },
   ttsVoice: { kind: 'string' },
   ttsStyle: { kind: 'string' },
@@ -261,21 +263,25 @@ export function resolveConfig(raw) {
     jdFetchTimeoutMs: number(config.jdFetchTimeoutMs, 1000, 120000, 15000),
     jdMaxChars: number(config.jdMaxChars, 500, 200000, 20000),
     // 语音识别：host（宿主 speechToText）> 服务端（插件自己直连）> 浏览器。
-    asrProvider: oneOf(config.asrProvider, ['auto', 'host', 'browser', 'none', 'minimax', 'openai'], 'auto'),
+    asrProvider: oneOf(config.asrProvider, ['auto', 'host', 'browser', 'none', 'minimax', 'minimax-cn', 'openai', 'openai-custom'], 'auto'),
     // 服务端语音识别（回落链路）：填了 key 与 baseUrl 就用服务端，否则继承宿主，再否则回落浏览器。
     asrBaseUrl: text(config.asrBaseUrl) ?? '',
     asrApiKey: text(config.asrApiKey) ?? '',
     // 凭据引用（推荐）：走 DSH 的 credentials seam，密钥不进配置文件。
-    asrApiKeyEnv: text(config.asrApiKeyEnv) ?? 'MINIMAX_API_KEY',
+    // **默认留空**，由所选预设决定默认凭据名（OpenAI 兼容不会去找 MINIMAX_API_KEY）。
+    asrApiKeyEnv: text(config.asrApiKeyEnv) ?? '',
+    // MiniMax 部分账户要求 GroupId（查询参数）；留空 = 不带。
+    asrGroupId: text(config.asrGroupId) ?? '',
     asrModel: text(config.asrModel) ?? '',
     asrEndpoint: text(config.asrEndpoint) ?? '',
     asrLanguage: text(config.asrLanguage) ?? 'zh',
     // 语音合成：宿主 > 按配置的模型（mimo/openai/minimax）> 免密钥自然音
     // （baidu/edge）> 浏览器。**默认不是机器音**：auto 会先找模型，再找
     // 免密钥的自然音，最后才用系统音色。
-    ttsProvider: oneOf(config.ttsProvider, ['auto', 'host', 'mimo', 'openai', 'minimax', 'baidu', 'edge', 'browser', 'none'], 'auto'),
+    ttsProvider: oneOf(config.ttsProvider, ['auto', 'host', 'mimo', 'openai', 'minimax', 'minimax-cn', 'baidu', 'edge', 'browser', 'none'], 'auto'),
     ttsBaseUrl: text(config.ttsBaseUrl) ?? '',
     ttsApiKeyEnv: text(config.ttsApiKeyEnv) ?? '',
+    ttsGroupId: text(config.ttsGroupId) ?? '',
     ttsApiKey: text(config.ttsApiKey) ?? '',
     ttsModel: text(config.ttsModel) ?? '',
     // 音色：mimo-v2.5-tts 用预置音色 id；voiceclone 时改由参考音频决定。

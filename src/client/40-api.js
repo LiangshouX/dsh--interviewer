@@ -175,6 +175,29 @@
     }
 
     /**
+     * 新建一场面试时的**占位元信息**。
+     *
+     * 必须与 Host 的 `defaultIdentity()` 保持一致：`新建公司 2026-11-17`
+     * 这类值不是真名字，而是「还没填」。列表分组、简历入库命名、
+     * 行的第二行小字都当它没有——不然「新建公司」会变成一个组名。
+     */
+    const STUB_COMPANY = /^新建公司 \d{4}-\d{2}-\d{2}$/
+    const STUB_POSITION = /^新建岗位 \d{4}-\d{2}-\d{2}$/
+    const STUB_TITLE = /^(?:面试 \d{4}-\d{2}-\d{2}|新建公司 \d{4}-\d{2}-\d{2} · 新建岗位 \d{4}-\d{2}-\d{2})$/
+
+    function isPlaceholderCompany(value) {
+      return STUB_COMPANY.test(String(value ?? '').trim())
+    }
+
+    function isPlaceholderPosition(value) {
+      return STUB_POSITION.test(String(value ?? '').trim())
+    }
+
+    function isPlaceholderTitle(value) {
+      return STUB_TITLE.test(String(value ?? '').trim())
+    }
+
+    /**
      * The monogram of a session title, for the no-signal plate.
      *
      * 中文标题不能按「首字母」处理——「字节 · 高级后端工程师」取首字母会得到

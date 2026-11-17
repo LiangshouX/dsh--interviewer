@@ -88,6 +88,10 @@
     title: '字节 · 高级后端工程师',
     role: 'candidate',
     status: 'running',
+    // 左栏按公司分组：没有这两项，截图里所有场次都会掉进「未整理」，
+    // 分组、折叠、行内岗位名三件事就全看不见了。
+    company: '字节跳动',
+    position: '高级后端工程师',
     createdAt: now - 5400000,
     startedAt: now - 3600000,
     endedAt: 0,
@@ -207,34 +211,343 @@ Nginx、Prometheus / Grafana、Kubernetes`
   // 报告页要看到真东西。
   state.report = report
 
+  // 字数与正文保持一致：硬编码的数字迟早和正文对不上，截图里就会出现
+  // 「卡片 4820 字 / 弹层 670 字」这种自相矛盾。
+  state.documents.resumeChars = resumeText.length
+  state.documents.jdChars = jdText.length
+
+  // ── 设置页的假数据 ────────────────────────────────────────────────
+  //
+  // 设置页是**唯一一页能回答「这台机器现在用的是哪条链路」**的界面，
+  // 所以假数据必须把两种真实处境都演出来：
+  //   · 已配置：宿主的凭据里已经有钥匙，语音走服务端模型；
+  //   · 未配置（预设 `voice: 'unconfigured'`）：只有免密钥/浏览器兜底，
+  //     界面上要能看出「没配」和「下一步能做什么」。
+  //
+  // 形状与 host 的契约一致（docs/DESIGN.md §9、docs/VOICE.md）：
+  //   GET voice/credentials → { credentials: [{ref, configured, source}] }
+  //   GET voice/presets     → { presets: [{id,label,protocol,baseUrl,model,voice,apiKeyEnv,keyless}] }
+  // 密钥**只有名、没有值**——这里也一样，连假值都不给。
+  const presets = [
+    // 播报（TTS）预设。`kind` 让设置页分得出「识别服务」与「播报服务」两套下拉。
+    {
+      id: 'mimo', kind: 'tts', label: 'MiMo · 语音合成', protocol: 'mimo',
+      baseUrl: 'https://api.xiaomi.com/v1', model: 'mimo-tts', voice: 'female-1',
+      apiKeyEnv: 'MIMO_API_KEY', keyless: false,
+      notes: '小米 MiMo，走 chat/completions 带 audio 的协议',
+    },
+    {
+      id: 'openai', kind: 'tts', label: 'OpenAI · /audio/speech', protocol: 'openai',
+      baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini-tts', voice: 'alloy',
+      apiKeyEnv: 'OPENAI_API_KEY', keyless: false,
+      notes: 'OpenAI 兼容的 /audio/speech 端点',
+    },
+    {
+      id: 'minimax', kind: 'tts', label: 'MiniMax · t2a_v2', protocol: 'minimax',
+      baseUrl: 'https://api.minimaxi.com/v1', model: 'speech-01', voice: 'male-qn-qingse',
+      apiKeyEnv: 'MINIMAX_M_PLAN_API_KEY', keyless: false,
+      notes: 'MiniMax t2a_v2，支持 GroupId 与音色选择',
+    },
+    {
+      id: 'baidu', kind: 'tts', label: '百度 · 免密钥自然音', protocol: 'baidu',
+      baseUrl: '', model: 'baidu-tts', voice: 'zh-female', apiKeyEnv: '', keyless: true,
+      notes: '不需要密钥，音质一般但永远能用',
+    },
+    {
+      id: 'edge', kind: 'tts', label: 'Edge · 免密钥自然音', protocol: 'edge',
+      baseUrl: '', model: 'edge-tts', voice: 'zh-CN-XiaoxiaoNeural', apiKeyEnv: '', keyless: true,
+      notes: 'Edge 的在线自然音，不需要密钥',
+    },
+    // 识别（ASR）预设：服务端识别只支持两套协议。
+    {
+      id: 'openai-asr', kind: 'asr', label: '服务端 · OpenAI 兼容', protocol: 'openai',
+      baseUrl: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/SenseVoiceSmall', voice: '',
+      apiKeyEnv: 'SILICONFLOW_API_KEY', keyless: false,
+      notes: 'OpenAI 兼容的 /audio/transcriptions 端点',
+    },
+    {
+      id: 'minimax-asr', kind: 'asr', label: '服务端 · MiniMax', protocol: 'minimax',
+      baseUrl: 'https://api.minimaxi.com/v1', model: 'asr-1.0', voice: '',
+      apiKeyEnv: 'MINIMAX_M_PLAN_API_KEY', keyless: false,
+      notes: 'MiniMax 的 speech_to_text 协议',
+    },
+  ]
+
+  const configuredCredentials = [
+    { ref: 'XIAOMI_TOKEN_PLAN_CN_API_KEY', configured: true, source: 'host' },
+    { ref: 'MINIMAX_M_PLAN_API_KEY', configured: true, source: 'host' },
+    { ref: 'QWEN_TOKEN_PLAN_API_KEY', configured: true, source: 'host' },
+    { ref: 'SILICONFLOW_API_KEY', configured: true, source: 'host' },
+    { ref: 'OPENAI_API_KEY', configured: false, source: 'none' },
+    { ref: 'MIMO_API_KEY', configured: false, source: 'none' },
+    { ref: 'DASHSCOPE_API_KEY', configured: false, source: 'none' },
+  ]
+  const missingCredentials = configuredCredentials.map(entry => ({ ...entry, configured: false, source: 'none' }))
+
+  /** 已配置 / 未配置两套语音链路。谁被截图，由预设的 `voice` 字段决定。 */
+  const voiceChain = (configured) => ({
+    asr: configured
+      ? {
+        mode: 'server', source: 'host', provider: 'siliconflow', protocol: 'openai',
+        endpoint: 'https://api.siliconflow.cn/v1/audio/transcriptions',
+        model: 'FunAudioLLM/SenseVoiceSmall', language: 'zh',
+        apiKeyEnv: 'SILICONFLOW_API_KEY',
+        // 设置页的「现在用」一行读 `server.*`；顶层的同名字段留给旧视图。
+        server: {
+          protocol: 'openai', baseUrl: 'https://api.siliconflow.cn/v1',
+          endpoint: 'https://api.siliconflow.cn/v1/audio/transcriptions',
+          model: 'FunAudioLLM/SenseVoiceSmall',
+        },
+        reason: '凭据来自宿主的 SILICONFLOW_API_KEY',
+      }
+      : {
+        mode: 'browser', source: 'browser', provider: 'web-speech',
+        endpoint: '', model: '', language: 'zh', apiKeyEnv: '',
+        reason: '没有可用的服务端凭据，识别回落到浏览器 Web Speech，键盘输入始终可用',
+      },
+    tts: configured
+      ? {
+        mode: 'server', source: 'host', provider: 'minimax', label: 'MiniMax',
+        protocol: 'minimax',
+        endpoint: 'https://api.minimaxi.com/v1/t2a_v2', model: 'speech-01',
+        voice: 'male-qn-qingse', apiKeyEnv: 'MINIMAX_M_PLAN_API_KEY',
+        reason: '凭据来自宿主的 MINIMAX_M_PLAN_API_KEY',
+      }
+      : {
+        mode: 'browser', source: 'browser', provider: 'system-voice',
+        endpoint: '', model: '', voice: '系统音色', apiKeyEnv: '',
+        reason: '没有可用的播报凭据，先用浏览器系统音色，听感会明显不同',
+      },
+  })
+
+  const settingsSnapshot = (configured) => ({
+    settings: {
+      asrProvider: configured ? 'openai-asr' : 'auto',
+      asrEndpoint: '',
+      asrBaseUrl: '',
+      asrModel: '',
+      asrApiKeyEnv: '',
+      asrLanguage: 'zh',
+      ttsProvider: configured ? 'minimax' : 'auto',
+      ttsModel: '',
+      ttsVoice: '',
+      ttsBaseUrl: '',
+      ttsApiKeyEnv: '',
+      ttsFormat: '',
+      ttsRate: 1,
+      ttsStyle: '',
+      cameraBackend: 'auto',
+      ffmpegPath: '',
+      chromiumPath: '',
+      recordVideo: true,
+      recordAudio: true,
+      guardEnabled: true,
+      guardQuiet: false,
+    },
+    // 设置快照里直接带预设表与凭据清单（设置页不再各自去取一次）。
+    presets,
+    credentials: configured ? configuredCredentials : missingCredentials,
+    effective: {
+      asrProvider: 'auto',
+      asrEndpoint: 'https://api.siliconflow.cn/v1/audio/transcriptions',
+      asrBaseUrl: 'https://api.siliconflow.cn/v1',
+      asrModel: 'FunAudioLLM/SenseVoiceSmall',
+      asrApiKeyEnv: 'SILICONFLOW_API_KEY',
+      asrLanguage: 'zh',
+      ttsProvider: 'auto',
+      ttsBaseUrl: 'https://api.minimaxi.com/v1',
+      ttsModel: 'speech-01',
+      ttsVoice: 'male-qn-qingse',
+      ttsApiKeyEnv: 'MINIMAX_M_PLAN_API_KEY',
+      ttsFormat: 'mp3',
+      ttsRate: 1,
+      ttsStyle: '',
+    },
+    voice: { ...voiceChain(configured), credentials: configured ? configuredCredentials : missingCredentials, presets },
+    camera: { backend: 'ffmpeg', running: false },
+    backends: {
+      ffmpeg: { found: true, path: 'D:\\tools\\ffmpeg\\bin\\ffmpeg.exe', source: 'config' },
+      chromium: { found: true, path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', source: 'system' },
+    },
+    speechModel: {
+      exists: true, dir: 'C:\\Users\\31770\\.dsh\\models\\sensevoice',
+      bytes: 268435456, files: 12, provider: 'sherpa-onnx',
+    },
+    dataRoot: {
+      path: 'D:\\DSH-REALTIME-INTERVIEW-ROOT',
+      source: 'config',
+      reason: '配置里指定的工作区根（非系统盘，简历与录像不占系统盘）',
+      exists: true,
+    },
+    sessionsDir: 'D:\\DSH-REALTIME-INTERVIEW-ROOT\\workspaces',
+    profilesDir: 'D:\\DSH-REALTIME-INTERVIEW-ROOT\\profiles',
+    settingsFile: 'C:\\Users\\31770\\.dsh\\profiles\\desktop\\dsh-realtime-interview.json',
+    hostWorkspace: { path: 'D:\\Code\\Node\\DSH-INTERVIEWER-ROOT' },
+    workspaceRegistration: {
+      registered: true,
+      title: 'dsh-realtime-interview',
+      workspaceId: 'ws-20261116-b7d2',
+    },
+    emptySessions: [],
+    session: { id: session.id, dir: session.dir, artifacts: state.recordings },
+  })
+
+  // 预览里的可写状态：保存简历 / JD、入库、换简历都要真的改变它，
+  // 否则「保存后刷新还是旧正文」——截图和探针都会被假数据骗。
+  const docs = { resume: resumeText, jd: jdText }
+  const library = [
+    { id: 'rs-20261116-a91c', title: '字节跳动 · 高级后端工程师', text: resumeText, chars: resumeText.length, createdAt: now - 5400000, updatedAt: now - 3600000 },
+    { id: 'rs-20261110-b72d', title: '阿里巴巴 · 金融科技开发（Java）', text: '阿里巴巴 · 金融科技开发\n\n3 年 Java 后端，做过支付清结算与账务系统。', chars: 42, createdAt: now - 700000000, updatedAt: now - 690000000 },
+    { id: 'rs-20261028-c18e', title: '小红书 · 后端开发工程师（社区方向 · 推荐与内容安全）', text: '小红书 · 后端开发\n\n内容安全与推荐链路的服务端开发。', chars: 28, createdAt: now - 1800000000, updatedAt: now - 1790000000 },
+  ]
+
   window.__FIXTURES__ = {
-    route(path, preview) {      if (path.startsWith('/sessions')) {
+    route(path, preview, method = 'GET', body = {}) {
+      if (method === 'POST') {
+        const parts = path.split('/').filter(part => part !== '')
+        if (parts[0] === 'resume' && parts[1] === 'extract') {
+          // 预览里把上传的文件真的解成文字——否则「上传后进编辑态」
+          // 这条路径在截图/探针里永远是空的。
+          let text = ''
+          try {
+            const bytes = Uint8Array.from(atob(String(body?.dataBase64 ?? '')), ch => ch.charCodeAt(0))
+            text = new TextDecoder().decode(bytes).trim()
+          } catch (error) {
+            text = ''
+          }
+          const filename = String(body?.filename ?? '').toLowerCase()
+          if (body?.plainOnly === true && !/\.(txt|md|markdown|text)$/.test(filename)) {
+            return { ok: false, kind: 'unknown', text: '', warnings: ['JD 只收纯文本（.txt / .md）。请另存为纯文本再传，或把正文粘贴进来。'], chars: 0 }
+          }
+          if (text === '') return { ok: false, kind: 'unknown', text: '', warnings: ['文件是空的'], chars: 0 }
+          return { ok: true, kind: 'plain', text, warnings: [], chars: text.length }
+        }
+        if (parts[0] === 'sessions') {
+          if (parts.length === 1) {
+            return { session: { ...session, id: 'iv-20261117-new1', title: '新面试', status: 'draft' } }
+          }
+          // 改元信息（POST sessions/<id>）：预览里要真的改掉，否则
+          // 「保存了但页头/列表没变」在截图和探针里都看不出来。
+          if (parts.length === 2) {
+            const text = value => (typeof value === 'string' ? value.trim() : '')
+            const company = body?.company === undefined ? text(state.session.company) : text(body.company)
+            const position = body?.position === undefined ? text(state.session.position) : text(body.position)
+            state.session.company = company
+            state.session.position = position
+            const title = body?.title === undefined ? text(state.session.title) : text(body.title)
+            state.session.title = title === '' ? `${company} · ${position}` : title
+            return { session: state.session }
+          }
+          if (parts[2] === 'resume') {
+            docs.resume = String(body?.text ?? '')
+            state.documents.resumeChars = docs.resume.length
+            return { chars: docs.resume.length }
+          }
+          if (parts[2] === 'jd') {
+            docs.jd = String(body?.text ?? '')
+            state.documents.jdChars = docs.jd.length
+            return { chars: docs.jd.length, session: state.session }
+          }
+          return { ok: true }
+        }
+        if (parts[0] === 'resumes') {
+          if (parts.length === 1) {
+            const text = String(body?.text ?? docs.resume)
+            const created = {
+              id: `rs-${Date.now()}`, title: String(body?.title ?? '未命名简历'),
+              text, chars: text.length, createdAt: Date.now(), updatedAt: Date.now(),
+            }
+            library.unshift(created)
+            return { resume: created }
+          }
+          if (parts[2] === 'delete') {
+            const at = library.findIndex(item => item.id === parts[1])
+            if (at >= 0) library.splice(at, 1)
+            return { deleted: true, id: parts[1] }
+          }
+          // 没有第二段 = 把库里这份用到这一场。
+          const found = library.find(item => item.id === parts[1])
+          if (found !== undefined) {
+            docs.resume = found.text
+            state.documents.resumeChars = found.text.length
+          }
+          return { resume: found ?? { id: parts[1], title: parts[1], text: docs.resume, chars: docs.resume.length } }
+        }
+        return { ok: true }
+      }
+      // 预设里 `voice: 'unconfigured'` 时，给设置页演「这台机器还没有钥匙」
+      // 的那一套——「已配置」看一万遍也看不出「未配置」长什么样。
+      const configured = !(typeof window !== 'undefined'
+        && window.__PRESET__ !== undefined
+        && window.__PRESET__ !== null
+        && window.__PRESET__.voice === 'unconfigured')
+
+      // 设置页的取数。**凭据永远只回名字与来源，不回值**（假数据也一样）。
+      if (path === '/voice/credentials' || path.startsWith('/voice/credentials?')) {
+        return { credentials: configured ? configuredCredentials : missingCredentials }
+      }
+      if (path === '/voice/presets' || path.startsWith('/voice/presets?')) {
+        return { presets }
+      }
+      if (path.startsWith('/voice')) {
+        return {
+          ...voiceChain(configured),
+          credentials: configured ? configuredCredentials : missingCredentials,
+          presets,
+        }
+      }
+      if (path.startsWith('/settings')) {
+        return settingsSnapshot(configured)
+      }
+      if (path.startsWith('/sessions')) {
         // 归档正文（准备页单独取，不跟轮询走）。
         if (path.endsWith('/documents')) {
           return {
-            resume: resumeText,
-            jd: jdText,
+            resume: docs.resume,
+            jd: docs.jd,
             jdMeta: { url: 'https://jobs.bytedance.com/position/123456/detail', sections: {}, warnings: [] },
           }
         }
         if (path === '/sessions') {
+          // 空状态预设：一场都还没有。左栏与主区的「一句话 + 一个动作」
+          // 只有在真的没有场次时才会渲染，不给它一档就永远截不到。
+          const preset = typeof window !== 'undefined' ? window.__PRESET__ : undefined
+          if (preset !== undefined && preset !== null && preset.empty === true) return { sessions: [] }
           return {
             sessions: [
               { ...session, checklistCount: 14, probedCount: 5, hasResume: true, hasJd: true, hasReport: false },
               {
                 id: 'iv-20261115-9d2e', title: '阿里 · 金融科技开发', role: 'candidate', status: 'done',
+                company: '阿里巴巴', position: '金融科技开发',
                 createdAt: now - 86400000, updatedAt: now - 80000000, hasResume: true, hasJd: true,
                 checklistCount: 11, probedCount: 11, hasReport: true,
               },
               {
                 id: 'iv-20261114-7b1c', title: '美团 · 后端开发（自测）', role: 'candidate', status: 'done',
+                company: '美团', position: '后端开发（自测）',
                 createdAt: now - 172800000, updatedAt: now - 170000000, hasResume: true, hasJd: false,
                 checklistCount: 8, probedCount: 8, hasReport: true,
+              },
+              {
+                // 同公司第二场 + 一个明显过长的标题：用来目检「组里有几场」
+                // 和「被截断的标题悬停能看全」。
+                id: 'iv-20261112-4e8a', title: '字节跳动 · 高级后端工程师（三面 · 数据库与高并发场景设计）',
+                role: 'candidate', status: 'done',
+                company: '字节跳动', position: '高级后端工程师',
+                createdAt: now - 300000000, updatedAt: now - 200000000, hasResume: true, hasJd: true,
+                checklistCount: 12, probedCount: 12, hasReport: true,
               },
             ],
           }
         }
         return state
+      }
+      if (path === '/resumes' || path.startsWith('/resumes?')) {
+        // 简历库：三份名字要**认得出来**（公司 · 岗位），其中一份名字很长，
+        // 用来检查下拉弹层里的省略号与整行点击。
+        return {
+          resumes: library.map(({ id, title, chars, createdAt, updatedAt }) => ({ id, title, chars, createdAt, updatedAt })),
+        }
       }
       if (path.startsWith('/profiles')) {
         return {

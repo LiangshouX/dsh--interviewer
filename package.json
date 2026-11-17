@@ -1,7 +1,7 @@
 {
   "name": "dsh-realtime-interview",
-  "version": "0.1.0",
-  "description": "DSH 实时模拟面试插件：简历/JD 入场 → 考点清单调研 → 逐轮追问 → 实时摄像头与语音 → 面试后分析报告",
+  "version": "0.4.5",
+  "description": "DSH 实时模拟面试插件：简历 + JD → 有准备的面试 → 逐轮追问 → 实时摄像与语音 → 事后分析报告",
   "type": "module",
   "main": "index.js",
   "license": "MIT",

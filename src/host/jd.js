@@ -61,7 +61,7 @@ async function fetchRaw(url, timeoutMs) {
 export async function fetchJobDescription(url, options = {}) {
   const timeoutMs = options.timeoutMs ?? 15000
   const maxChars = options.maxChars ?? 20000
-  const hint = '抓取没成功。可以直接把 JD 正文粘贴进来，或上传文件（.txt/.md/.docx/.pdf）——两种都能用，插件会自动接着往下走。'
+  const hint = '抓取没成功。可以直接把 JD 正文粘贴进来，或上传纯文本文件（.txt / .md）——两种都能用，插件会自动接着往下走。'
 
   let parsed
   try {

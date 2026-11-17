@@ -65,7 +65,21 @@
 }
 ```
 
-`position` / `company` 供列表**按岗位分组**；`archived` 只是收起，不是删除。
+`position` / `company` 供列表**按公司分组**（组头是公司，行内小字是岗位）；
+元信息只认**显式写入**——新建时没写就是带日期的占位值
+（`新建公司 2026-11-17` / `新建岗位 2026-11-17`），插件**不从 JD 正文里猜**；
+`archived` 只是收起，不是删除。
+
+**元信息归一化规则**（`sessions` 新建与 `sessions/<id>` 修改共用）：
+
+| 字段 | 留空 / 没写 | 说明 |
+|---|---|---|
+| `company` | `新建公司 <YYYY-MM-DD>` | 占位值 = 还没填 |
+| `position` | `新建岗位 <YYYY-MM-DD>` | 占位值 = 还没填 |
+| `title` | `公司 · 岗位` | 标题自动拼的会跟着公司/岗位走；**显式写过的标题不覆盖** |
+
+标题是不是「自动拼」的记在 `session.json` 的 `titleAuto` 里。老场次没有这个字段时，
+按「空 / 老默认 `面试 <日期>` / 等于 `公司 · 岗位`」推断。
 
 ### 1.1.1 `ResumeSummary` / `ResumeFull`
 
@@ -168,8 +182,8 @@ POST 时的上报形状：
 
 | 动作 | 请求体 | 说明 |
 |---|---|---|
-| `sessions` | `{title?, role?, resumeText?, jdText?, jdUrl?}` | 新建会话 |
-| `sessions/<id>` | `{title?, role?, status?, notes?, position?, company?}` | 改元信息（`position`/`company` 供列表分组） |
+| `sessions` | `{title?, company?, position?, role?, resumeText?, jdText?, jdUrl?}` | 新建会话；元信息没写就落带日期的占位值 |
+| `sessions/<id>` | `{title?, role?, status?, notes?, position?, company?}` | 改元信息（`position`/`company` 供列表分组；留空写回占位值，详见 §1.1） |
 | `sessions/<id>/start` | `{}` | 标记开始（记 `startedAt`） |
 | `sessions/<id>/finish` | `{}` | 标记结束（记 `endedAt`） |
 | `sessions/<id>/resume` | `{text}` | 存简历正文 |
@@ -239,6 +253,8 @@ POST /interviewer/api/jd/fetch  { "url": "https://…" }
 
 ```
 POST /interviewer/api/resume/extract  { "filename": "cv.pdf", "mimeType": "application/pdf", "dataBase64": "…" }
+# 传 JD 时带 plainOnly: true：只接受纯文本（.txt / .md），docx/pdf 一律拒绝
+POST /interviewer/api/resume/extract  { "filename": "jd.md", "mimeType": "text/markdown", "dataBase64": "…", "plainOnly": true }
 ```
 
 ```jsonc
@@ -246,6 +262,7 @@ POST /interviewer/api/resume/extract  { "filename": "cv.pdf", "mimeType": "appli
 ```
 
 `ok: false` 时 `warnings` 必须说清**为什么**以及**怎么办**。
+`plainOnly` 用扩展名 + 文件头双判据（扩展名可以改，文件头骗不了人）。
 
 ### 2.4 语音
 
@@ -467,7 +484,7 @@ ffmpeg -version          # 能出版本号就说明在 PATH 里
 
 | 工具 | 参数 | 作用 |
 |---|---|---|
-| `interview_prepare` | `sessionId? sessionTitle? role? resumeText? jdText? jdUrl?` | 建会话、落盘简历与 JD；给链接时先尝试抓取，失败**如实说**并给兜底 |
+| `interview_prepare` | `sessionId? sessionTitle? company? position? role? resumeText? jdText? jdUrl?` | 建会话、落盘简历与 JD。**带 `sessionId` 时不新建**，只更新这一场的标题/公司/岗位与文档——建会话时写错的元信息事后也能改。给链接时先尝试抓取，失败**如实说**并给兜底 |
 | `interview_save_checklist` | `sessionId? items[]` | 落盘考点清单（替换式） |
 | `interview_mutate_checklist` | `sessionId? op id? topic? why? level? source? tags? probed? note? reason?` | 面试中调整清单 |
 | `interview_record_turn` | `sessionId? role text meta?` | 记录一轮对话 |
@@ -481,7 +498,7 @@ ffmpeg -version          # 能出版本号就说明在 PATH 里
 | `interview_asr_status` | — | 读识别链路状态与原因（兼容旧名） |
 | `interview_voice_status` | — | 读整条语音链路：识别与播报分别走哪条、为什么、宿主模型准备到哪一步 |
 | `interview_voice_prepare` | `providerId?` | 让宿主开始准备语音识别模型（首次要下载） |
-| `interview_save_jd` | `sessionId? text url?` | 把 JD 正文写进一场面试；标题按「公司 · 岗位」重新提炼 |
+| `interview_save_jd` | `sessionId? text url?` | 把 JD 正文写进一场面试。**只写正文**：标题/公司/岗位用 `interview_prepare` 显式写入 |
 | `interview_archive_session` | `sessionId? archived` | 归档 / 取消归档一场面试（只是收起来，不删） |
 | `interview_list_resumes` | — | 列出简历库里的简历 |
 | `interview_save_resume` | `text? sessionId? title?` | 存一份简历进库（或把某场面试里的简历存进去） |

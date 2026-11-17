@@ -47,14 +47,24 @@ export async function synthesizeWithOpenAi(options) {
     })
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 200)
-      return { ok: false, reason: `/audio/speech 返回 HTTP ${response.status}：${detail}` }
+      return {
+        ok: false,
+        reason: `/audio/speech 返回 HTTP ${response.status}：${detail}`,
+        hint: hintForStatus(response.status),
+      }
     }
     const contentType = response.headers.get('content-type') ?? ''
     const buffer = Buffer.from(await response.arrayBuffer())
-    if (buffer.length === 0) return { ok: false, reason: '语音服务返回了空响应。' }
+    if (buffer.length === 0) {
+      return { ok: false, reason: '语音服务返回了空响应。', hint: '换一个模型或网关再试；也可以改用百度朗读（免密钥）。' }
+    }
     // 有些网关出错时也回 200，但回的是 JSON 错误体——按内容判断，别当音频。
     if (/json/i.test(contentType)) {
-      return { ok: false, reason: `语音服务返回的不是音频：${buffer.toString('utf8').slice(0, 200)}` }
+      return {
+        ok: false,
+        reason: `语音服务返回的不是音频：${buffer.toString('utf8').slice(0, 200)}`,
+        hint: '端点返回 JSON 说明路径或模型不对：确认 baseUrl 指向 /v1，且模型支持 /audio/speech。',
+      }
     }
     return {
       ok: true,
@@ -62,11 +72,26 @@ export async function synthesizeWithOpenAi(options) {
       mimeType: /wav/i.test(contentType) || options.format === 'wav' ? 'audio/wav' : 'audio/mpeg',
     }
   } catch (error) {
-    const message = error?.name === 'AbortError' ? `语音合成超时（${TIMEOUT_MS}ms）` : `语音合成失败：${messageOf(error)}`
-    return { ok: false, reason: message }
+    const aborted = error?.name === 'AbortError'
+    return {
+      ok: false,
+      reason: aborted ? `语音合成超时（${TIMEOUT_MS}ms）` : `语音合成失败：${messageOf(error)}`,
+      hint: aborted
+        ? '网络慢或端点不可达：检查网络/代理，或改用百度朗读（免密钥）。'
+        : '检查网络与端点；也可以改用百度朗读（免密钥）。',
+    }
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** A next step for a failed HTTP status. */
+function hintForStatus(status) {
+  if (status === 401 || status === 403) return '语音服务拒绝了这把凭据：确认 OPENAI_API_KEY（或你选的凭据名）属于这个网关。'
+  if (status === 404) return '端点或模型不存在：确认 baseUrl 指向 /v1，模型支持 /audio/speech。'
+  if (status === 400) return '请求被拒：检查模型 id、音色与 response_format；有的兼容网关只认部分音色。'
+  if (status === 429) return '额度或频率被限：稍后再试，或改用百度朗读（免密钥）。'
+  return '检查凭据、端点与模型；也可以改用百度朗读（免密钥）继续面试。'
 }
 
 /** Join a base URL and a path without doubling slashes. */

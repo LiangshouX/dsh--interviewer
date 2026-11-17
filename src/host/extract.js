@@ -28,9 +28,12 @@ export const EXTRACT_KIND = {
  * Extract text from an uploaded file.
  *
  * @param {{filename?: string, mimeType?: string, buffer: Buffer}} file
+ * @param {{plainOnly?: boolean}} [options]
+ *   `plainOnly: true`（传 JD 时）只接受纯文本；docx/pdf 一律拒绝并给出出路。
+ *   简历没有这个限制——它本来就是 word/pdf 交过来的。
  * @returns {{ok: boolean, kind: string, text: string, warnings: string[], chars: number}}
  */
-export function extractTextFromUpload(file) {
+export function extractTextFromUpload(file, options = {}) {
   const filename = typeof file.filename === 'string' ? file.filename : ''
   const lower = filename.toLowerCase()
   const extension = lower.includes('.') ? lower.slice(lower.lastIndexOf('.')) : ''
@@ -56,6 +59,22 @@ export function extractTextFromUpload(file) {
   // Sniff by magic bytes: an extension lies more often than a header.
   const isZip = buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4b
   const isPdf = buffer.length > 4 && buffer.subarray(0, 4).toString('latin1') === '%PDF'
+
+  // **JD 只收纯文本。** 简历可以是 docx/pdf（有解析器），JD 没有这个必要：
+  // 职位描述本来就是一段可粘贴的文字，多支持一种二进制格式只会多一种乱码来源。
+  // 这里用扩展名 + 文件头双判据——扩展名可以改，文件头骗不了人。
+  if (options.plainOnly === true) {
+    const plainExt = extension === '' || ['.txt', '.md', '.markdown', '.text'].includes(extension)
+    if (!plainExt || isZip || isPdf) {
+      return {
+        ok: false,
+        kind: EXTRACT_KIND.UNKNOWN,
+        text: '',
+        warnings: ['JD 只收纯文本（.txt / .md）。请另存为纯文本再传，或把正文粘贴进来。'],
+        chars: 0,
+      }
+    }
+  }
 
   if (isZip) {
     if (extension === '.docx' || extension === '' || extension === '.docm') {
@@ -95,7 +114,9 @@ export function extractTextFromUpload(file) {
       ok: false,
       kind: EXTRACT_KIND.UNKNOWN,
       text: '',
-      warnings: ['这看起来是二进制文件，不是文本。请传 .txt/.md/.docx/.pdf，或把正文粘贴进来。'],
+      warnings: [options.plainOnly === true
+        ? '这看起来不是纯文本。JD 只收 .txt / .md，请另存为纯文本或把正文粘贴进来。'
+        : '这看起来是二进制文件，不是文本。请传 .txt/.md/.docx/.pdf，或把正文粘贴进来。'],
       chars: 0,
     }
   }

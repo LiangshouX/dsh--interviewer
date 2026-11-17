@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { InterviewService, deriveJobTitle } from '../src/host/service.js'
+import { InterviewService } from '../src/host/service.js'
 
 // **不要用 `new URL(...).pathname`。** Windows 上它会给出 `/D:/Code/...`，
 // 后面 `resolve()` 会把它拼成 `D:\D:\Code\...`——目录凭空多出一层盘符。
@@ -65,6 +65,24 @@ test('简历库：空简历和非法 id 都被挡住', async () => {
   }
 })
 
+test('简历库：按 id 覆盖正文时保留名字与创建时间，不是再存一份', async () => {
+  const { service, workspaceRoot } = await makeService()
+  try {
+    const first = await service.saveResume({ title: '字节 · 后端', text: '旧正文' })
+    const before = await service.getResume(first.id)
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const updated = await service.saveResume({ id: first.id, text: '新正文（改过）' })
+    assert.equal(updated.id, first.id)
+    assert.equal(updated.title, '字节 · 后端')
+    assert.equal(updated.chars, '新正文（改过）'.length)
+    assert.equal(updated.createdAt, before.createdAt, '覆盖不该改创建时间')
+    assert.equal((await service.listResumes()).length, 1, '覆盖不是新建一份')
+    assert.equal((await service.getResume(first.id)).text, '新正文（改过）')
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
 test('归档：收起来而不是删掉，取回来不留归档时间', async () => {
   const { service, workspaceRoot } = await makeService()
   try {
@@ -90,38 +108,73 @@ test('归档：收起来而不是删掉，取回来不留归档时间', async ()
   }
 })
 
-test('标题提炼：从 JD 认公司与岗位，用户改过的标题不动', async () => {
+test('元信息：新建时就是带日期的占位值，JD 正文不参与猜公司/岗位', async () => {
   const { service, workspaceRoot } = await makeService()
   try {
     const session = await service.createSession({})
     const before = await service.getSession(session.id)
-    assert.match(before.title, /^面试 \d{4}-\d{2}-\d{2}$/)
+    assert.match(before.company, /^新建公司 \d{4}-\d{2}-\d{2}$/)
+    assert.match(before.position, /^新建岗位 \d{4}-\d{2}-\d{2}$/)
+    assert.match(before.title, /^新建公司 \d{4}-\d{2}-\d{2} · 新建岗位 \d{4}-\d{2}-\d{2}$/)
 
-    await service.setJd(session.id, {
-      text: '公司：字节跳动\n岗位：高级前端工程师\n负责跨端框架与性能优化。',
-      url: 'https://example.com/job/1',
-    })
+    // 这段 JD 里的「【基础信息】」和「专家」曾经被误当成公司/岗位。
+    const jd = [
+      '阿里云智能-终端智能创新业务 AI 模型与推理产品专家-杭州/上海/深圳',
+      '工作地点：深圳/杭州/上海',
+      '【基础信息】',
+      '所属部门：云智能集团',
+      '【职位描述】',
+    ].join('\n')
+    await service.setJd(session.id, { text: jd, url: 'https://example.com/job/1' })
     const after = await service.getSession(session.id)
-    assert.equal(after.company, '字节跳动')
-    assert.equal(after.position, '高级前端工程师')
-    assert.equal(after.title, '字节跳动 · 高级前端工程师')
-
-    // 用户自己改过的标题，不能被提炼覆盖。
-    await service.updateSession(session.id, { title: '我想叫它别的' })
-    await service.setJd(session.id, { text: '公司：腾讯\n岗位：后端工程师' })
-    const again = await service.getSession(session.id)
-    assert.equal(again.title, '我想叫它别的')
-    assert.equal(again.company, '腾讯')
+    assert.equal(after.company, before.company, 'JD 落盘不许改公司')
+    assert.equal(after.position, before.position, 'JD 落盘不许改岗位')
+    assert.equal(after.title, before.title, 'JD 落盘不许改标题')
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true })
   }
 })
 
-test('标题提炼：认不出来就留空，不硬猜', () => {
-  const derived = deriveJobTitle('这是一段完全不像岗位描述的文字。')
-  assert.equal(derived.position, '')
-  assert.equal(derived.company, '')
-  assert.equal(derived.title, '')
+test('元信息：已建好的会话也能改标题/公司/岗位（助手补写）', async () => {
+  const { service, workspaceRoot } = await makeService()
+  try {
+    const session = await service.createSession({})
+    const renamed = await service.updateSession(session.id, {
+      title: '阿里云 · AI 模型与推理产品专家',
+      company: '阿里云',
+      position: 'AI 模型与推理产品专家',
+    })
+    assert.equal(renamed.title, '阿里云 · AI 模型与推理产品专家')
+    assert.equal(renamed.company, '阿里云')
+    assert.equal(renamed.position, 'AI 模型与推理产品专家')
+
+    // 再改一次公司：显式标题不该被「公司 · 岗位」覆盖。
+    const again = await service.updateSession(session.id, { company: '阿里巴巴' })
+    assert.equal(again.title, '阿里云 · AI 模型与推理产品专家', '显式标题不跟着公司改')
+    assert.equal(again.company, '阿里巴巴')
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
+test('元信息：留空写回默认值，自动拼的标题跟着公司/岗位走', async () => {
+  const { service, workspaceRoot } = await makeService()
+  try {
+    const session = await service.createSession({})
+    // 只写公司：岗位还是占位值，标题自动拼成「公司 · 占位岗位」。
+    const partial = await service.updateSession(session.id, { company: '字节跳动' })
+    assert.equal(partial.company, '字节跳动')
+    assert.match(partial.position, /^新建岗位 \d{4}-\d{2}-\d{2}$/)
+    assert.equal(partial.title, `字节跳动 · ${partial.position}`)
+
+    // 清空 = 没填 → 写回占位值，不是留一个空字符串。
+    const cleared = await service.updateSession(session.id, { company: '', position: '', title: '' })
+    assert.match(cleared.company, /^新建公司 \d{4}-\d{2}-\d{2}$/)
+    assert.match(cleared.position, /^新建岗位 \d{4}-\d{2}-\d{2}$/)
+    assert.equal(cleared.title, `${cleared.company} · ${cleared.position}`)
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
 })
 
 test('清空 JD / 简历 = 真的删掉，不是留个 0 字的文件', async () => {

@@ -235,6 +235,11 @@ async function readResource(service, segments, query) {
   if (head === 'voice') {
     // 整条语音链路：识别走哪条、合成走哪条、为什么。
     // 面板一次拿全，避免「识别状态」和「合成状态」分两次问、各自过期。
+    //
+    // `voice/credentials` 与 `voice/presets` 是设置页的两个只读入口：
+    // 前者只回名字与"配没配"，后者是服务下拉的唯一来源。**都没有密钥值。**
+    if (rest[0] === 'credentials') return { credentials: await service.voiceCredentials() }
+    if (rest[0] === 'presets') return { presets: service.voicePresets() }
     return service.voiceStatus()
   }
   if (head === 'asr') {
@@ -413,6 +418,8 @@ async function runAction(service, segments, body) {
           filename: body.filename,
           mimeType: body.mimeType,
           buffer: Buffer.from(String(body.dataBase64 ?? ''), 'base64'),
+          // JD 上传只收纯文本：界面挡一道扩展名，这里挡一道文件头。
+          plainOnly: body.plainOnly === true,
         })
       }
       throw new Error(`未知的简历操作：${rest.join('/')}`)
@@ -429,6 +436,23 @@ async function runAction(service, segments, body) {
       // voice/prepare：让宿主开始准备它的语音模型（首次要下载）。
       if (rest[0] === 'prepare') {
         return service.prepareSpeech(body.providerId)
+      }
+      // voice/credentials：往宿主凭据存储里写 / 删一把 key。
+      // **请求体里的 value 只进不出**——成功后响应只有 ref 与状态。
+      if (rest[0] === 'credentials') {
+        const action = typeof body.action === 'string' ? body.action.trim().toLowerCase() : ''
+        if (action === 'set') return await service.setVoiceCredential(String(body.ref ?? ''), body.value)
+        if (action === 'clear') return await service.clearVoiceCredential(String(body.ref ?? ''))
+        throw new Error('凭据操作只能是 set 或 clear。')
+      }
+      // voice/test：真跑一遍链路（播报合成 / 识别回落），失败带具体原因与出路。
+      if (rest[0] === 'test') {
+        return await service.testVoice({
+          kind: body.kind,
+          dataBase64: body.dataBase64,
+          mimeType: body.mimeType,
+          language: body.language,
+        })
       }
       throw new Error(`未知的语音操作：${rest.join('/')}`)
     }

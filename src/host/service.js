@@ -35,6 +35,8 @@ import { extractTextFromUpload } from './extract.js'
 import { CameraService, locateFfmpeg } from './camera.js'
 import { locateChromium } from './camera-browser.js'
 import { VoiceService } from './voice/index.js'
+import { clearSecret, discoverCredentials, setSecret } from './voice/credentials.js'
+import { voicePresets } from './voice/presets.js'
 import { measureFluency, summarizeFluency } from './fluency.js'
 
 /** Session lifecycle. */
@@ -107,6 +109,14 @@ function unwrapPickedPath(result) {
  * poll into a steady stream of deserialization work in the renderer.
  */
 const DEFAULT_TRANSCRIPT_LIMIT = 200
+
+/**
+ * 「测试播报」合成的那句话。
+ *
+ * 固定短句有两个好处：一听就知道是不是真在播（不是一段缓存的音频），
+ * 而且失败时耗时可比、能进单测。
+ */
+const VOICE_TEST_SENTENCE = '这是一次语音播报测试。听到这句话，说明面试官的声音已经接通。'
 
 /**
  * One interview session, with every operation the callers need.
@@ -502,9 +512,21 @@ export class InterviewService {
     await mkdir(join(dir, 'recordings'), { recursive: true })
 
     const now = Date.now()
+    // **元信息只认显式写入。** 公司 / 岗位 / 标题在助手或用户写进来之前，
+    // 就先落**带日期的占位值**——它们不是从 JD 里猜的（猜出来的「基础信息」
+    // 「专家」比空着更糟），而是明摆着的「还没填」。
+    const stub = defaultIdentity(now)
+    const inputTitle = typeof input.title === 'string' ? input.title.trim() : ''
+    const inputCompany = typeof input.company === 'string' ? input.company.trim() : ''
+    const inputPosition = typeof input.position === 'string' ? input.position.trim() : ''
+    const company = inputCompany === '' ? stub.company : inputCompany
+    const position = inputPosition === '' ? stub.position : inputPosition
     const meta = {
       id,
-      title: typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : `面试 ${formatDate(now)}`,
+      title: inputTitle === '' ? `${company} · ${position}` : inputTitle,
+      titleAuto: inputTitle === '',
+      company,
+      position,
       role: input.role === 'interviewer' ? 'interviewer' : 'candidate',
       status: SESSION_STATUS.DRAFT,
       createdAt: now,
@@ -539,6 +561,18 @@ export class InterviewService {
   /**
    * Patch a session's metadata.
    *
+   * **元信息（标题 / 公司 / 岗位）只认显式写入，绝不从 JD 里回猜。**
+   * URL 抓取或正文里的小标题（「【基础信息】」）不是公司名；猜错一次，
+   * 用户和助手都得先猜哪一个是错的。所以：
+   *
+   *   - 公司 / 岗位留空 = 「还没填」→ 写回带日期的占位值；
+   *   - 标题留空 = 还没起名 → 用「公司 · 岗位」拼；
+   *   - 用户 / 助手给了标题就保留——只有 `titleAuto` 还是 true 的那种
+   *     （自动拼的、或老版本没记这个字段的「面试 日期」）才跟着改。
+   *
+   * 这样助手用 `interview_prepare({sessionId, sessionTitle, company, position})`
+   * 就能改正一场已经建好的面试——**建会话时写不进去的东西，事后也得写进去**。
+   *
    * @param {string} sessionId
    * @param {object} patch
    */
@@ -546,6 +580,7 @@ export class InterviewService {
     const dir = await this.sessionDir(sessionId)
     const meta = await readJsonIfExists(join(dir, 'session.json'))
     if (meta === undefined) throw new Error(`会话不存在：${sessionId}`)
+    const before = { ...meta }
     const allowed = [
       'title', 'role', 'status', 'jdUrl', 'startedAt', 'endedAt', 'notes',
       'position', 'company', 'archived', 'archivedAt', 'resumeId',
@@ -553,6 +588,7 @@ export class InterviewService {
     for (const key of allowed) {
       if (patch[key] !== undefined) meta[key] = patch[key]
     }
+    normalizeIdentity(before, meta, patch)
     // 取消归档：把归档时间也抹掉，别留一个「归档过但没归档」的时间戳。
     if (patch.archived === false) delete meta.archivedAt
     meta.updatedAt = Date.now()
@@ -712,8 +748,9 @@ export class InterviewService {
   /**
    * Store the job description text (and where it came from).
    *
-   * **顺带把标题提炼出来。** JD 一落盘，标题就不该还是「面试 2026-11-16」——
-   * 那行字是给「还没准备」的场次占位的。用户手改过的标题不动。
+   * **只存正文，不动元信息。** 从 JD 正文里认公司 / 岗位是猜——JD 的小标题、
+   * 工作地点、部门名字都会骗过词表。标题和公司/岗位由助手或用户在
+   * `interview_prepare` / 面板里**显式写入**；这里只负责把正文落盘。
    *
    * @param {string} sessionId
    * @param {{text: string, url?: string, meta?: object}} input
@@ -732,7 +769,7 @@ export class InterviewService {
       await rm(join(dir, 'jd.txt'), { force: true })
       await rm(join(dir, 'jd.json'), { force: true })
       await this.touch(sessionId)
-      return { chars: 0, position: '', company: '', title: '' }
+      return { chars: 0 }
     }
     await writeTextAtomic(join(dir, 'jd.txt'), trimmed)
     await writeJsonAtomic(join(dir, 'jd.json'), {
@@ -743,20 +780,8 @@ export class InterviewService {
       warnings: input.meta?.warnings ?? [],
     })
 
-    // 标题提炼：只动**还没被用户改过**的标题。
-    const meta = await readJsonIfExists(join(dir, 'session.json'))
-    const derived = deriveJobTitle(trimmed)
-    if (meta !== undefined) {
-      const untouched = typeof meta.title === 'string' && /^面试 \d{4}-\d{2}-\d{2}$/.test(meta.title)
-      const patch = {}
-      if (derived.position !== '') patch.position = derived.position
-      if (derived.company !== '') patch.company = derived.company
-      if (untouched && derived.title !== '') patch.title = derived.title
-      if (Object.keys(patch).length > 0) await this.updateSession(sessionId, patch)
-    }
-
     await this.touch(sessionId)
-    return { chars: trimmed.length, ...derived }
+    return { chars: trimmed.length }
   }
 
   /**
@@ -1048,10 +1073,12 @@ export class InterviewService {
   /**
    * Extract text from an uploaded resume file.
    *
-   * @param {{filename?: string, mimeType?: string, buffer: Buffer}} file
+   * `plainOnly` 是 JD 上传时的约束：JD 只收纯文本（见 `extract/plainOnly`）。
+   *
+   * @param {{filename?: string, mimeType?: string, buffer: Buffer, plainOnly?: boolean}} file
    */
   async extractResume(file) {
-    return extractTextFromUpload(file)
+    return extractTextFromUpload(file, { plainOnly: file.plainOnly === true })
   }
 
   /**
@@ -1294,10 +1321,15 @@ export class InterviewService {
     const chromium = locateChromium({ chromiumPath })
     const session = sessionId !== undefined && sessionId !== '' ? await this.sessionFacts(sessionId) : undefined
     const effective = await this.effectiveConfig()
+    // **有效配置里可能带着配置文件里写的明文 key**（`asrApiKey` / `ttsApiKey`）。
+    // 这个快照会进 HTTP 响应、进面板——密钥只进不出的边界在这里再收一次。
+    const publicEffective = { ...effective }
+    delete publicEffective.asrApiKey
+    delete publicEffective.ttsApiKey
     return {
       settingsFile: settingsPath(),
       settings,
-      effective,
+      effective: publicEffective,
       explicit: [...this.explicitKeys],
       dataRoot: location,
       sessionsDir: await this.sessionsDir(),
@@ -1307,6 +1339,10 @@ export class InterviewService {
         note: '宿主侧 agent 工作区：一场面试一个子目录，简历库与岗位档案也在这里。',
       },
       voice,
+      // 语音配置闭环：这台机器上已有哪几把钥匙（只有名字与是否配置），
+      // 以及服务下拉的选项表。**都不含密钥值。**
+      credentials: await this.voiceCredentials(),
+      presets: voicePresets(),
       camera,
       backends: {
         ffmpeg: ffmpeg === undefined ? { path: '', source: '', found: false } : { ...ffmpeg, found: true },
@@ -1486,6 +1522,142 @@ export class InterviewService {
    */
   async synthesizeSpeech(input) {
     return this.voice.speak(input)
+  }
+
+  /**
+   * 这台机器上已经配置了哪些语音凭据（**只有名字与状态，没有值**）。
+   *
+   * 来源：profile 的 `cordis.patch.yml` 里的 `apiKeyEnv:` + 宿主 credentials
+   * 存储里登记的 ref 名 + 常见候选名。文件读不了就只用候选名，不抛。
+   *
+   * @returns {Promise<Array<{ref: string, configured: boolean, source: string, writable: boolean}>>}
+   */
+  async voiceCredentials() {
+    return discoverCredentials(this.ctx)
+  }
+
+  /**
+   * 写一把语音凭据到宿主的 credentials 存储。
+   *
+   * **密钥不写插件设置文件。** 宿主没有 credentials seam 时返回
+   * `{ok:false, reason, hint}`，hint 是「环境变量 + 重启 DSH」——
+   * 绝不回落成把明文写进本地 JSON。
+   *
+   * @param {string} ref
+   * @param {string} value
+   */
+  async setVoiceCredential(ref, value) {
+    const result = await setSecret(this.ctx, ref, value)
+    // 成功也只回状态，不回值；失败原因已经过擦除。
+    if (result.ok !== true) return result
+    return { ok: true, ref: result.ref, configured: true, source: 'host', writable: true }
+  }
+
+  /**
+   * 从宿主的 credentials 存储里删掉一把语音凭据。
+   *
+   * @param {string} ref
+   */
+  async clearVoiceCredential(ref) {
+    return clearSecret(this.ctx, ref)
+  }
+
+  /**
+   * The voice service preset table — the settings page's only option list.
+   *
+   * @returns {Array<object>}
+   */
+  voicePresets() {
+    return voicePresets()
+  }
+
+  /**
+   * 真跑一遍语音链路：**不许 mock**。
+   *
+   *   kind='tts'  用当前配置合成一句固定短句，回传 base64 音频与耗时；
+   *   kind='asr'  用调用方录的那段音频走完整的识别回落链，回传 text、
+   *               attempts（谁试过、为什么失败）与耗时。
+   *
+   * 失败返回 `{ok:false, reason, hint}`：原因要具体到 HTTP 码 / 超时 /
+   * 缺凭据 / 协议不匹配，hint 要是下一步能做的事。响应里没有密钥。
+   *
+   * @param {{kind?: string, dataBase64?: string, mimeType?: string, language?: string}} input
+   * @returns {Promise<object>}
+   */
+  async testVoice(input = {}) {
+    const kind = typeof input.kind === 'string' ? input.kind.trim().toLowerCase() : ''
+    if (kind !== 'tts' && kind !== 'asr') {
+      return {
+        ok: false,
+        kind,
+        reason: '测试类型只能是 tts 或 asr。',
+        hint: '播报测试用 kind=tts；识别测试用 kind=asr 并带一段音频。',
+      }
+    }
+
+    const startedAt = Date.now()
+    if (kind === 'tts') {
+      const result = await this.voice.speak({ text: VOICE_TEST_SENTENCE })
+      const ms = Date.now() - startedAt
+      if (result.ok !== true) {
+        return {
+          ok: false,
+          kind,
+          mode: result.mode,
+          provider: result.provider ?? '',
+          ms,
+          reason: result.reason ?? '播报链路不可用。',
+          hint: result.hint ?? '问题照常以文字显示；想更自然就换一个模型或改用百度朗读（免密钥）。',
+        }
+      }
+      return {
+        ok: true,
+        kind,
+        mode: result.mode,
+        provider: result.provider ?? '',
+        label: result.label ?? '',
+        model: result.model ?? '',
+        voice: result.voice ?? '',
+        ms,
+        mimeType: result.mimeType ?? 'audio/mpeg',
+        audioBase64: result.audioBase64,
+      }
+    }
+
+    const dataBase64 = typeof input.dataBase64 === 'string' ? input.dataBase64 : ''
+    if (dataBase64.trim() === '') {
+      return {
+        ok: false,
+        kind,
+        mode: 'browser',
+        ms: Date.now() - startedAt,
+        reason: '测试识别需要一段音频。',
+        hint: '点「测试识别」会现场录 2 秒；麦克风不可用时用键盘输入继续面试。',
+        attempts: [],
+      }
+    }
+
+    const result = await this.voice.transcribe({
+      dataBase64,
+      mimeType: input.mimeType,
+      language: input.language,
+    })
+    const ms = Date.now() - startedAt
+    return {
+      ok: result.ok === true,
+      kind,
+      mode: result.mode,
+      text: result.text ?? '',
+      attempts: Array.isArray(result.attempts) ? result.attempts : [],
+      ms,
+      ...(result.provider === undefined ? {} : { provider: result.provider }),
+      ...(result.model === undefined ? {} : { model: result.model }),
+      ...(result.protocol === undefined ? {} : { protocol: result.protocol }),
+      ...(result.language === undefined ? {} : { language: result.language }),
+      ...(result.ok === true
+        ? {}
+        : { reason: result.reason ?? '识别链路不可用。', hint: result.hint ?? '用键盘输入继续面试；识别不可用不影响面试。' }),
+    }
   }
 
   /**
@@ -1989,87 +2161,72 @@ function makeResumeId() {
 }
 
 /**
- * 岗位词表：从一段 JD 里认出「这是在招什么」。
+ * 新建一场面试时的占位元信息。
  *
- * **为什么要词表。** JD 正文五花八门，但岗位名几乎总是落在这些词上。
- * 与其猜结构，不如认词——认不出的就老实说「没提炼出来」。
+ * **为什么是「新建公司 / 新建岗位」而不是空着。** 列表按公司分组、助手要读
+ * 元信息——全空的话两处都得特殊处理，而且用户分不清「没填」和「读不到」。
+ * 带上日期 (`新建公司 2026-11-17`) 一眼就能看出这是占位值，不是真名字。
+ *
+ * **不猜。** 公司 / 岗位 / 标题只在助手或用户**显式写入**时才变成真值；
+ * 插件不从 JD 正文里提炼（JD 的「【基础信息】」不是公司名）。
+ *
+ * @param {number} createdAt
+ * @returns {{company: string, position: string, title: string}}
  */
-const POSITION_WORDS = [
-  '前端工程师', '后端工程师', '全栈工程师', '客户端工程师', '服务端工程师', '测试开发工程师',
-  '算法工程师', '数据工程师', '运维工程师', '解决方案工程师', '硬件工程师', '嵌入式工程师',
-  '安全工程师', '网络工程师', '软件工程师', '系统工程师', '测试工程师', '安卓工程师', 'iOS工程师',
-  '产品经理', '产品运营', '项目经理', '项目专员', '数据分析师', '数据科学家', '商业分析师',
-  '运营专员', '运营经理', '内容运营', '用户运营', '活动运营', '社群运营',
-  'UI设计师', 'UX设计师', '交互设计师', '视觉设计师', '产品设计师', '平面设计师', '设计负责人',
-  '测试', '人力资源', '招聘', '财务', '法务', '行政', '销售', '商务', '市场', '品牌', '公关',
-  '架构师', '技术经理', '研发经理', '实习生', '管培生', '顾问', '专家',
-  '工程师', '开发', '经理', '总监', '主管', '专员', '负责人', '助理',
-]
-
-/** 常见公司名后缀：中文 JD 里公司名几乎都长这样。 */
-const COMPANY_SUFFIX = /(?:[一-鿿A-Za-z0-9（）()]{2,14})(科技|集团|网络|有限公司|股份|通信|信息|软件|技术|传媒|银行|证券|研究院|事业部|实验室|工作室)/
-
-/** 常见大厂名：认出来就直接用，比从后缀猜准。 */
-const KNOWN_COMPANIES = [
-  '字节跳动', '腾讯', '阿里巴巴', '美团', '百度', '京东', '小米', '网易', '滴滴', '快手', '拼多多',
-  '华为', '蚂蚁集团', '哔哩哔哩', '携程', '蔚来', '理想汽车', '小鹏', '大疆', '商汤',
-  '旷视', '寒武纪', '同花顺', '贝壳', '小红书', '知乎', '微博', '淘宝',
-]
+function defaultIdentity(createdAt) {
+  const date = formatDate(createdAt)
+  const company = `新建公司 ${date}`
+  const position = `新建岗位 ${date}`
+  return { company, position, title: `${company} · ${position}` }
+}
 
 /**
- * 从 JD 正文里提炼「公司 · 岗位」。
+ * 元信息归一化：公司 / 岗位 / 标题。
  *
- * **为什么本地做，不叫模型。** 标题每场面试都要有，模型一跑就是钱和秒；
- * 而 JD 里的岗位名和公司名其实有固定的写法，认词比认语义更稳。
- * 认不出来就**不猜**——留空，让用户自己写。
+ * 规则见 `updateSession()` 的注释。这里只做三件事：
+ * 空的公司/岗位补占位值、标题留空就拼、「自动拼」的标题跟着改。
  *
- * @param {string} text JD 正文
- * @returns {{position: string, company: string, title: string}}
+ * @param {object} before 改之前的 session.json
+ * @param {object} meta 改之后的元信息（就地修改）
+ * @param {object} patch 本次的 patch（用来知道调用者到底有没有写标题）
  */
-export function deriveJobTitle(text) {
-  const body = String(text ?? '')
-  const head = body.slice(0, 4000)
-  const lines = head.split(/\r?\n/).map(line => line.trim()).filter(line => line !== '')
+function normalizeIdentity(before, meta, patch) {
+  const touched = ['title', 'company', 'position'].some(key => patch[key] !== undefined)
+  if (!touched) return
+  const text = value => (typeof value === 'string' ? value.trim() : '')
+  const createdAt = Number.isFinite(before.createdAt) ? before.createdAt : Date.now()
+  const stub = defaultIdentity(createdAt)
+  const previousTitle = text(before.title)
+  // 标题是不是「自动拼」的？显式写过的标题永远不动；
+  // 老场次没有 `titleAuto`，就按占位标题的样子推断（空 / 老默认 / 等于公司·岗位）。
+  const wasAuto = typeof before.titleAuto === 'boolean'
+    ? before.titleAuto
+    : previousTitle === ''
+      || /^面试 \d{4}-\d{2}-\d{2}$/.test(previousTitle)
+      || previousTitle === `${text(before.company)} · ${text(before.position)}`
 
-  // 公司：先找「公司：」这种明写，再找已知大厂，最后才从后缀猜。
-  let company = ''
-  const companyLabel = head.match(/公司(?:名称)?\s*[:：]\s*([^\n，。；;]{2,20})/)
-  if (companyLabel !== null) company = companyLabel[1].trim()
-  if (company === '') {
-    for (const name of KNOWN_COMPANIES) {
-      if (head.includes(name)) { company = name; break }
-    }
-  }
-  if (company === '') {
-    const suffix = head.match(COMPANY_SUFFIX)
-    if (suffix !== null) company = suffix[0]
-  }
-  company = company.replace(/[（(].*?[)）]/g, '').replace(/[\s、,，。;；:：]+$/g, '').slice(0, 20)
+  meta.company = text(meta.company) === '' ? stub.company : text(meta.company)
+  meta.position = text(meta.position) === '' ? stub.position : text(meta.position)
 
-  // 岗位：先找明写的「岗位：」，再扫前 30 行里带岗位词的短行。
-  let position = ''
-  const positionLabel = head.match(/(?:招聘)?(?:岗位|职位|岗位名称|职位名称)\s*[:：]\s*([^\n，。；;]{2,20})/)
-  if (positionLabel !== null) position = positionLabel[1].trim()
-  if (position === '') {
-    for (const line of lines.slice(0, 30)) {
-      if (line.length > 24) continue
-      if (POSITION_WORDS.some(word => line.includes(word))) { position = line; break }
-    }
+  const requested = text(meta.title)
+  if (requested === '') {
+    // 用户清空标题 = 没起名，用「公司 · 岗位」补上，以后继续跟着走。
+    meta.title = `${meta.company} · ${meta.position}`
+    meta.titleAuto = true
+    return
   }
-  if (position === '') {
-    for (const word of POSITION_WORDS) {
-      if (head.includes(word)) { position = word; break }
-    }
+  if (requested !== previousTitle) {
+    // 显式改了标题：从此这行字是用户/助手定的，公司/岗位再变也不覆盖。
+    meta.title = requested
+    meta.titleAuto = false
+    return
   }
-  position = position
-    .replace(/^(招聘|岗位|职位)[:：]?\s*/, '')
-    .replace(/[\s、,，。;；:：()（）【】\[\]]+$/g, '')
-    .slice(0, 20)
-
-  const title = company !== '' && position !== ''
-    ? `${company} · ${position}`
-    : (position !== '' ? position : company)
-  return { position, company, title }
+  if (wasAuto) {
+    meta.title = `${meta.company} · ${meta.position}`
+    meta.titleAuto = true
+  } else {
+    meta.titleAuto = false
+  }
 }
 
 /** `2026-11-16` for a timestamp. */

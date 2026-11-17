@@ -96,34 +96,70 @@ export async function synthesizeWithMimo(options) {
     })
     const raw = await response.text()
     if (!response.ok) {
-      return { ok: false, reason: `MiMo TTS 返回 HTTP ${response.status}：${raw.slice(0, 300)}` }
+      return {
+        ok: false,
+        reason: `MiMo TTS 返回 HTTP ${response.status}：${raw.slice(0, 300)}`,
+        hint: hintForStatus(response.status),
+      }
     }
     let parsed
     try {
       parsed = JSON.parse(raw)
     } catch {
-      return { ok: false, reason: `MiMo TTS 返回的不是 JSON：${raw.slice(0, 200)}` }
+      return {
+        ok: false,
+        reason: `MiMo TTS 返回的不是 JSON：${raw.slice(0, 200)}`,
+        hint: '端点可能不是 MiMo：检查端点是否指向 api.xiaomimimo.com/v1。',
+      }
     }
     const failure = providerFailure(parsed)
-    if (failure !== '') return { ok: false, reason: failure }
+    if (failure !== '') {
+      return {
+        ok: false,
+        reason: failure,
+        hint: '检查 MIMO_API_KEY 是否是 MiMo 官方开放平台的 key；Token Plan 中转的 key 只能在它自己的中转上跑，不能当 MiMo 官方 key 用。',
+      }
+    }
 
     const data = parsed?.choices?.[0]?.message?.audio?.data
     if (typeof data !== 'string' || data === '') {
-      return { ok: false, reason: 'MiMo TTS 没有返回音频数据（choices[0].message.audio.data 为空）。' }
+      return {
+        ok: false,
+        reason: 'MiMo TTS 没有返回音频数据（choices[0].message.audio.data 为空）。',
+        hint: '确认模型是 TTS 模型（mimo-v2.5-tts）；voicedesign 需要 ttsStyle，voiceclone 需要 ttsReferenceAudio。',
+      }
     }
     const buffer = Buffer.from(data, 'base64')
-    if (buffer.length === 0) return { ok: false, reason: 'MiMo TTS 返回的音频数据解不出来。' }
+    if (buffer.length === 0) {
+      return { ok: false, reason: 'MiMo TTS 返回的音频数据解不出来。', hint: '换 mp3 格式再试一次。' }
+    }
     return {
       ok: true,
       audioBase64: buffer.toString('base64'),
       mimeType: audio.format === 'wav' ? 'audio/wav' : 'audio/mpeg',
     }
   } catch (error) {
-    const message = error?.name === 'AbortError' ? `MiMo TTS 超时（${TIMEOUT_MS}ms）` : `MiMo TTS 失败：${messageOf(error)}`
-    return { ok: false, reason: message }
+    const aborted = error?.name === 'AbortError'
+    return {
+      ok: false,
+      reason: aborted ? `MiMo TTS 超时（${TIMEOUT_MS}ms）` : `MiMo TTS 失败：${messageOf(error)}`,
+      hint: aborted
+        ? '网络慢或端点不可达：检查网络/代理，或改用百度朗读（免密钥）。'
+        : '检查网络是否可达 api.xiaomimimo.com；也可以改用百度朗读（免密钥）。',
+    }
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** A next step for a failed HTTP status. */
+function hintForStatus(status) {
+  if (status === 401 || status === 403) {
+    return 'MiMo 拒绝了这把凭据。你手里若是 Token Plan 中转的 key，它只能在那个中转上跑，不能当 MiMo 官方 key；要 MiMo 音色得去小米 MiMo 开放平台申请官方 key。'
+  }
+  if (status === 404) return '端点可能不对：MiMo TTS 走 /v1/chat/completions，baseUrl 是 https://api.xiaomimimo.com/v1。'
+  if (status === 429) return '额度或频率被限：稍后再试，或改用百度朗读（免密钥）。'
+  return '检查凭据、端点与模型；也可以改用百度朗读（免密钥）继续面试。'
 }
 
 /**
