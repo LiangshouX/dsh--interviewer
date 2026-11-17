@@ -25,7 +25,7 @@
 import { join, resolve } from 'node:path'
 import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { describeWorkspaceRoot, ensureDataRoot, defaultWorkspaceRoot, readSettings, writeSettings, settingsPath, SETTING_KEYS, normalizeSetting, resolveConfig } from './paths.js'
+import { describeWorkspaceRoot, ensureDataRoot, defaultWorkspaceRoot, readSettings, writeSettings, settingsPath, SETTING_KEYS, normalizeSetting, resolveConfig, isBundleDefault } from './paths.js'
 import {
   appendJsonl, isDirectory, isFile, listDirIfExists, readJsonIfExists, readJsonl,
   readTextIfExists, resolveWithin, writeJsonAtomic, writeTextAtomic,
@@ -37,6 +37,7 @@ import { locateChromium } from './camera-browser.js'
 import { VoiceService } from './voice/index.js'
 import { clearSecret, discoverCredentials, setSecret } from './voice/credentials.js'
 import { voicePresets } from './voice/presets.js'
+import { voiceTable, voicesFor } from './voice/voices.js'
 import { measureFluency, summarizeFluency } from './fluency.js'
 
 /** Session lifecycle. */
@@ -130,7 +131,10 @@ export class InterviewService {
     // "配置文件里写了 auto" 和 "配置文件里根本没写"——而合并面板设置时，
     // 只有**显式写过**的键才该压过面板设置。
     this.rawConfig = deps.config !== undefined && typeof deps.config === 'object' && deps.config !== null ? deps.config : {}
-    this.explicitKeys = new Set(Object.keys(this.rawConfig))
+    // **只有「值不同于发版默认」的键才算用户显式写死。** 发版补丁 restated 了所有
+    // 默认值（见 paths.js BUNDLE_DEFAULTS），若把「键存在」当显式，面板设置会被这些
+    // 默认值永远顶掉（bug2）。等于默认的键视为没写，面板可覆盖；真正改过的仍压过面板。
+    this.explicitKeys = new Set(Object.keys(this.rawConfig).filter(key => !isBundleDefault(key, this.rawConfig[key])))
     this.config = resolveConfig(deps.config)
     this.ctx = deps.ctx
     /** Session id the UI last touched; used as the default for agent calls. */
@@ -1343,6 +1347,8 @@ export class InterviewService {
       // 以及服务下拉的选项表。**都不含密钥值。**
       credentials: await this.voiceCredentials(),
       presets: voicePresets(),
+      // 模型 → 音色对照表：设置页音色下拉的真源（前端不硬编码）。只有 id/名字，无密钥。
+      voices: voiceTable(),
       camera,
       backends: {
         ffmpeg: ffmpeg === undefined ? { path: '', source: '', found: false } : { ...ffmpeg, found: true },
@@ -1569,6 +1575,17 @@ export class InterviewService {
    */
   voicePresets() {
     return voicePresets()
+  }
+
+  /**
+   * 某模型/服务商支持的音色（设置页音色下拉与 agent 共用这一份判断）。
+   *
+   * @param {string} [model]
+   * @param {string} [provider]
+   * @returns {{model: string, provider: string, known: boolean, scope: string, voices: Array<{id: string, label: string}>}}
+   */
+  voicesForModel(model, provider) {
+    return { model: String(model ?? ''), provider: String(provider ?? ''), ...voicesFor(model, provider) }
   }
 
   /**

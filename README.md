@@ -59,7 +59,7 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
   （Media Foundation）。「申请摄像头与麦克风」一条按钮走完整条链路：
   浏览器麦克风 → 宿主摄像头，并逐步显示「✓ 麦克风已接入 · 摄像头正在尝试宿主采集…」。
 - 语音：宿主 `speechToText`（SenseVoice 本地模型）→ 插件 HTTP 端点 → 浏览器识别 → 键盘；
-  播报：宿主 TTS（暂无）→ 配好的模型（MiMo/OpenAI/MiniMax）→ 免密钥自然音 → 浏览器音色。
+  播报：宿主 TTS（暂无）→ 配好的模型（MiMo/OpenAI/MiniMax/**DashScope·Qwen/CosyVoice**）→ 免密钥自然音 → 浏览器音色。
   面板永远显示**现在用的是哪条链路、为什么**。
 - 语流观察（停顿、语速、填充词、重复、自我修正）由 Host 统一计算；
   只用于调整追问方式与报告「表达」一节，**不打分**。
@@ -79,7 +79,7 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 |---|---|
 | 外观 | 亮色 / 暗色（**默认亮色**）、**跟随 DSH 主题**（勾上后页头切换按钮失效，明暗完全由宿主决定） |
 | 语音识别 | 服务（自动 / 宿主 / OpenAI 兼容 / 自定义端点 / MiniMax / 浏览器 / 关闭）、端点、模型、语言、凭据，**测试识别** |
-| 语音播报 | 服务（自动 / 宿主 / MiMo / OpenAI 兼容 / MiniMax（两个站点）/ 百度 / Edge / 浏览器 / 关闭）、模型、音色、格式、语速、凭据，**测试播报** |
+| 语音播报 | 服务（自动 / 宿主 / MiMo / OpenAI 兼容 / MiniMax（两个站点）/ **DashScope·Qwen/CosyVoice（WebSocket）** / 百度 / Edge / 浏览器 / 关闭）、模型、**音色（按模型下拉）**、格式、语速、凭据，**测试播报** |
 | 摄像头 | 采集后端（auto / 仅 ffmpeg / Chromium 优先）、ffmpeg 路径、Chrome/Edge 路径 |
 | 隐私 | 允许录像、允许录音 |
 | 面试间保护 | 离开确认总开关、恢复「以后不再提醒」 |
@@ -144,3 +144,29 @@ node dev/shoot.mjs                 # 截图到 dev/shots/
 - 侧栏离开拦截依赖 DSH 侧栏以 click 触发导航（实测如此）；非 click 的程序化跳转拦不住，
   但卸载时一定会释放设备。
 - 语音识别不支持流式：宿主的 `speechToText` 只有整段转写，准实时靠客户端分段。
+- **播报只做「一次性合成」，不支持实时语音对话模型。** 播报半边是「文本 → 一段音频」
+  的请求-响应（OpenAI `/audio/speech`、MiMo `chat-audio`、MiniMax `t2a_v2`、
+  DashScope `tts_v2` WebSocket、百度/Edge 免密钥、浏览器音色）。像
+  `qwen-audio-3.0-realtime-plus` 这类**语音转语音 realtime 对话模型**（持久双工连接、
+  `session.update` / `input_audio_buffer.append` / `response.audio.delta`、服务端 VAD
+  轮次检测、音频进音频出）是另一个产品类目，本插件**没有**对应的协议适配，配上去也不会响。
+  面试官「念一个问题」需要的是 TTS（如 `qwen-audio-3.0-tts-flash`），不是 realtime 对话模型。
+- **DashScope/Qwen TTS 走 WebSocket，不是 HTTP 中转。** `qwen-audio-*-tts-*` / `cosyvoice-*`
+  用 `tts_v2` 的 `wss://…/api-ws/v1/inference` 推理协议；千问 Token Plan 的
+  `compatible-mode/v1` **HTTP** 中转只开 `/chat/completions` 与 `/models`，音频路径一律 400，
+  别把端点填成它。音色**按模型**选（每个模型只支持一组特定音色，跨模型混用报
+  InvalidParameter / `[cosyvoice:]Engine error [411]`），设置页已做成按模型的下拉。
+  **key 与主机要配对**：Token Plan key（`QIANWEN_TOKEN_PLAN_API_KEY`）只在
+  `token-plan.maas.qianwenaiapi.com` 这台主机有效（`maas` / `cn-beijing.maas` / 官方
+  `dashscope.aliyuncs.com` 认的是别的 key），且该中转的 TTS 模型是
+  **`qwen-audio-3.0-tts-plus`**（没有 flash，音色 `longanlingxin` / `longanlufeng`）。
+  预设已按这套默认配好；官方 DashScope 则用 `DASHSCOPE_API_KEY` + `dashscope.aliyuncs.com`。
+
+## 待办（已知功能缺口，以后再说）
+
+- **音色克隆 / 音色设计**：目前音色下拉只覆盖各模型的**系统音色**（内部维护的
+  模型-音色对照表 `src/host/voice/voices.js`）。DashScope 的音色复刻（用一段样本创建
+  专属音色）与音色设计（自然语言描述生成音色）尚未接入——未知模型/自定义音色暂以
+  文本输入兜底。MiMo 的 `voiceclone` 已有参考音频通路，但 DashScope 这条还没做。
+- **实时语音对话**：见「已知边界」。若将来要把 realtime 对话模型接进来，需要新增
+  双工 WebSocket 适配 + 流式播放 + 轮次/上下文管理，是一项独立功能，不是配置项。

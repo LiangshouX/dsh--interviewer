@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { resolveTts, describeTts, synthesize, pickAutoOrder, providerHint, loadReferenceAudio } from '../src/host/voice/tts.js'
 import { synthesizeWithMimo, shapeOf } from '../src/host/voice/tts/mimo.js'
 import { synthesizeWithOpenAi } from '../src/host/voice/tts/openai.js'
+import { synthesizeWithDashScope } from '../src/host/voice/tts/dashscope.js'
 import { synthesizeWithMinimax, endpointFor as minimaxEndpointFor, resolveGroupId } from '../src/host/voice/tts/minimax.js'
 import { splitText } from '../src/host/voice/tts/baidu.js'
 import { secMsGec, endpointUrl } from '../src/host/voice/tts/edge.js'
@@ -16,6 +17,7 @@ import {
   clearSecret, describeSecret, discoverCredentials, isValidSecretRef, setSecret,
 } from '../src/host/voice/credentials.js'
 import { voicePresets } from '../src/host/voice/presets.js'
+import { voicesFor, defaultVoiceForModel, voiceTable } from '../src/host/voice/voices.js'
 import { InterviewService } from '../src/host/service.js'
 
 /** A service with no host services at all. */
@@ -395,7 +397,7 @@ test('profile 读不到时只用候选名，不抛', async () => {
 
 // ── 预设表：设置页的唯一真源 ─────────────────────────────────────────────
 
-test('预设表带 notes/keyless；MiniMax 有国内站与大陆站；不提供 Qwen 语音（中转只支持文本）', () => {
+test('预设表带 notes/keyless；MiniMax 有国内站与大陆站；DashScope 走 WebSocket 而非 HTTP 中转', () => {
   const presets = voicePresets()
   const tts = presets.filter(preset => preset.kind === 'tts')
   const asr = presets.filter(preset => preset.kind === 'asr')
@@ -409,7 +411,13 @@ test('预设表带 notes/keyless；MiniMax 有国内站与大陆站；不提供 
   assert.ok(ttsIds.includes('minimax'))
   assert.ok(ttsIds.includes('minimax-cn'))
   assert.ok(ttsIds.includes('baidu') && ttsIds.includes('edge'))
-  assert.equal(ttsIds.some(id => /qwen|dashscope/i.test(id)), false, 'Qwen 中转没有语音路径，别让用户白试')
+  // Qwen/CosyVoice 非实时合成走 api-ws WebSocket（不是 compatible-mode HTTP 中转），应当提供。
+  assert.ok(ttsIds.includes('dashscope'), 'DashScope tts_v2 WebSocket 通道可用，别把它和 HTTP 中转混为一谈')
+  const dashscope = tts.find(preset => preset.id === 'dashscope')
+  assert.equal(dashscope.protocol, 'dashscope')
+  assert.match(dashscope.baseUrl, /^wss:\/\/.+\/api-ws\/v1\/inference$/)
+  assert.equal(dashscope.keyless, false)
+  assert.ok(voicesFor(dashscope.model).voices.some(v => v.id === dashscope.voice), '预设默认音色必须对默认模型合法（否则开箱即撞 411）')
   assert.ok(tts.find(preset => preset.id === 'minimax-cn').baseUrl.includes('api.minimax.cn'))
   const asrIds = asr.map(preset => preset.id)
   assert.ok(asrIds.includes('openai') && asrIds.includes('openai-custom'))
@@ -523,4 +531,137 @@ test('testVoice 只认 tts / asr 两种', async () => {
   const result = await InterviewService.prototype.testVoice.call({}, { kind: 'image' })
   assert.equal(result.ok, false)
   assert.match(result.reason, /tts 或 asr/)
+})
+
+// ── DashScope tts_v2 WebSocket：协议形状与诚实失败 ─────────────────────────
+
+/** 造一个按脚本回应的假 WebSocket（run-task→task-started；finish-task→音频+task-finished）。 */
+function makeFakeWS(script = {}) {
+  class FakeWS {
+    constructor(url, opts) {
+      this.url = url
+      this.opts = opts
+      this.sent = []
+      this.listeners = {}
+      this.binaryType = ''
+      FakeWS.last = this
+      queueMicrotask(() => this._emit('open', {}))
+    }
+    addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn) }
+    _emit(type, ev) { for (const fn of [...(this.listeners[type] ?? [])]) fn(ev) }
+    send(raw) {
+      const msg = JSON.parse(raw)
+      this.sent.push(msg)
+      const action = msg.header.action
+      if (action === 'run-task') {
+        queueMicrotask(() => this._emit('message', { data: JSON.stringify({ header: { event: 'task-started', task_id: msg.header.task_id } }) }))
+      } else if (action === 'finish-task') {
+        queueMicrotask(() => {
+          if (script.failEvent) { this._emit('message', { data: JSON.stringify(script.failEvent) }); return }
+          const bytes = script.audio ?? [0x49, 0x44, 0x33]
+          this._emit('message', { data: new Uint8Array(bytes).buffer })
+          this._emit('message', { data: JSON.stringify({ header: { event: 'task-finished', task_id: msg.header.task_id } }) })
+        })
+      }
+    }
+    close() {}
+  }
+  return FakeWS
+}
+
+/** 替换全局 WebSocket 跑一个测试。 */
+async function withWebSocket(FakeWS, run) {
+  const original = globalThis.WebSocket
+  globalThis.WebSocket = FakeWS
+  try {
+    return await run()
+  } finally {
+    globalThis.WebSocket = original
+  }
+}
+
+test('DashScope 走 tts_v2 WebSocket：run-task→continue-task→finish-task，二进制帧拼成音频', async () => {
+  const FakeWS = makeFakeWS({ audio: [0x49, 0x44, 0x33, 0x01] })
+  const result = await withWebSocket(FakeWS, () => synthesizeWithDashScope({
+    baseUrl: 'wss://cn-beijing.maas.qianwenaiapi.com/api-ws/v1/inference',
+    apiKey: 'sk-dashscope-test', model: 'qwen-audio-3.0-tts-flash', voice: 'longanfengyue',
+    format: 'mp3', rate: 1, text: '请先做一个自我介绍。',
+  }))
+  assert.equal(result.ok, true)
+  assert.equal(result.mimeType, 'audio/mpeg')
+  assert.equal(Buffer.from(result.audioBase64, 'base64').toString('hex'), '49443301')
+  const ws = FakeWS.last
+  assert.equal(ws.opts.headers.Authorization, 'Bearer sk-dashscope-test')
+  assert.deepEqual(ws.sent.map(m => m.header.action), ['run-task', 'continue-task', 'finish-task'])
+  assert.equal(ws.sent[0].payload.model, 'qwen-audio-3.0-tts-flash')
+  assert.equal(ws.sent[0].payload.function, 'SpeechSynthesizer')
+  assert.equal(ws.sent[0].payload.parameters.voice, 'longanfengyue')
+  assert.equal(ws.sent[0].payload.parameters.format, 'mp3')
+  assert.equal(ws.sent[0].header.streaming, 'duplex')
+  assert.equal(ws.sent[1].payload.input.text, '请先做一个自我介绍。')
+  assert.equal(ws.sent[0].header.task_id, ws.sent[1].header.task_id)
+  assert.equal(ws.sent[1].header.task_id, ws.sent[2].header.task_id)
+})
+
+test('DashScope 音色留空时按模型取默认音色（不拿预设音色跨模型撞 411）', async () => {
+  const FakeWS = makeFakeWS({})
+  const result = await withWebSocket(FakeWS, () => synthesizeWithDashScope({
+    baseUrl: 'wss://x/api-ws/v1/inference', apiKey: 'sk', model: 'qwen-audio-3.1-tts-flash', voice: '', format: 'wav', rate: 1, text: '你好',
+  }))
+  assert.equal(result.ok, true)
+  assert.equal(result.mimeType, 'audio/wav')
+  assert.equal(FakeWS.last.sent[0].payload.parameters.voice, 'longanhuan_v3.1')
+  assert.equal(FakeWS.last.sent[0].payload.parameters.format, 'wav')
+})
+
+test('DashScope task-failed 带厂商错误码原文，音色错误给出「按模型选音色」的出路', async () => {
+  const FakeWS = makeFakeWS({ failEvent: { header: { event: 'task-failed', error_code: 'InvalidParameter', error_message: '[cosyvoice:]Engine error [411]: TTS speak operation failed' } } })
+  const result = await withWebSocket(FakeWS, () => synthesizeWithDashScope({
+    baseUrl: 'wss://x/api-ws/v1/inference', apiKey: 'sk', model: 'qwen-audio-3.0-tts-flash', voice: 'wrong-voice', format: 'mp3', rate: 1, text: '你好',
+  }))
+  assert.equal(result.ok, false)
+  assert.match(result.reason, /411|InvalidParameter/)
+  assert.match(result.hint, /音色/)
+})
+
+test('DashScope 端点必须是 wss：填成 HTTP /audio/speech 会被拦下并指路', async () => {
+  const result = await synthesizeWithDashScope({
+    baseUrl: 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1',
+    apiKey: 'sk', model: 'qwen-audio-3.0-tts-flash', voice: 'longanfengyue', format: 'mp3', rate: 1, text: '你好',
+  })
+  assert.equal(result.ok, false)
+  assert.match(result.reason, /WebSocket|wss/)
+})
+
+test('auto 反推：wss 端点 / qwen-audio 模型 / 千问凭据名都指向 dashscope', () => {
+  assert.equal(providerHint({ ttsBaseUrl: 'wss://cn-beijing.maas.qianwenaiapi.com/api-ws/v1/inference' }), 'dashscope')
+  assert.equal(providerHint({ ttsModel: 'qwen-audio-3.0-tts-flash' }), 'dashscope')
+  assert.equal(providerHint({ ttsModel: 'cosyvoice-v3-flash' }), 'dashscope')
+  assert.equal(providerHint({ ttsApiKeyEnv: 'QIANWEN_TOKEN_PLAN_API_KEY' }), 'dashscope')
+})
+
+// ── 模型 → 音色对照表 ──────────────────────────────────────────────────────
+
+test('音色表按模型精确匹配；未知模型回落服务商级；都没有则 known=false', () => {
+  const byModel = voicesFor('qwen-audio-3.0-tts-flash', 'dashscope')
+  assert.equal(byModel.known, true)
+  assert.equal(byModel.scope, 'model')
+  assert.ok(byModel.voices.some(v => v.id === 'longanfengyue'))
+  const byProvider = voicesFor('some-unknown-model', 'openai')
+  assert.equal(byProvider.scope, 'provider')
+  assert.ok(byProvider.voices.some(v => v.id === 'alloy'))
+  const none = voicesFor('totally-unknown', 'minimax')
+  assert.equal(none.known, false)
+  assert.deepEqual(none.voices, [])
+  assert.equal(defaultVoiceForModel('qwen-audio-3.0-tts-flash'), 'longanfengyue')
+  assert.equal(defaultVoiceForModel('nope'), '')
+  assert.ok(voiceTable().models['qwen-audio-3.0-tts-flash'].length >= 12)
+})
+
+test('不同模型的音色组不同（跨模型混用会 411，表必须按模型分开）', () => {
+  const a = voicesFor('qwen-audio-3.0-tts-flash').voices.map(v => v.id)
+  const b = voicesFor('qwen-audio-3.1-tts-flash').voices.map(v => v.id)
+  assert.ok(a.includes('longanfengyue'))
+  assert.ok(b.includes('longanfengyue_v3.1'))
+  assert.ok(!b.includes('longanfengyue'), '3.1 的音色带 _v3.1 后缀，不能拿 3.0 的裸 id 去撞')
 })

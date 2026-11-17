@@ -130,7 +130,7 @@ export const SETTING_SPECS = {
   asrGroupId: { kind: 'string' },
   asrLanguage: { kind: 'string' },
   // 语音合成
-  ttsProvider: { kind: 'enum', values: ['auto', 'host', 'mimo', 'openai', 'minimax', 'minimax-cn', 'baidu', 'edge', 'browser', 'none'] },
+  ttsProvider: { kind: 'enum', values: ['auto', 'host', 'mimo', 'openai', 'minimax', 'minimax-cn', 'dashscope', 'baidu', 'edge', 'browser', 'none'] },
   ttsBaseUrl: { kind: 'string' },
   ttsApiKeyEnv: { kind: 'string' },
   ttsGroupId: { kind: 'string' },
@@ -231,6 +231,61 @@ export async function writeSettings(patch) {
 }
 
 /**
+ * 发版补丁 `cordis.patch.yml` 里 `config:` 块的**默认值快照**。
+ *
+ * **为什么需要它（bug2 的根因）。** 发版补丁为了「后来的 patch 层整体替换 config
+ * 时插件仍拿得到每个字段」，把**所有**键都 restated 了一遍（含 `ttsProvider:'auto'`
+ * 这类默认值）。于是 `InterviewService` 收到的 rawConfig 里每个键都在，若按
+ * 「键存在 = 用户显式写死」处理，面板设置就永远被这些默认值顶掉——用户改了播报
+ * 服务却仍跑 auto→百度，正是这个原因。
+ *
+ * 所以「显式」的正确判据是：**值不同于发版默认值**（或键根本不在发版默认里）。
+ * 等于默认值的键视为「没写」，面板设置可以压过它；用户在 profile 层真正改过的键
+ * （值不同于默认）仍然压过面板，保住「配置文件 > 面板 > 默认」的语义。
+ *
+ * **维护纪律：这张表必须与 cordis.patch.yml 的 config 块保持一致。** 改了补丁
+ * 默认值就要同步这里（tests/config-priority.test.js 会盯住行为）。
+ */
+export const BUNDLE_DEFAULTS = {
+  workspaceRoot: '',
+  jdFetchTimeoutMs: 15000,
+  jdMaxChars: 20000,
+  asrProvider: 'auto',
+  asrBaseUrl: '',
+  asrApiKey: '',
+  asrApiKeyEnv: 'MINIMAX_API_KEY',
+  asrModel: '',
+  asrEndpoint: '',
+  asrLanguage: 'zh',
+  ttsProvider: 'auto',
+  ttsBaseUrl: '',
+  ttsApiKeyEnv: '',
+  ttsApiKey: '',
+  ttsModel: '',
+  ttsVoice: '',
+  ttsStyle: '',
+  ttsReferenceAudio: '',
+  ttsFormat: 'mp3',
+  ttsRate: 1.0,
+  recordVideo: true,
+  recordAudio: true,
+  ffmpegPath: '',
+  chromiumPath: '',
+}
+
+/**
+ * 某个配置键值是否只是发版默认值（= 用户没显式写过，面板可覆盖）。
+ * 键不在发版默认表里 → 视为用户额外写的（显式）。值都是基本类型，严格相等即可。
+ *
+ * @param {string} key
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isBundleDefault(key, value) {
+  return Object.prototype.hasOwnProperty.call(BUNDLE_DEFAULTS, key) && BUNDLE_DEFAULTS[key] === value
+}
+
+/**
  * Resolve the plugin configuration.
  *
  * Every field is restated in `cordis.patch.yml`; a later patch layer replaces
@@ -278,7 +333,7 @@ export function resolveConfig(raw) {
     // 语音合成：宿主 > 按配置的模型（mimo/openai/minimax）> 免密钥自然音
     // （baidu/edge）> 浏览器。**默认不是机器音**：auto 会先找模型，再找
     // 免密钥的自然音，最后才用系统音色。
-    ttsProvider: oneOf(config.ttsProvider, ['auto', 'host', 'mimo', 'openai', 'minimax', 'minimax-cn', 'baidu', 'edge', 'browser', 'none'], 'auto'),
+    ttsProvider: oneOf(config.ttsProvider, ['auto', 'host', 'mimo', 'openai', 'minimax', 'minimax-cn', 'dashscope', 'baidu', 'edge', 'browser', 'none'], 'auto'),
     ttsBaseUrl: text(config.ttsBaseUrl) ?? '',
     ttsApiKeyEnv: text(config.ttsApiKeyEnv) ?? '',
     ttsGroupId: text(config.ttsGroupId) ?? '',

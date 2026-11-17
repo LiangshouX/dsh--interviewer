@@ -240,6 +240,7 @@ async function readResource(service, segments, query) {
     // 前者只回名字与"配没配"，后者是服务下拉的唯一来源。**都没有密钥值。**
     if (rest[0] === 'credentials') return { credentials: await service.voiceCredentials() }
     if (rest[0] === 'presets') return { presets: service.voicePresets() }
+    if (rest[0] === 'voices') return service.voicesForModel(query.model, query.provider)
     return service.voiceStatus()
   }
   if (head === 'asr') {

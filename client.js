@@ -5796,7 +5796,7 @@ function SettingsView(props) {
       ttsBaseUrl: settings.ttsBaseUrl ?? '',
       ttsApiKeyEnv: settings.ttsApiKeyEnv ?? '',
       ttsGroupId: settings.ttsGroupId ?? '',
-      ttsFormat: settings.ttsFormat ?? '',
+      ttsFormat: settings.ttsFormat ?? 'mp3',
       ttsRate: settings.ttsRate === undefined ? '' : String(settings.ttsRate),
       ttsStyle: settings.ttsStyle ?? '',
       cameraBackend: settings.cameraBackend ?? 'auto',
@@ -6100,6 +6100,32 @@ function SettingsView(props) {
     onChange: event => set(key, event.target.value),
   })
 
+  // 音色下拉的真源来自 Host（设置快照里的 data.voices = 模型→音色对照表）。
+  // 按当前模型精确查；模型不在表里退到服务商级；都没有 → 文本输入（自定义/克隆音色的出路）。
+  const voiceTableData = data.voices ?? { models: {}, providers: {} }
+  const lookupVoices = (modelId, providerId) => {
+    const byModel = voiceTableData.models?.[String(modelId ?? '').trim()]
+    if (Array.isArray(byModel) && byModel.length > 0) return byModel
+    const byProvider = voiceTableData.providers?.[String(providerId ?? '').trim()]
+    if (Array.isArray(byProvider) && byProvider.length > 0) return byProvider
+    return []
+  }
+  const currentTtsModel = form.ttsModel !== '' ? form.ttsModel : (effective.ttsModel || ttsPreset?.model || '')
+  const ttsVoiceOptions = lookupVoices(currentTtsModel, form.ttsProvider)
+  const voiceControl = () => {
+    if (ttsVoiceOptions.length === 0) {
+      return input('ttsVoice', effective.ttsVoice || ttsPreset?.voice || '留空用默认音色')
+    }
+    const current = form.ttsVoice
+    const options = [h('option', { key: '__def', value: '' }, `默认 · ${ttsVoiceOptions[0].id}`)]
+    for (const v of ttsVoiceOptions) options.push(h('option', { key: v.id, value: v.id }, v.label || v.id))
+    // 当前值不在表里（自定义/克隆音色）也保留成一个选项，不静默丢掉。
+    if (current !== '' && !ttsVoiceOptions.some(v => v.id === current)) {
+      options.push(h('option', { key: '__cur', value: current }, current))
+    }
+    return h('select', { key: 's', style: S.input, value: current, onChange: event => set('ttsVoice', event.target.value) }, options)
+  }
+
   /**
    * 服务下拉：选项全部来自预设表。
    *
@@ -6389,15 +6415,21 @@ function SettingsView(props) {
       h('div', { key: 'g', style: grid }, [
         field('ttsProvider', '服务', presetSelect('ttsProvider', ttsPresets, ['ttsBaseUrl', 'ttsModel', 'ttsVoice', 'ttsGroupId', 'ttsApiKeyEnv'])),
         field('ttsBaseUrl', '端点', input('ttsBaseUrl', effective.ttsBaseUrl || ttsPreset?.baseUrl || '留空用该服务默认')),
-        field('ttsModel', '模型', input('ttsModel', effective.ttsModel || ttsPreset?.model || '留空用该服务默认')),
-        field('ttsVoice', '音色', input('ttsVoice', effective.ttsVoice || ttsPreset?.voice || '留空用默认音色')),
+        field('ttsModel', '模型', h('input', {
+          key: 'i',
+          style: S.input,
+          value: form.ttsModel,
+          placeholder: effective.ttsModel || ttsPreset?.model || '留空用该服务默认',
+          // 换模型 = 换一组合法音色：把音色重置为默认，避免拿旧模型的音色去撞 411。
+          onChange: event => { const value = event.target.value; setForm(previous => ({ ...previous, ttsModel: value, ttsVoice: '' })) },
+        })),
+        field('ttsVoice', '音色', voiceControl()),
         field('ttsFormat', '音频格式', h('select', {
           key: 's',
           style: S.input,
           value: form.ttsFormat,
           onChange: event => set('ttsFormat', event.target.value),
         }, [
-          h('option', { key: 'd', value: '' }, '默认'),
           h('option', { key: 'm', value: 'mp3' }, 'mp3'),
           h('option', { key: 'w', value: 'wav' }, 'wav'),
         ])),

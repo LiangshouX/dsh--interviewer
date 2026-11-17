@@ -297,8 +297,12 @@ UI 一起拍进去，且要求窗口可见——是演示 hack，不是产品路
    不要去找根本不存在的流式协议。
 
 **TTS 不绑定厂商。** 协议适配在 `src/host/voice/tts/`：`mimo.js`（chat/completions
-+ audio）、`openai.js`（/audio/speech）、`minimax.js`（/v1/t2a_v2）、`baidu.js` /
++ audio）、`openai.js`（/audio/speech）、`minimax.js`（/v1/t2a_v2）、`dashscope.js`
+（tts_v2 WebSocket，run-task/continue-task/finish-task）、`baidu.js` /
 `edge.js`（免密钥）。加一家 = 加一个文件 + 一个预设，不改编排层。
+**音色按模型维护**在 `src/host/voice/voices.js`（模型→音色对照表，设置页下拉的真源）：
+DashScope 每个模型只支持一组特定音色，跨模型混用报 InvalidParameter/411，所以音色
+不能让用户随手填，要按当前模型给合法的那一组；未知模型回落文本输入。
 
 ### 6.5.1 凭据：写宿主的存储，不写自己的文件
 
@@ -323,7 +327,8 @@ UI 一起拍进去，且要求窗口可见——是演示 hack，不是产品路
 |---|---|
 | MiniMax `POST https://api.minimax.cn/v1/t2a_v2`（Bearer）协议正确 | 200 也可能是业务失败：`base_resp.status_code` 非 0 要把 `status_msg` 原文带回界面（2056 = 用量上限） |
 | MiMo 官方端点 `api.xiaomimimo.com` 认**官方 key**，不认 Token Plan 中转 key（401） | 预设里要写清这一点，别让用户拿中转 key 白撞 |
-| Qwen Token Plan 中转只有 `/chat/completions` 与 `/models` 可用，音频路径一律 400 `url error` | **不要**给它做语音预设 |
+| Qwen Token Plan 的 **HTTP `compatible-mode/v1` 中转**只有 `/chat/completions` 与 `/models` 可用，音频路径一律 400 `url error` | 别把 TTS/ASR 端点填成这个 HTTP 中转。但 **`api-ws/v1/inference` WebSocket 推理端点是开音频的**——`qwen-audio-*-tts-*`/`cosyvoice-*` 走 `dashscope.js`（tts_v2）可用，凭据 `QIANWEN_TOKEN_PLAN_API_KEY`。两者不是同一条路 |
+| DashScope 每个模型只支持一组特定音色，跨模型混用报 InvalidParameter / `[cosyvoice:]Engine error [411]` | 音色按模型维护在 `voices.js`，设置页做成按模型下拉；voice 留空时取**当前模型**默认音色，不拿预设音色跨模型撞 |
 | Edge 神经音色在部分出口被 WAF 403；百度朗读可用 | `auto` 候选顺序里免密钥自然音仍然有效，失败要记一段时间再试 |
 
 ### 6.6 继承岗位档案不等于照抄

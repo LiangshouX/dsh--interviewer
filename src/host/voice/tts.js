@@ -22,12 +22,14 @@ import { extname } from 'node:path'
 import { resolveSecret } from './credentials.js'
 import { hostService } from './host.js'
 import { TTS_AUTO_ORDER, TTS_PROVIDERS } from './presets.js'
+import { defaultVoiceForModel } from './voices.js'
 import { redactSecret } from './redact.js'
 import { synthesizeWithBaidu } from './tts/baidu.js'
 import { edgeFailure, synthesizeWithEdge } from './tts/edge.js'
 import { synthesizeWithMimo } from './tts/mimo.js'
 import { synthesizeWithMinimax } from './tts/minimax.js'
 import { synthesizeWithOpenAi } from './tts/openai.js'
+import { synthesizeWithDashScope } from './tts/dashscope.js'
 
 /** 语音配置的有效值：配置文件 > 面板设置 > 默认（见 InterviewService.voiceConfig）。 */
 async function voiceConfigOf(service) {
@@ -191,6 +193,9 @@ export async function synthesize(service, input = {}) {
     case 'openai':
       result = await synthesizeWithOpenAi(common)
       break
+    case 'dashscope':
+      result = await synthesizeWithDashScope(common)
+      break
     case 'minimax':
       result = await synthesizeWithMinimax(common)
       break
@@ -256,6 +261,9 @@ export function providerHint(config) {
   const env = typeof config.ttsApiKeyEnv === 'string' ? config.ttsApiKeyEnv.toUpperCase() : ''
   if (base.includes('xiaomimimo') || model.startsWith('mimo-') || env === 'MIMO_API_KEY') return 'mimo'
   if (base.includes('minimax') || base.includes('minimaxi') || env === 'MINIMAX_API_KEY') return 'minimax'
+  if (base.includes('dashscope') || base.includes('maas.qianwenaiapi') || base.startsWith('wss://')
+    || model.startsWith('qwen-audio') || model.startsWith('cosyvoice')
+    || env === 'DASHSCOPE_API_KEY' || env === 'QIANWEN_TOKEN_PLAN_API_KEY' || env === 'QWEN_TOKEN_PLAN_API_KEY') return 'dashscope'
   if (env === 'OPENAI_API_KEY') return 'openai'
   if (model !== '' || base !== '') {
     // 有自定义端点或模型但没有厂商标识：按 OpenAI 兼容协议理解（最通行的形状）。
@@ -287,9 +295,13 @@ async function describeCandidate(service, name, config, options) {
   const model = typeof config.ttsModel === 'string' && config.ttsModel.trim() !== ''
     ? config.ttsModel.trim()
     : (preset.model ?? '')
-  const voice = typeof config.ttsVoice === 'string' && config.ttsVoice.trim() !== ''
-    ? config.ttsVoice.trim()
-    : (preset.voice ?? '')
+  const configuredVoice = typeof config.ttsVoice === 'string' && config.ttsVoice.trim() !== '' ? config.ttsVoice.trim() : ''
+  let voice = configuredVoice !== '' ? configuredVoice : (preset.voice ?? '')
+  // DashScope 音色按模型走：用户没填时取**当前模型**的默认音色，而不是预设音色——
+  // 预设音色只对默认模型合法，换个模型再拿它去撞会报 InvalidParameter/411。
+  if (preset.protocol === 'dashscope' && configuredVoice === '') {
+    voice = defaultVoiceForModel(model) || (preset.voice ?? '')
+  }
   const style = typeof config.ttsStyle === 'string' ? config.ttsStyle.trim() : ''
   // MiniMax 的 t2a_v2 在部分账户上要求 GroupId（查询参数），空 = 不带。
   const groupId = typeof config.ttsGroupId === 'string' ? config.ttsGroupId.trim() : ''
