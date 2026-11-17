@@ -137,6 +137,9 @@ node dev/shoot.mjs                 # 截图到 dev/shots/
 - 文档：[AGENTS.md](AGENTS.md)（开发纪律）、[docs/DESIGN.md](docs/DESIGN.md)（界面契约）、
   [docs/VOICE.md](docs/VOICE.md)（语音链路与凭据）、[docs/PRD.md](docs/PRD.md)（产品）、
   [docs/API.md](docs/API.md)（接口）、[docs/DETAIL.md](docs/DETAIL.md)（实现细节）。
+- **语音模型速查**：[docs/VOICE-TTS.md](docs/VOICE-TTS.md)（TTS 模型 ID / 音色含简介 / 快速对接）、
+  [docs/VOICE-ASR.md](docs/VOICE-ASR.md)（ASR 模型 ID / 快速对接）——接入不用再去翻官方文档。
+- **未来计划**：[ROADMAP.md](ROADMAP.md)（音色克隆 / 音色设计 / 实时语音 / 配置注入等未实现与待优化项）。
 
 ## 已知边界
 
@@ -162,11 +165,9 @@ node dev/shoot.mjs                 # 截图到 dev/shots/
   **`qwen-audio-3.0-tts-plus`**（没有 flash，音色 `longanlingxin` / `longanlufeng`）。
   预设已按这套默认配好；官方 DashScope 则用 `DASHSCOPE_API_KEY` + `dashscope.aliyuncs.com`。
 
-## 待办（已知功能缺口，以后再说）
+## 待办与未来计划
 
-- **音色克隆 / 音色设计**：目前音色下拉只覆盖各模型的**系统音色**（内部维护的
-  模型-音色对照表 `src/host/voice/voices.js`）。DashScope 的音色复刻（用一段样本创建
-  专属音色）与音色设计（自然语言描述生成音色）尚未接入——未知模型/自定义音色暂以
-  文本输入兜底。MiMo 的 `voiceclone` 已有参考音频通路，但 DashScope 这条还没做。
-- **实时语音对话**：见「已知边界」。若将来要把 realtime 对话模型接进来，需要新增
-  双工 WebSocket 适配 + 流式播放 + 轮次/上下文管理，是一项独立功能，不是配置项。
+已知功能缺口（**音色克隆 / 音色设计 / 实时语音对话**）与待优化项（**音色经工作区配置文件注入**、
+长音色表搜索/分组、音色试听、流式 TTS/ASR、模型可用性预探测等）统一记录在
+**[ROADMAP.md](ROADMAP.md)**，每条含现状、目标、难点与优先级建议。
+做掉一条就把它从 ROADMAP 移进 README/CHANGELOG，避免两处重复维护。
