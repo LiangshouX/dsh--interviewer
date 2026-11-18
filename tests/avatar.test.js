@@ -111,7 +111,10 @@ test('GET 形象资源：正确的类型与字节', async () => {
     assert.match(rig.type, /application\/json/)
     assert.equal(rig.cache, 'no-cache')
     const parsed = JSON.parse(rig.body.toString('utf8'))
-    assert.equal(parsed.image.width, 1024)
+    // 尺寸不写死（换形象就会变）：只要有个正数，且与 layers.json 的 size 一致。
+    const layers = JSON.parse((await get('/interviewer/avatar/asset/avatar/interviewer/built/layers.json')).body.toString('utf8'))
+    assert.ok(parsed.image.width > 0 && parsed.image.height > 0)
+    assert.deepEqual(layers.size, [parsed.image.width, parsed.image.height])
 
     const runtime = await get('/interviewer/avatar/asset/vendor/mesh-avatar.js')
     assert.equal(runtime.status, 200)
