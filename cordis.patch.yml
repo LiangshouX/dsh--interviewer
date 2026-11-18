@@ -78,6 +78,11 @@
 #                   on  = 面试中舞台右上角挂一个会说话、会看你的预置面试官；
 #                   off = 不挂。形象是**增强**不是前提：加载失败也只是没那张脸，
 #                   面试照常进行。素材随包分发（assets/），不用联网、不用下载模型。
+#   interviewerStyle 用哪一份形象：值就是 assets/avatar/<id>/ 的目录名，
+#                   留空 = 默认那份（interviewer）。包里放一个凑齐
+#                   avatar.json / rig.json / built/ 的目录，它就自动出现在
+#                   设置页的下拉里；写了个不存在的 id 会回落默认（面板保存时
+#                   也会拒绝并说明）。
 #   ffmpegPath      ffmpeg 的可执行文件路径。
 #                   **摄像头是 Host 侧用 ffmpeg 采的**——DSH 桌面端的 Electron
 #                   权限处理器只放行纯音频请求，摄像头在主进程就被拒了，改
@@ -117,5 +122,6 @@
         answerMode: 'manual'
         turnEndSilenceMs: 2000
         interviewerAvatar: 'on'
+        interviewerStyle: ''
         ffmpegPath: ''
         chromiumPath: ''

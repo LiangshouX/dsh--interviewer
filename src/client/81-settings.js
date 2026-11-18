@@ -70,6 +70,8 @@ function SettingsView(props) {
       turnEndSilenceMs: settings.turnEndSilenceMs === undefined ? '' : String(settings.turnEndSilenceMs),
       // 虚拟面试官：有效值优先（配置文件写 off 时，面板不该显示成开）。
       interviewerAvatar: (data.effective?.interviewerAvatar ?? settings.interviewerAvatar) !== 'off',
+      // 用哪一份形象：Host 解析过的那一个（未知/空都已经是默认那份）。
+      interviewerStyle: data.avatar?.selected ?? '',
     })
   }, [data, form])
 
@@ -539,6 +541,14 @@ function SettingsView(props) {
 
   const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }
 
+  /**
+   * 可用的面试官形象（来自包内 `assets/avatar/<id>/`）。
+   *
+   * **面板不硬编码形象列表**：Host 扫目录给清单，这里只渲染。
+   * 只有一份时不出下拉（见形象区注释）。
+   */
+  const avatarOptions = Array.isArray(data?.avatar?.avatars) ? data.avatar.avatars : []
+
   const actions = children => h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } }, children)
 
   /**
@@ -880,14 +890,35 @@ function SettingsView(props) {
     //
     // **为什么值得一个开关。** 有人就是不喜欢屏幕里有张脸；出问题时这也
     // 是最快的止血开关（关掉 = 舞台上不挂，其他一律不变）。
+    //
+    // **形象下拉只在真有多份时才出现**：包里只有一份形象时摆一个
+    // 单选项下拉是纯噪声（AGENTS §10.0.1）——加一份形象（放目录）它就自己出来。
     section('avatar', '面试官形象', [
       checkbox('interviewerAvatar', '在舞台上显示预置面试官（会跟着提问开口、听你说话时看着你）'),
+      avatarOptions.length > 1
+        ? h('div', { key: 'style', style: grid }, [
+          field('interviewerStyle', '形象', h('select', {
+            key: 's',
+            style: S.input,
+            value: form.interviewerStyle === undefined || form.interviewerStyle === ''
+              ? (data.avatar?.selected ?? avatarOptions[0].id)
+              : form.interviewerStyle,
+            onChange: event => set('interviewerStyle', event.target.value),
+          }, avatarOptions.map(option => h('option', { key: option.id, value: option.id }, option.name)))),
+        ])
+        : null,
       actions([
         h('button', {
           key: 'save',
           style: S.btn('primary', busy === 'avatar'),
           onClick: () => save(
-            { interviewerAvatar: form.interviewerAvatar === true ? 'on' : 'off' },
+            {
+              interviewerAvatar: form.interviewerAvatar === true ? 'on' : 'off',
+              // 只有真出现过下拉才写这个键：否则会用空值覆盖掉已存的形象选择。
+              ...(avatarOptions.length > 1 && form.interviewerStyle !== undefined
+                ? { interviewerStyle: form.interviewerStyle }
+                : {}),
+            },
             'avatar',
           ),
         }, busy === 'avatar' ? '保存中…' : '保存形象设置'),

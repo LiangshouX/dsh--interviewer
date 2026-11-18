@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { InterviewService } from '../src/host/service.js'
 import { registerApi } from '../src/host/api.js'
 import { ASSET_DIR, BUNDLE_DEFAULTS, normalizeSetting, resolveConfig } from '../src/host/paths.js'
+import { AVATAR_DIR, DEFAULT_AVATAR_ID, listAvatars, resolveAvatar } from '../src/host/avatar.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -191,6 +192,48 @@ test('设置项 interviewerAvatar：白名单里有，默认 on，只认 on/off'
 test('发版补丁与 BUNDLE_DEFAULTS 保持一致（漏一处 = 配置写了不生效）', async () => {
   const patch = await readFile(join(ROOT, 'cordis.patch.yml'), 'utf8')
   assert.match(patch, /interviewerAvatar: 'on'/, 'cordis.patch.yml 的 config 块缺 interviewerAvatar')
+  assert.match(patch, /interviewerStyle: ''/, 'cordis.patch.yml 的 config 块缺 interviewerStyle')
+  assert.equal(BUNDLE_DEFAULTS.interviewerStyle, '')
+})
+
+test('形象清单由目录发现：默认那份排第一，每份都真有四样文件', async () => {
+  const avatars = await listAvatars()
+  assert.ok(avatars.length >= 1, '至少要有默认那份形象')
+  assert.equal(avatars[0].id, DEFAULT_AVATAR_ID, '默认形象必须排第一（下拉默认项别随字母序漂）')
+  assert.equal(avatars[0].default, true)
+  assert.ok(avatars[0].name.length > 0, '清单里要有能认出来的名字')
+
+  // 「放一个目录就是一份形象」的前提：清单里的每一份都必须真能跑起来。
+  for (const avatar of avatars) {
+    const dir = join(AVATAR_DIR, avatar.id)
+    const rig = JSON.parse(await readFile(join(dir, 'rig.json'), 'utf8'))
+    assert.equal(rig.eyes.length, 2, `${avatar.id}: 绑定里必须有两颗眼`)
+    assert.ok(rig.mouth.halfLen > 0, `${avatar.id}: 嘴部区域必须可画`)
+    const layers = JSON.parse(await readFile(join(dir, 'built', 'layers.json'), 'utf8'))
+    for (const name of ['eye0_ball', 'eye0_lash', 'eye1_ball', 'eye1_lash']) {
+      assert.ok(layers.layers[name] !== undefined, `${avatar.id}: 缺图层 ${name}`)
+    }
+    const manifest = JSON.parse(await readFile(join(dir, 'avatar.json'), 'utf8'))
+    assert.equal(typeof manifest.lipSync?.openness, 'number', `${avatar.id}: 缺口型参数`)
+  }
+})
+
+test('设置里写了个不存在的形象：拒绝并说明，且不会把舞台搞成没脸', async () => {
+  // 解析层回落：空 / 未知 id 都解析成默认那份。
+  assert.equal((await resolveAvatar('')).selected, DEFAULT_AVATAR_ID)
+  assert.equal((await resolveAvatar('nope')).selected, DEFAULT_AVATAR_ID)
+  assert.equal((await resolveAvatar(DEFAULT_AVATAR_ID)).selected, DEFAULT_AVATAR_ID)
+
+  await withApi(async ({ service }) => {
+    const bad = await service.updateSettings({ interviewerStyle: 'nope' })
+    assert.equal(bad.invalid.some(item => item.key === 'interviewerStyle'), true, '未知 id 必须被拒绝')
+    assert.match(bad.invalid.find(item => item.key === 'interviewerStyle').reason, /nope/)
+
+    const good = await service.updateSettings({ interviewerStyle: DEFAULT_AVATAR_ID })
+    assert.deepEqual(good.invalid, [])
+    const options = await service.avatarOptions()
+    assert.equal(options.selected, DEFAULT_AVATAR_ID)
+  })
 })
 
 test('GET /config 把形象开关带给面板', async () => {
@@ -200,6 +243,10 @@ test('GET /config 把形象开关带给面板', async () => {
     const body = JSON.parse(response.body.toString('utf8'))
     assert.equal(body.ok, true)
     assert.equal(body.data.interviewerAvatar, 'on')
+    // 面板要知道「有哪几份、现在用哪一份」——默认那份是解析过的 id。
+    assert.equal(body.data.interviewerStyle, DEFAULT_AVATAR_ID)
+    assert.ok(Array.isArray(body.data.interviewerAvatars))
+    assert.equal(body.data.interviewerAvatars[0].id, DEFAULT_AVATAR_ID)
     // 关掉之后要如实回报（面板据此不挂形象）。
     await service.updateSettings({ interviewerAvatar: 'off' })
     const next = await get('/interviewer/api/config')
@@ -229,5 +276,10 @@ test('口型链路的三条硬约束在 bundle 里（错了不报错，只是「
   // 7. 形象挂在舞台上，且开关通到了视图。
   assert.match(client, /AvatarPiP/, '视图没有挂形象')
   assert.match(client, /interviewerAvatar !== 'off'/, '开关没有接到视图')
+  // 8. 挂的是**设置里选的那一份**，且读不到时回落默认那份（不是空脸）。
+  assert.match(client, /avatarBaseUrl\(avatarId\)/, '形象地址没有按 id 拼')
+  assert.match(client, /AVATAR_DEFAULT_ID/, '没有默认形象的兜底 id')
+  assert.match(client, /loadAvatarFiles\(AVATAR_DEFAULT_ID\)/, '选中的形象读不到时没有回落默认')
+  assert.match(client, /avatarId: config\?\.interviewerStyle/, '视图没有把选中的形象传下去')
 })
 
