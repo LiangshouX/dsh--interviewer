@@ -142,11 +142,14 @@ test('voiceclone 缺参考音频时明说，不静默换成别的模型', async 
 
 test('从已有配置反推用户想用哪家', () => {
   assert.equal(providerHint({ ttsBaseUrl: 'https://api.xiaomimimo.com/v1' }), 'mimo')
+  assert.equal(providerHint({ ttsBaseUrl: 'https://token-plan-cn.xiaomimimo.com/v1' }), 'mimo-token-plan')
   assert.equal(providerHint({ ttsModel: 'mimo-v2.5-tts' }), 'mimo')
-  assert.equal(providerHint({ ttsApiKeyEnv: 'MINIMAX_API_KEY' }), 'minimax')
+  assert.equal(providerHint({ ttsApiKeyEnv: 'MINIMAX_API_KEY' }), 'minimax-cn')
+  assert.equal(providerHint({ ttsApiKeyEnv: 'M_PLAN_API_KEY' }), 'minimax-token-plan')
+  assert.equal(providerHint({ ttsApiKeyEnv: 'QIANWEN_TOKEN_PLAN_API_KEY' }), 'dashscope-token-plan')
   assert.equal(providerHint({ ttsBaseUrl: 'https://gateway.example/v1' }), 'openai')
   assert.equal(providerHint({}), '')
-  assert.deepEqual(pickAutoOrder({ ttsModel: 'mimo-v2.5-tts' }).slice(0, 2), ['mimo', 'openai'])
+  assert.deepEqual(pickAutoOrder({ ttsModel: 'mimo-v2.5-tts' }).slice(0, 2), ['mimo', 'dashscope-token-plan'])
 })
 
 test('参考音频只认 mp3/wav，路径不存在时给出可读原因', async () => {
@@ -397,7 +400,7 @@ test('profile 读不到时只用候选名，不抛', async () => {
 
 // ── 预设表：设置页的唯一真源 ─────────────────────────────────────────────
 
-test('预设表带 notes/keyless；MiniMax 有国内站与大陆站；DashScope 走 WebSocket 而非 HTTP 中转', () => {
+test('预设表带 notes/keyless；顺序是「预设供应商 → OpenAI 兼容 → 免密钥」', () => {
   const presets = voicePresets()
   const tts = presets.filter(preset => preset.kind === 'tts')
   const asr = presets.filter(preset => preset.kind === 'asr')
@@ -405,23 +408,56 @@ test('预设表带 notes/keyless；MiniMax 有国内站与大陆站；DashScope 
     assert.equal(typeof preset.notes, 'string')
     assert.equal(typeof preset.keyless, 'boolean')
     assert.equal(typeof preset.id, 'string')
+    assert.equal(typeof preset.group, 'string')
   }
   const ttsIds = tts.map(preset => preset.id)
-  assert.ok(ttsIds.includes('mimo'))
-  assert.ok(ttsIds.includes('minimax'))
-  assert.ok(ttsIds.includes('minimax-cn'))
-  assert.ok(ttsIds.includes('baidu') && ttsIds.includes('edge'))
-  // Qwen/CosyVoice 非实时合成走 api-ws WebSocket（不是 compatible-mode HTTP 中转），应当提供。
-  assert.ok(ttsIds.includes('dashscope'), 'DashScope tts_v2 WebSocket 通道可用，别把它和 HTTP 中转混为一谈')
+  // 顺序是产品顺序：控制 → 预设供应商（Qwen/MiMo/MiniMax × Token Plan/直连）
+  // → 任意 OpenAI 兼容 → 免密钥 → 关闭。
+  assert.deepEqual(ttsIds, [
+    'auto', 'host',
+    'dashscope-token-plan', 'dashscope',
+    'mimo-token-plan', 'mimo',
+    'minimax-token-plan', 'minimax-cn',
+    'openai',
+    'baidu', 'edge', 'browser',
+    'none',
+  ])
+  // Qwen/CosyVoice 非实时合成走 api-ws WebSocket（不是 compatible-mode HTTP 中转）。
   const dashscope = tts.find(preset => preset.id === 'dashscope')
   assert.equal(dashscope.protocol, 'dashscope')
-  assert.match(dashscope.baseUrl, /^wss:\/\/.+\/api-ws\/v1\/inference$/)
+  assert.match(dashscope.baseUrl, /^wss:\/\/dashscope\.aliyuncs\.com\/api-ws\/v1\/inference$/)
   assert.equal(dashscope.keyless, false)
+  assert.equal(dashscope.locked, true)
   assert.ok(voicesFor(dashscope.model).voices.some(v => v.id === dashscope.voice), '预设默认音色必须对默认模型合法（否则开箱即撞 411）')
-  assert.ok(tts.find(preset => preset.id === 'minimax-cn').baseUrl.includes('api.minimax.cn'))
+  assert.equal(tts.find(preset => preset.id === 'minimax-cn').baseUrl, 'https://api.minimax.cn')
+  // Token Plan 与直连是两条不同的链路：端点/凭据名必须成对，不许混。
+  assert.notEqual(tts.find(preset => preset.id === 'dashscope-token-plan').apiKeyEnv, dashscope.apiKeyEnv)
+  assert.match(tts.find(preset => preset.id === 'dashscope-token-plan').baseUrl, /token-plan\.maas\.qianwenaiapi\.com/)
+  assert.match(tts.find(preset => preset.id === 'mimo-token-plan').baseUrl, /^https:\/\/token-plan-cn\.xiaomimimo\.com\/v1$/)
+  assert.equal(tts.find(preset => preset.id === 'mimo').apiKeyEnv, 'MIMO_API_KEY')
+  assert.equal(tts.find(preset => preset.id === 'minimax-token-plan').apiKeyEnv, 'M_PLAN_API_KEY')
+
   const asrIds = asr.map(preset => preset.id)
+  for (const id of ['qwen-token-plan', 'qwen', 'mimo-token-plan', 'mimo', 'minimax-token-plan', 'minimax-cn']) {
+    assert.ok(asrIds.includes(id), `缺少 ASR 预设 ${id}`)
+  }
   assert.ok(asrIds.includes('openai') && asrIds.includes('openai-custom'))
   assert.ok(asr.find(preset => preset.id === 'openai').baseUrl.endsWith('/v1'))
+  // 顺序：vendor 全部在 compatible 之前，compatible 在 free 之前
+  //（控制项 auto/host 在头部、none 在尾部，不参与这段排序）。
+  const rank = preset => ['control', 'vendor', 'compatible', 'free'].indexOf(preset.group)
+  let previous = -1
+  for (const preset of asr.filter(item => item.id !== 'auto' && item.id !== 'host' && item.id !== 'none')) {
+    assert.ok(rank(preset) >= previous, `ASR 预设顺序错乱：${preset.id}`)
+    previous = rank(preset)
+  }
+  assert.equal(asr[0].id, 'auto')
+  assert.equal(asr[1].id, 'host')
+  assert.equal(asr[asr.length - 1].id, 'none')
+  // Qwen ASR 走 DashScope 原生端点，不是 /audio/transcriptions；MiMo 走 chat/completions。
+  assert.equal(asr.find(preset => preset.id === 'qwen-token-plan').protocol, 'dashscope-asr')
+  assert.equal(asr.find(preset => preset.id === 'mimo').protocol, 'chat-audio')
+  assert.equal(asr.find(preset => preset.id === 'openai').protocol, 'openai')
 })
 
 test('MiniMax 的业务错误码与 status_msg 原样带回（2056 = 用量上限）', async () => {
@@ -633,11 +669,12 @@ test('DashScope 端点必须是 wss：填成 HTTP /audio/speech 会被拦下并�
   assert.match(result.reason, /WebSocket|wss/)
 })
 
-test('auto 反推：wss 端点 / qwen-audio 模型 / 千问凭据名都指向 dashscope', () => {
+test('auto 反推：wss 端点 / qwen-audio 模型 / 千问凭据名都指向 Qwen 的对应预设', () => {
   assert.equal(providerHint({ ttsBaseUrl: 'wss://cn-beijing.maas.qianwenaiapi.com/api-ws/v1/inference' }), 'dashscope')
   assert.equal(providerHint({ ttsModel: 'qwen-audio-3.0-tts-flash' }), 'dashscope')
   assert.equal(providerHint({ ttsModel: 'cosyvoice-v3-flash' }), 'dashscope')
-  assert.equal(providerHint({ ttsApiKeyEnv: 'QIANWEN_TOKEN_PLAN_API_KEY' }), 'dashscope')
+  assert.equal(providerHint({ ttsApiKeyEnv: 'QIANWEN_TOKEN_PLAN_API_KEY' }), 'dashscope-token-plan')
+  assert.equal(providerHint({ ttsBaseUrl: 'wss://token-plan.maas.qianwenaiapi.com/api-ws/v1/inference' }), 'dashscope-token-plan')
 })
 
 // ── 模型 → 音色对照表 ──────────────────────────────────────────────────────
@@ -650,9 +687,12 @@ test('音色表按模型精确匹配；未知模型回落服务商级；都没�
   const byProvider = voicesFor('some-unknown-model', 'openai')
   assert.equal(byProvider.scope, 'provider')
   assert.ok(byProvider.voices.some(v => v.id === 'alloy'))
-  const none = voicesFor('totally-unknown', 'minimax')
+  const none = voicesFor('totally-unknown', 'nope')
   assert.equal(none.known, false)
   assert.deepEqual(none.voices, [])
+  // MiMo / MiniMax 的音色是厂商级：模型不在表里也要给出合法的那一组。
+  assert.ok(voicesFor('mimo-v2.5-tts', 'mimo').voices.some(v => v.id === 'mimo_default'))
+  assert.ok(voicesFor('speech-02-hd', 'minimax').voices.some(v => v.id === 'female-shaonv'))
   assert.equal(defaultVoiceForModel('qwen-audio-3.0-tts-flash'), 'longanfengyue')
   assert.equal(defaultVoiceForModel('nope'), '')
   assert.ok(voiceTable().models['qwen-audio-3.0-tts-flash'].length >= 12)

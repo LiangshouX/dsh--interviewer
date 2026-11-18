@@ -173,6 +173,31 @@ export function registerTools(ctx, service) {
       },
     ),
     tool(
+      'interview_continue_session',
+      '续接一场**已经结束**的面试：状态回 running，中断的那段时间记进 pausedMs（不算面试时长），转录与清单原样保留，并派活让助手接着中断处继续问。与「暂停后继续」不同：这里是 done → running，不重开一轮。',
+      {
+        sessionId: sessionProperty,
+      },
+      async args => {
+        const sessionId = await resolveSession(service, args.sessionId)
+        const session = await service.continueSession(sessionId)
+        return { sessionId, status: session.status, pausedMs: session.pausedMs }
+      },
+    ),
+    tool(
+      'interview_reset_session',
+      '重置一场面试的记录：清掉转录、报告、计时与暂停账本、清单上的「问过」标记与调整记录、等助手的任务记录，并把助手会话解绑（旧对话仍留在 DSH 里）；**保留简历、JD、考点清单本身与元信息**。用于清理误触开始面试留下的脏片段。录音录像默认保留，dropRecordings=true 才删。',
+      {
+        sessionId: sessionProperty,
+        dropRecordings: { type: 'boolean', description: '连录音录像一起删（默认 false：文件不可恢复，先留着）。' },
+      },
+      async args => {
+        const sessionId = await resolveSession(service, args.sessionId)
+        const result = await service.resetSession(sessionId, { dropRecordings: args.dropRecordings === true })
+        return { sessionId, cleared: result.cleared, kept: result.kept, status: result.session.status }
+      },
+    ),
+    tool(
       'interview_prepare',
       '开一场模拟面试：落盘简历与 JD，建好会话。给 sessionId 时**不会新建**，只更新这一场：标题 / 公司 / 岗位（显式写入，插件不从 JD 里猜）与简历、JD。给 jdUrl 时会先尝试抓取该链接（抓不到会如实说，并让你改用粘贴文本兜底）。',
       {

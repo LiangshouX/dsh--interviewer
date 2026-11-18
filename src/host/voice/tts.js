@@ -21,7 +21,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { resolveSecret } from './credentials.js'
 import { hostService } from './host.js'
-import { TTS_AUTO_ORDER, TTS_PROVIDERS } from './presets.js'
+import { TTS_AUTO_ORDER, TTS_PROVIDERS, normalizeProviderId, protocolLabel } from './presets.js'
 import { defaultVoiceForModel } from './voices.js'
 import { redactSecret } from './redact.js'
 import { synthesizeWithBaidu } from './tts/baidu.js'
@@ -68,7 +68,9 @@ const AUTO_ORDER = TTS_AUTO_ORDER
  */
 export async function resolveTts(service) {
   const config = await voiceConfigOf(service)
-  const explicit = typeof config.ttsProvider === 'string' ? config.ttsProvider.trim().toLowerCase() : 'auto'
+  const explicitRaw = typeof config.ttsProvider === 'string' ? config.ttsProvider.trim().toLowerCase() : 'auto'
+  // 旧 id（`minimax`）在解析层归一，面板与配置文件都能连上同一条链路。
+  const explicit = normalizeProviderId('tts', explicitRaw)
   const format = config.ttsFormat === 'wav' ? 'wav' : 'mp3'
   const rate = typeof config.ttsRate === 'number' ? config.ttsRate : 1
 
@@ -96,7 +98,7 @@ export async function resolveTts(service) {
     }
   }
 
-  const candidates = explicit === 'auto'
+  const candidates = explicit === 'auto' || PRESETS[explicit] === undefined
     ? pickAutoOrder(config)
     : (explicit === 'host' ? [] : [explicit])
 
@@ -259,11 +261,16 @@ export function providerHint(config) {
   const base = typeof config.ttsBaseUrl === 'string' ? config.ttsBaseUrl.toLowerCase() : ''
   const model = typeof config.ttsModel === 'string' ? config.ttsModel.toLowerCase() : ''
   const env = typeof config.ttsApiKeyEnv === 'string' ? config.ttsApiKeyEnv.toUpperCase() : ''
+  // Token Plan 主机与官方主机是两个世界，先认主机再认模型/凭据名。
+  if (base.includes('token-plan-cn.xiaomimimo') || env === 'XIAOMI_TOKEN_PLAN_CN_API_KEY') return 'mimo-token-plan'
   if (base.includes('xiaomimimo') || model.startsWith('mimo-') || env === 'MIMO_API_KEY') return 'mimo'
-  if (base.includes('minimax') || base.includes('minimaxi') || env === 'MINIMAX_API_KEY') return 'minimax'
+  if (env === 'M_PLAN_API_KEY' || env === 'MINIMAX_M_PLAN_API_KEY') return 'minimax-token-plan'
+  if (base.includes('minimax') || base.includes('minimaxi') || env === 'MINIMAX_API_KEY') return 'minimax-cn'
+  if (base.includes('token-plan.maas.qianwenaiapi')
+    || env === 'QIANWEN_TOKEN_PLAN_API_KEY' || env === 'QWEN_TOKEN_PLAN_API_KEY') return 'dashscope-token-plan'
   if (base.includes('dashscope') || base.includes('maas.qianwenaiapi') || base.startsWith('wss://')
     || model.startsWith('qwen-audio') || model.startsWith('cosyvoice')
-    || env === 'DASHSCOPE_API_KEY' || env === 'QIANWEN_TOKEN_PLAN_API_KEY' || env === 'QWEN_TOKEN_PLAN_API_KEY') return 'dashscope'
+    || env === 'DASHSCOPE_API_KEY') return 'dashscope'
   if (env === 'OPENAI_API_KEY') return 'openai'
   if (model !== '' || base !== '') {
     // 有自定义端点或模型但没有厂商标识：按 OpenAI 兼容协议理解（最通行的形状）。
@@ -289,12 +296,25 @@ async function describeCandidate(service, name, config, options) {
     if (remembered !== '') return { ok: false, reason: `最近失败过（${remembered}），十分钟内不再尝试` }
   }
 
-  const baseUrl = typeof config.ttsBaseUrl === 'string' && config.ttsBaseUrl.trim() !== ''
-    ? config.ttsBaseUrl.trim()
-    : (preset.baseUrl ?? '')
-  const model = typeof config.ttsModel === 'string' && config.ttsModel.trim() !== ''
+  // **预设供应商 = 配好的一对。** 端点锁死（Token Plan 与官方主机认不同的 key），
+  // 模型只能从这一家声明的清单里选；要自由填端点/模型就选「OpenAI 兼容」。
+  const locked = preset.locked === true
+  const baseUrl = locked
+    ? (preset.baseUrl ?? '')
+    : (typeof config.ttsBaseUrl === 'string' && config.ttsBaseUrl.trim() !== ''
+      ? config.ttsBaseUrl.trim()
+      : (preset.baseUrl ?? ''))
+  const configuredModel = typeof config.ttsModel === 'string' && config.ttsModel.trim() !== ''
     ? config.ttsModel.trim()
-    : (preset.model ?? '')
+    : ''
+  const allowedModels = Array.isArray(preset.models) && preset.models.length > 0
+    ? preset.models.map(item => item.id)
+    : []
+  const model = locked
+    ? (allowedModels.length > 0
+      ? (allowedModels.includes(configuredModel) ? configuredModel : (preset.model ?? allowedModels[0]))
+      : (preset.model ?? ''))
+    : (configuredModel !== '' ? configuredModel : (preset.model ?? ''))
   const configuredVoice = typeof config.ttsVoice === 'string' && config.ttsVoice.trim() !== '' ? config.ttsVoice.trim() : ''
   let voice = configuredVoice !== '' ? configuredVoice : (preset.voice ?? '')
   // DashScope 音色按模型走：用户没填时取**当前模型**的默认音色，而不是预设音色——
@@ -334,6 +354,7 @@ async function describeCandidate(service, name, config, options) {
       source,
       provider: name,
       protocol: preset.protocol,
+      protocolLabel: protocolLabel(preset.protocol),
       label: preset.label,
       baseUrl,
       model,
@@ -346,7 +367,7 @@ async function describeCandidate(service, name, config, options) {
       ...(referenceAudioDataUri === undefined ? {} : { referenceAudioDataUri }),
       reason: source === 'preset'
         ? `使用${preset.label}（免密钥）。`
-        : `使用${preset.label}（凭据来自${source === 'host' ? '宿主' : source === 'config' ? '插件配置' : '环境变量'}）。`,
+        : `使用 ${preset.label}；凭据来自${source === 'host' ? '宿主' : source === 'config' ? '插件配置' : '环境变量'}。`,
     },
   }
 }

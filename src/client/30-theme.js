@@ -177,19 +177,27 @@
         '--iv-edge': 'inset 0 1px 0 var(--iv-hi), inset 0 -1px 0 var(--iv-lo)',
         // 四级 elevation：contact（接触影）+ seam（外缝）+ ambient（环境影）。
         // 影是**蓝黑**的（rgba(2,4,9)）：真实场景里影由天光补色，纯黑影会显得像脏。
-        '--iv-elev-1': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.025), inset 0 -1px 0 rgba(2,4,9,0.45), inset 0 -16px 24px -20px rgba(2,4,9,0.75), 0 1px 2px rgba(2,4,9,0.62), 0 0 0 1px rgba(2,4,9,0.50), 0 20px 42px -20px rgba(2,4,9,0.92)',
-        '--iv-elev-2': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.48), inset 0 -16px 24px -20px rgba(2,4,9,0.78), 0 1px 3px rgba(2,4,9,0.68), 0 0 0 1px rgba(2,4,9,0.52), 0 30px 60px -22px rgba(2,4,9,0.96)',
-        '--iv-elev-3': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.50), 0 2px 6px rgba(2,4,9,0.70), 0 0 0 1px rgba(2,4,9,0.55), 0 48px 96px -30px rgba(2,4,9,1)',
-        '--iv-elev-4': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.75), 0 0 0 1px rgba(2,4,9,0.60), 0 70px 130px -40px #000',
+        //
+        // **暗色下环境影要收着。** 页面底本身就是近黑（#04060A→#06080D），
+        // 再叠一层 alpha≈1 的黑影，卡片下方那片区域会从「有层次」变成
+        // 「一块糊住内容的黑」（底部的按钮与速记字被压得几乎看不见）。
+        // 现在：接触影与外缝照旧，环境影的 alpha 收到 0.5–0.8、半径缩一档——
+        // 四级**仍然分得开**（alpha 递增 + 半径递增），但不再吃掉内容。
+        '--iv-elev-1': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.025), inset 0 -1px 0 rgba(2,4,9,0.45), inset 0 -16px 24px -20px rgba(2,4,9,0.75), 0 1px 2px rgba(2,4,9,0.62), 0 0 0 1px rgba(2,4,9,0.50), 0 16px 34px -20px rgba(2,4,9,0.55)',
+        '--iv-elev-2': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.48), inset 0 -16px 24px -20px rgba(2,4,9,0.78), 0 1px 3px rgba(2,4,9,0.68), 0 0 0 1px rgba(2,4,9,0.52), 0 24px 48px -22px rgba(2,4,9,0.66)',
+        '--iv-elev-3': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.50), 0 2px 6px rgba(2,4,9,0.70), 0 0 0 1px rgba(2,4,9,0.55), 0 36px 72px -30px rgba(2,4,9,0.74)',
+        '--iv-elev-4': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.75), 0 0 0 1px rgba(2,4,9,0.60), 0 52px 96px -40px rgba(2,4,9,0.82)',
         // 舞台专用：比 elev-4 收一点——它下面还压着回答框，影太散会把下一条盖住。
-        '--iv-elev-stage': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.72), 0 0 0 1px rgba(2,4,9,0.58), 0 44px 84px -34px rgba(2,4,9,0.95)',
+        '--iv-elev-stage': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.72), 0 0 0 1px rgba(2,4,9,0.58), 0 32px 62px -34px rgba(2,4,9,0.60)',
         // 主按钮：**一块被按在台面上的骨白键**。上亮下暗才是实体。
         '--iv-primary-top': '#F4F6F9',
         '--iv-primary-bottom': '#D2D7DE',
         '--iv-primary-text': '#080A0D',
         '--iv-primary-shadow': 'inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(0,0,0,0.22), 0 1px 2px rgba(0,0,0,0.55), 0 10px 22px -14px rgba(0,0,0,0.85)',
         '--iv-glass': 'rgba(7,9,13,0.72)',
-        '--iv-vignette': 'radial-gradient(125% 92% at 50% 4%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.42) 82%, rgba(0,0,0,0.62) 100%)',
+        // 暗角：只收四角一点点光。**不许收到底部发暗**——页面底部压着
+        // 回答框与速记，暗角一重，那些字就读不出来了（见 elevation 的注释）。
+        '--iv-vignette': 'radial-gradient(132% 96% at 50% 2%, rgba(0,0,0,0) 46%, rgba(0,0,0,0.20) 84%, rgba(0,0,0,0.32) 100%)',
         '--iv-rule': 'rgba(255,255,255,0.115)',
         '--iv-rule-soft': 'rgba(255,255,255,0.06)',
         '--iv-bone': '#EBEDF0',
@@ -813,6 +821,9 @@
         background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
         animation: ivShimmer 1.6s linear infinite;
       }
+      /* 等助手返回：一圈很淡的旋转环。只在真有等待时出现，**不是装饰**。 */
+      @keyframes ivSpin { to { transform: rotate(360deg); } }
+      [data-iv-page] .iv-spin { animation: ivSpin 1.1s linear infinite; }
       @media (prefers-reduced-motion: reduce) {
         [data-iv-page] *, [data-iv-page] *::before, [data-iv-page] *::after {
           animation-duration: 0.001ms !important; transition-duration: 0.001ms !important;

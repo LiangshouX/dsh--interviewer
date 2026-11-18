@@ -369,15 +369,17 @@ function SettingsView(props) {
   // 音色下拉的真源来自 Host（设置快照里的 data.voices = 模型→音色对照表）。
   // 按当前模型精确查；模型不在表里退到服务商级；都没有 → 文本输入（自定义/克隆音色的出路）。
   const voiceTableData = data.voices ?? { models: {}, providers: {} }
-  const lookupVoices = (modelId, providerId) => {
+  const lookupVoices = (modelId, vendorId) => {
     const byModel = voiceTableData.models?.[String(modelId ?? '').trim()]
     if (Array.isArray(byModel) && byModel.length > 0) return byModel
-    const byProvider = voiceTableData.providers?.[String(providerId ?? '').trim()]
+    const byProvider = voiceTableData.providers?.[String(vendorId ?? '').trim()]
     if (Array.isArray(byProvider) && byProvider.length > 0) return byProvider
     return []
   }
+  // 音色表按**厂商**建（mimo/minimax 的音色是厂商级、跨模型通用），
+  // 不是按预设 id——Token Plan 与直连共享同一组音色。
   const currentTtsModel = form.ttsModel !== '' ? form.ttsModel : (effective.ttsModel || ttsPreset?.model || '')
-  const ttsVoiceOptions = lookupVoices(currentTtsModel, form.ttsProvider)
+  const ttsVoiceOptions = lookupVoices(currentTtsModel, ttsPreset?.vendor ?? form.ttsProvider)
   const voiceControl = () => {
     if (ttsVoiceOptions.length === 0) {
       return input('ttsVoice', effective.ttsVoice || ttsPreset?.voice || '留空用默认音色')
@@ -393,18 +395,38 @@ function SettingsView(props) {
   }
 
   /**
-   * 服务下拉：选项全部来自预设表。
+   * 服务下拉：选项全部来自预设表，按 Host 给的分组标题分段。
    *
    * **换服务要清掉旧服务的覆盖值。** 上一版把 provider 与 baseUrl/model 分开存：
    * 从 MiMo 切到 MiniMax 时，上一家的端点覆盖还在，于是"选了 A 却打 B 的端点"。
    * 换服务 = 从这一家的默认值重新开始；要自定义就在新服务上再填。
+   *
+   * 分组标题是 `disabled` 的 option——原生 `<select>` 里这就是分隔条，
+   * 不额外造一层自定义下拉（窄面板里自定义下拉更难用）。
    */
   const presetSelect = (key, presets, resetKeys) => {
     const current = String(form[key] ?? '')
     const options = presets.length > 0
-      ? presets.map(preset => ({ id: preset.id, label: preset.label, title: preset.notes }))
-      : [{ id: current === '' ? 'auto' : current, label: current === '' ? '默认' : current, title: '' }]
+      ? presets.map(preset => ({
+        id: preset.id,
+        label: preset.label,
+        title: preset.notes,
+        group: preset.group,
+        groupLabel: preset.groupLabel,
+      }))
+      : [{ id: current === '' ? 'auto' : current, label: current === '' ? '默认' : current, title: '', group: 'control', groupLabel: '' }]
     const hasCurrent = options.some(option => option.id === current)
+    const nodes = []
+    let lastGroup = undefined
+    for (const option of options) {
+      // 分组标题只在 Host 真的给了标题时画；老快照/测试数据没有这个字段就退化成平铺列表。
+      if (typeof option.groupLabel === 'string' && option.groupLabel !== '' && option.group !== lastGroup) {
+        nodes.push(h('option', { key: `__group_${option.group}`, disabled: true }, `── ${option.groupLabel} ──`))
+      }
+      lastGroup = option.group
+      nodes.push(h('option', { key: option.id, value: option.id, title: option.title }, option.label))
+    }
+    if (!hasCurrent) nodes.push(h('option', { key: '__current', value: current }, current))
     return h('select', {
       key: 's',
       style: S.input,
@@ -419,11 +441,19 @@ function SettingsView(props) {
         // 换了服务之后，旧的"替换密钥"目标就不对了——直接收起。
         setSecretEdit(undefined)
       },
-    }, [
-      ...options.map(option => h('option', { key: option.id, value: option.id, title: option.title }, option.label)),
-      hasCurrent ? null : h('option', { key: '__current', value: current }, current),
-    ].filter(option => option !== null))
+    }, nodes)
   }
+
+  /** 只读值：预设供应商的端点/模型是固定的，展示但不给改。 */
+  const readonly = (key, value) => h('div', {
+    key,
+    title: value,
+    style: {
+      ...S.input,
+      display: 'flex', alignItems: 'center',
+      color: C.boneDim, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+    },
+  }, value)
 
   const checkbox = (key, label) => h('label', {
     key,
@@ -604,13 +634,13 @@ function SettingsView(props) {
     ? undefined
     : asr.mode === 'none'
       ? '识别已关闭；需要时把服务改回「自动」。'
-      : '现在走浏览器识别；要自己的模型就选「服务端 · OpenAI 兼容」，填一个 /audio/transcriptions 端点并配凭据。识别不通时用键盘输入，面试照常进行。'
+      : '现在走浏览器识别；要自己的模型就选一个预设供应商（Qwen / MiMo / MiniMax，Token Plan 与直连二选一）并配好它对应的凭据。识别不通时用键盘输入，面试照常进行。'
 
   const ttsQuiet = tts.mode === 'server'
     ? undefined
     : tts.mode === 'none'
       ? '播报已关闭；问题只以文字显示。'
-      : '现在会用浏览器系统音色；要模型音色就选一个服务并配凭据，也可以用免密钥的百度朗读。'
+      : '现在会用浏览器系统音色；要模型音色就选一个预设供应商并配凭据，也可以用免密钥的百度朗读。'
 
   // 「现在用」只放**认得出是哪条链路**的最短一组词：
   // 服务 → 协议 → 模型。端点已经在下面那一格填着了，再抄一遍是把一行撑成三段。
@@ -619,7 +649,7 @@ function SettingsView(props) {
   const asrSummary = asr.mode === 'host'
     ? joinParts(['宿主语音服务', asr.host?.provider?.name])
     : asr.mode === 'server'
-      ? joinParts(['服务端', asr.server?.protocol, asr.server?.model])
+      ? joinParts([asr.server?.label ?? '服务端', asr.server?.protocolLabel ?? asr.server?.protocol, asr.server?.model])
       : asr.mode === 'none'
         ? '已关闭'
         : '浏览器 Web Speech'
@@ -635,6 +665,33 @@ function SettingsView(props) {
   const asrNeedsGroupId = (asrPreset?.protocol ?? '') === 'minimax'
   const ttsNeedsGroupId = (ttsPreset?.protocol ?? '') === 'minimax'
   const ttsNeedsStyle = (ttsPreset?.protocol ?? '') === 'chat-audio'
+  // 预设供应商 = 端点/协议/凭据名/模型已经配好的一对，只读；要自定义端点选
+  // 「OpenAI 兼容 · 自定义端点」。
+  const asrLocked = asrPreset?.locked === true
+  const ttsLocked = ttsPreset?.locked === true
+  const ttsModels = Array.isArray(ttsPreset?.models) ? ttsPreset.models : []
+  const ttsModelControl = () => {
+    if (!ttsLocked || ttsModels.length === 0) {
+      return h('input', {
+        key: 'i',
+        style: S.input,
+        value: form.ttsModel,
+        placeholder: effective.ttsModel || ttsPreset?.model || '留空用该服务默认',
+        // 换模型 = 换一组合法音色：把音色重置为默认，避免拿旧模型的音色去撞 411。
+        onChange: event => { const value = event.target.value; setForm(previous => ({ ...previous, ttsModel: value, ttsVoice: '' })) },
+      })
+    }
+    const chosen = ttsModels.some(item => item.id === form.ttsModel) ? form.ttsModel : ''
+    return h('select', {
+      key: 's',
+      style: S.input,
+      value: chosen,
+      onChange: event => { const value = event.target.value; setForm(previous => ({ ...previous, ttsModel: value, ttsVoice: '' })) },
+    }, [
+      h('option', { key: '__def', value: '' }, `默认 · ${ttsPreset?.model ?? ttsModels[0].id}`),
+      ...ttsModels.map(item => h('option', { key: item.id, value: item.id }, item.label || item.id)),
+    ])
+  }
 
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, [
     section('appearance', '外观', [themeRow()]),
@@ -643,8 +700,12 @@ function SettingsView(props) {
       nowRow('now', '现在用', asrSummary, asr.reason),
       h('div', { key: 'g', style: grid }, [
         field('asrProvider', '服务', presetSelect('asrProvider', asrPresets, ['asrBaseUrl', 'asrModel', 'asrGroupId', 'asrApiKeyEnv'])),
-        field('asrBaseUrl', '端点', input('asrBaseUrl', effective.asrBaseUrl || asrPreset?.baseUrl || '留空用该服务默认')),
-        field('asrModel', '模型', input('asrModel', effective.asrModel || asrPreset?.model || '留空用该服务默认')),
+        asrLocked
+          ? field('asrFixed', '端点 · 模型', readonly('fixed', `${asrPreset?.baseUrl ?? ''} · ${asrPreset?.model ?? ''}`))
+          : field('asrBaseUrl', '端点', input('asrBaseUrl', effective.asrBaseUrl || asrPreset?.baseUrl || '留空用该服务默认')),
+        asrLocked
+          ? null
+          : field('asrModel', '模型', input('asrModel', effective.asrModel || asrPreset?.model || '留空用该服务默认')),
         field('asrLanguage', '语言', input('asrLanguage', effective.asrLanguage || 'zh')),
         // Group ID 只有 MiniMax 的两套协议用得着。**别的服务上不显示这一格**——
         // 一个永远空着的字段，用户会以为必须填，或者以为坏了。
@@ -680,15 +741,10 @@ function SettingsView(props) {
       nowRow('now', '现在用', ttsSummary, tts.reason),
       h('div', { key: 'g', style: grid }, [
         field('ttsProvider', '服务', presetSelect('ttsProvider', ttsPresets, ['ttsBaseUrl', 'ttsModel', 'ttsVoice', 'ttsGroupId', 'ttsApiKeyEnv'])),
-        field('ttsBaseUrl', '端点', input('ttsBaseUrl', effective.ttsBaseUrl || ttsPreset?.baseUrl || '留空用该服务默认')),
-        field('ttsModel', '模型', h('input', {
-          key: 'i',
-          style: S.input,
-          value: form.ttsModel,
-          placeholder: effective.ttsModel || ttsPreset?.model || '留空用该服务默认',
-          // 换模型 = 换一组合法音色：把音色重置为默认，避免拿旧模型的音色去撞 411。
-          onChange: event => { const value = event.target.value; setForm(previous => ({ ...previous, ttsModel: value, ttsVoice: '' })) },
-        })),
+        ttsLocked
+          ? field('ttsFixed', '端点（固定）', readonly('fixed', ttsPreset?.baseUrl ?? ''))
+          : field('ttsBaseUrl', '端点', input('ttsBaseUrl', effective.ttsBaseUrl || ttsPreset?.baseUrl || '留空用该服务默认')),
+        field('ttsModel', '模型', ttsModelControl()),
         field('ttsVoice', '音色', voiceControl()),
         field('ttsFormat', '音频格式', h('select', {
           key: 's',

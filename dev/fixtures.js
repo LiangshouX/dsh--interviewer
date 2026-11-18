@@ -83,11 +83,14 @@
     meta: {},
   }))
 
+  const presetAll = typeof window !== 'undefined' ? window.__PRESET__ : undefined
+  const presetStatus = presetAll === undefined || presetAll === null ? undefined : presetAll.status
   const session = {
     id: 'iv-20261116-a3f1',
     title: '字节 · 高级后端工程师',
     role: 'candidate',
-    status: 'running',
+    // 预设可以改状态（`status: 'done'` 用来截「续接板」，`paused` 截暂停板）。
+    status: typeof presetStatus === 'string' ? presetStatus : 'running',
     // 左栏按公司分组：没有这两项，截图里所有场次都会掉进「未整理」，
     // 分组、折叠、行内岗位名三件事就全看不见了。
     company: '字节跳动',
@@ -98,6 +101,16 @@
     updatedAt: now,
     profileId: 'pf-2026111-a2c9',
     dir: 'D:\\DSH-REALTIME-INTERVIEW-ROOT\\workspaces\\iv-20261116-a3f1',
+    // 助手会话：拉 JD / 出底稿 / 开场 / 写报告共用的那个宿主对话（AGENTS §6.14）。
+    agentSessionId: 'sess_7f3a91c2',
+    agent: {
+      sessionId: 'sess_7f3a91c2',
+      createdAt: now - 5400000,
+      workspaceId: 'ws-20261116-b7d2',
+      rebuilds: 0,
+      dispatches: [{ at: now - 120000, kind: 'checklist', requestId: 'checklist-demo', explicit: false }],
+      lastDispatchAt: now - 120000,
+    },
   }
 
   const state = {
@@ -119,6 +132,25 @@
       { name: 'audio-2026-11-16T03-14-02.webm', kind: 'audio', bytes: 1048576, modifiedAt: now - 60000, path: 'y' },
     ],
     report: '',
+    // 等助手返回的任务：截图用 `tasks: 'drafting' | 'report-failed'` 演出来。
+    // 真代码里这是 Host 根据派发记录 + 宿主会话状态算的，不是客户端自己编的。
+    agentTasks: (() => {
+      const preset = typeof window !== 'undefined' ? window.__PRESET__ : undefined
+      const kind = preset === undefined || preset === null ? undefined : preset.tasks
+      if (kind === 'drafting') {
+        return { checklist: { kind: 'checklist', status: 'waiting', at: now - 4000, requestId: 'checklist-demo' } }
+      }
+      if (kind === 'report-failed') {
+        return {
+          report: {
+            kind: 'report', status: 'failed', at: now - 70000, requestId: 'report-demo',
+            reason: '助手这一轮结束了，但没有写回报告',
+            hint: '再点一次「生成事后报告」；也可以在对话里让助手用 interview_finish 写。',
+          },
+        }
+      }
+      return {}
+    })(),
     stats: {
       asked: 15, answered: 15, durationMs: 3600000,
       checklistTotal: 14, checklistProbed: 5, adjustments: 2,
@@ -224,59 +256,28 @@ Nginx、Prometheus / Grafana、Kubernetes`
   //   · 未配置（预设 `voice: 'unconfigured'`）：只有免密钥/浏览器兜底，
   //     界面上要能看出「没配」和「下一步能做什么」。
   //
-  // 形状与 host 的契约一致（docs/DESIGN.md §9、docs/VOICE.md）：
-  //   GET voice/credentials → { credentials: [{ref, configured, source}] }
-  //   GET voice/presets     → { presets: [{id,label,protocol,baseUrl,model,voice,apiKeyEnv,keyless}] }
-  // 密钥**只有名、没有值**——这里也一样，连假值都不给。
+  // 形状与 host 的 `voicePresets()` 一致：分组、只读标记、按预设给的模型清单。
+  // 这里只放**有代表性的子集**——下拉里的完整顺序由 Host 决定，界面不硬编码。
   const presets = [
-    // 播报（TTS）预设。`kind` 让设置页分得出「识别服务」与「播报服务」两套下拉。
-    {
-      id: 'mimo', kind: 'tts', label: 'MiMo · 语音合成', protocol: 'mimo',
-      baseUrl: 'https://api.xiaomi.com/v1', model: 'mimo-tts', voice: 'female-1',
-      apiKeyEnv: 'MIMO_API_KEY', keyless: false,
-      notes: '小米 MiMo，走 chat/completions 带 audio 的协议',
-    },
-    {
-      id: 'openai', kind: 'tts', label: 'OpenAI · /audio/speech', protocol: 'openai',
-      baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini-tts', voice: 'alloy',
-      apiKeyEnv: 'OPENAI_API_KEY', keyless: false,
-      notes: 'OpenAI 兼容的 /audio/speech 端点',
-    },
-    {
-      id: 'minimax', kind: 'tts', label: 'MiniMax · t2a_v2', protocol: 'minimax',
-      baseUrl: 'https://api.minimaxi.com/v1', model: 'speech-01', voice: 'male-qn-qingse',
-      apiKeyEnv: 'MINIMAX_M_PLAN_API_KEY', keyless: false,
-      notes: 'MiniMax t2a_v2，支持 GroupId 与音色选择',
-    },
-    {
-      id: 'baidu', kind: 'tts', label: '百度 · 免密钥自然音', protocol: 'baidu',
-      baseUrl: '', model: 'baidu-tts', voice: 'zh-female', apiKeyEnv: '', keyless: true,
-      notes: '不需要密钥，音质一般但永远能用',
-    },
-    {
-      id: 'edge', kind: 'tts', label: 'Edge · 免密钥自然音', protocol: 'edge',
-      baseUrl: '', model: 'edge-tts', voice: 'zh-CN-XiaoxiaoNeural', apiKeyEnv: '', keyless: true,
-      notes: 'Edge 的在线自然音，不需要密钥',
-    },
-    // 识别（ASR）预设：服务端识别只支持两套协议。
-    {
-      id: 'openai-asr', kind: 'asr', label: '服务端 · OpenAI 兼容', protocol: 'openai',
-      baseUrl: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/SenseVoiceSmall', voice: '',
-      apiKeyEnv: 'SILICONFLOW_API_KEY', keyless: false,
-      notes: 'OpenAI 兼容的 /audio/transcriptions 端点',
-    },
-    {
-      id: 'minimax-asr', kind: 'asr', label: '服务端 · MiniMax', protocol: 'minimax',
-      baseUrl: 'https://api.minimaxi.com/v1', model: 'asr-1.0', voice: '',
-      apiKeyEnv: 'MINIMAX_M_PLAN_API_KEY', keyless: false,
-      notes: 'MiniMax 的 speech_to_text 协议',
-    },
+    { id: 'auto', kind: 'asr', group: 'control', groupLabel: '', label: '自动', protocol: 'auto', protocolLabel: 'auto', baseUrl: '', model: '', models: [], voice: '', apiKeyEnv: '', keyless: true, locked: false, notes: '宿主 → 预设供应商 → 浏览器' },
+    { id: 'qwen-token-plan', kind: 'asr', group: 'vendor', groupLabel: '预设供应商', vendor: 'qwen', label: 'Qwen · Token Plan（千问中转）', protocol: 'dashscope-asr', protocolLabel: 'DashScope multimodal-generation', baseUrl: 'https://token-plan.maas.qianwenaiapi.com', model: 'qwen-audio-3.0-asr-flash', models: [], voice: '', apiKeyEnv: 'QIANWEN_TOKEN_PLAN_API_KEY', keyless: false, locked: true, notes: '千问 Token Plan 中转' },
+    { id: 'mimo', kind: 'asr', group: 'vendor', groupLabel: '预设供应商', vendor: 'mimo', label: 'MiMo · API 直连（官方按量）', protocol: 'chat-audio', protocolLabel: 'chat/completions + input_audio', baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-asr', models: [], voice: '', apiKeyEnv: 'MIMO_API_KEY', keyless: false, locked: true, notes: 'chat/completions + input_audio' },
+    { id: 'openai-custom', kind: 'asr', group: 'compatible', groupLabel: '任意 OpenAI 协议兼容', vendor: '', label: 'OpenAI 兼容 · 自定义端点', protocol: 'openai', protocolLabel: 'OpenAI /audio/transcriptions', baseUrl: '', model: 'whisper-1', models: [], voice: '', apiKeyEnv: 'OPENAI_API_KEY', keyless: false, locked: false, notes: '任何 /audio/transcriptions 网关' },
+    { id: 'browser', kind: 'asr', group: 'free', groupLabel: '免密钥免费方案', vendor: '', label: '浏览器 Web Speech（免密钥）', protocol: 'browser', protocolLabel: '浏览器 Web Speech', baseUrl: '', model: '', models: [], voice: '', apiKeyEnv: '', keyless: true, locked: false, notes: '零配置兜底' },
+    { id: 'mimo', kind: 'tts', group: 'vendor', groupLabel: '预设供应商', vendor: 'mimo', label: 'MiMo TTS · API 直连（官方按量）', protocol: 'chat-audio', protocolLabel: 'chat/completions + input_audio', baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-tts', models: [
+      { id: 'mimo-v2.5-tts', label: 'MiMo TTS · 预置音色（默认）' },
+      { id: 'mimo-v2.5-tts-voicedesign', label: 'MiMo TTS · 文本描述音色' },
+    ], voice: 'mimo_default', apiKeyEnv: 'MIMO_API_KEY', keyless: false, locked: true, notes: '小米 MiMo，走 chat/completions 带 audio 的协议' },
+    { id: 'dashscope-token-plan', kind: 'tts', group: 'vendor', groupLabel: '预设供应商', vendor: 'qwen', label: 'Qwen TTS · Token Plan（千问中转）', protocol: 'dashscope', protocolLabel: 'DashScope tts_v2 WebSocket', baseUrl: 'wss://token-plan.maas.qianwenaiapi.com/api-ws/v1/inference', model: 'qwen-audio-3.0-tts-plus', models: [{ id: 'qwen-audio-3.0-tts-plus', label: 'Qwen-Audio 3.0 TTS Plus · 旗舰（2 音色）' }], voice: 'longanlingxin', apiKeyEnv: 'QIANWEN_TOKEN_PLAN_API_KEY', keyless: false, locked: true, notes: 'tts_v2 WebSocket；该中转只有 plus' },
+    { id: 'openai', kind: 'tts', group: 'compatible', groupLabel: '任意 OpenAI 协议兼容', vendor: 'openai', label: 'OpenAI 兼容 · /audio/speech（自定义端点）', protocol: 'openai', protocolLabel: 'OpenAI /audio/speech', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini-tts', models: [], voice: 'alloy', apiKeyEnv: 'OPENAI_API_KEY', keyless: false, locked: false, notes: '任何实现 /audio/speech 的网关' },
+    { id: 'baidu', kind: 'tts', group: 'free', groupLabel: '免密钥免费方案', vendor: '', label: '百度朗读（免密钥）', protocol: 'baidu', protocolLabel: '百度朗读', baseUrl: '', model: '', models: [], voice: '', apiKeyEnv: '', keyless: true, locked: false, notes: '不需要密钥，音质一般但永远能用' },
+    { id: 'edge', kind: 'tts', group: 'free', groupLabel: '免密钥免费方案', vendor: '', label: 'Edge 神经音色（免密钥）', protocol: 'edge', protocolLabel: 'Edge 神经音色', baseUrl: '', model: '', models: [], voice: 'zh-CN-XiaoxiaoNeural', apiKeyEnv: '', keyless: true, locked: false, notes: 'Edge 的在线自然音，不需要密钥' },
   ]
 
   const configuredCredentials = [
     { ref: 'XIAOMI_TOKEN_PLAN_CN_API_KEY', configured: true, source: 'host' },
-    { ref: 'MINIMAX_M_PLAN_API_KEY', configured: true, source: 'host' },
-    { ref: 'QWEN_TOKEN_PLAN_API_KEY', configured: true, source: 'host' },
+    { ref: 'M_PLAN_API_KEY', configured: true, source: 'host' },
+    { ref: 'QIANWEN_TOKEN_PLAN_API_KEY', configured: true, source: 'host' },
     { ref: 'SILICONFLOW_API_KEY', configured: true, source: 'host' },
     { ref: 'OPENAI_API_KEY', configured: false, source: 'none' },
     { ref: 'MIMO_API_KEY', configured: false, source: 'none' },
@@ -288,17 +289,20 @@ Nginx、Prometheus / Grafana、Kubernetes`
   const voiceChain = (configured) => ({
     asr: configured
       ? {
-        mode: 'server', source: 'host', provider: 'siliconflow', protocol: 'openai',
-        endpoint: 'https://api.siliconflow.cn/v1/audio/transcriptions',
-        model: 'FunAudioLLM/SenseVoiceSmall', language: 'zh',
-        apiKeyEnv: 'SILICONFLOW_API_KEY',
+        mode: 'server', source: 'host', provider: 'qwen-token-plan', protocol: 'dashscope-asr',
+        endpoint: 'https://token-plan.maas.qianwenaiapi.com/api/v1/services/aigc/multimodal-generation/generation',
+        model: 'qwen-audio-3.0-asr-flash', language: 'zh',
+        apiKeyEnv: 'QIANWEN_TOKEN_PLAN_API_KEY',
         // 设置页的「现在用」一行读 `server.*`；顶层的同名字段留给旧视图。
         server: {
-          protocol: 'openai', baseUrl: 'https://api.siliconflow.cn/v1',
-          endpoint: 'https://api.siliconflow.cn/v1/audio/transcriptions',
-          model: 'FunAudioLLM/SenseVoiceSmall',
+          label: 'Qwen · Token Plan（千问中转）',
+          protocol: 'dashscope-asr',
+          protocolLabel: 'DashScope multimodal-generation',
+          baseUrl: 'https://token-plan.maas.qianwenaiapi.com',
+          endpoint: 'https://token-plan.maas.qianwenaiapi.com/api/v1/services/aigc/multimodal-generation/generation',
+          model: 'qwen-audio-3.0-asr-flash',
         },
-        reason: '凭据来自宿主的 SILICONFLOW_API_KEY',
+        reason: '使用 Qwen · Token Plan；凭据来自环境变量 QIANWEN_TOKEN_PLAN_API_KEY。',
       }
       : {
         mode: 'browser', source: 'browser', provider: 'web-speech',
@@ -307,11 +311,12 @@ Nginx、Prometheus / Grafana、Kubernetes`
       },
     tts: configured
       ? {
-        mode: 'server', source: 'host', provider: 'minimax', label: 'MiniMax',
-        protocol: 'minimax',
-        endpoint: 'https://api.minimaxi.com/v1/t2a_v2', model: 'speech-01',
-        voice: 'male-qn-qingse', apiKeyEnv: 'MINIMAX_M_PLAN_API_KEY',
-        reason: '凭据来自宿主的 MINIMAX_M_PLAN_API_KEY',
+        mode: 'server', source: 'host', provider: 'dashscope-token-plan',
+        label: 'Qwen TTS · Token Plan（千问中转）',
+        protocol: 'dashscope',
+        endpoint: 'wss://token-plan.maas.qianwenaiapi.com/api-ws/v1/inference', model: 'qwen-audio-3.0-tts-plus',
+        voice: 'longanlingxin', apiKeyEnv: 'QIANWEN_TOKEN_PLAN_API_KEY',
+        reason: '使用 Qwen TTS · Token Plan；凭据来自环境变量 QIANWEN_TOKEN_PLAN_API_KEY。',
       }
       : {
         mode: 'browser', source: 'browser', provider: 'system-voice',
@@ -322,15 +327,15 @@ Nginx、Prometheus / Grafana、Kubernetes`
 
   const settingsSnapshot = (configured) => ({
     settings: {
-      asrProvider: configured ? 'openai-asr' : 'auto',
+      asrProvider: configured ? 'qwen-token-plan' : 'auto',
       asrEndpoint: '',
       asrBaseUrl: '',
       asrModel: '',
       asrApiKeyEnv: '',
       asrLanguage: 'zh',
-      ttsProvider: configured ? 'minimax' : 'auto',
-      ttsModel: '',
-      ttsVoice: '',
+      ttsProvider: configured ? 'dashscope-token-plan' : 'auto',
+      ttsModel: configured ? 'qwen-audio-3.0-tts-plus' : '',
+      ttsVoice: configured ? 'longanlingxin' : '',
       ttsBaseUrl: '',
       ttsApiKeyEnv: '',
       ttsFormat: '',
@@ -348,17 +353,17 @@ Nginx、Prometheus / Grafana、Kubernetes`
     presets,
     credentials: configured ? configuredCredentials : missingCredentials,
     effective: {
-      asrProvider: 'auto',
-      asrEndpoint: 'https://api.siliconflow.cn/v1/audio/transcriptions',
-      asrBaseUrl: 'https://api.siliconflow.cn/v1',
-      asrModel: 'FunAudioLLM/SenseVoiceSmall',
-      asrApiKeyEnv: 'SILICONFLOW_API_KEY',
+      asrProvider: configured ? 'qwen-token-plan' : 'auto',
+      asrEndpoint: '',
+      asrBaseUrl: '',
+      asrModel: '',
+      asrApiKeyEnv: '',
       asrLanguage: 'zh',
-      ttsProvider: 'auto',
-      ttsBaseUrl: 'https://api.minimaxi.com/v1',
-      ttsModel: 'speech-01',
-      ttsVoice: 'male-qn-qingse',
-      ttsApiKeyEnv: 'MINIMAX_M_PLAN_API_KEY',
+      ttsProvider: configured ? 'dashscope-token-plan' : 'auto',
+      ttsBaseUrl: '',
+      ttsModel: configured ? 'qwen-audio-3.0-tts-plus' : '',
+      ttsVoice: configured ? 'longanlingxin' : '',
+      ttsApiKeyEnv: '',
       ttsFormat: 'mp3',
       ttsRate: 1,
       ttsStyle: '',
@@ -425,6 +430,41 @@ Nginx、Prometheus / Grafana、Kubernetes`
         if (parts[0] === 'sessions') {
           if (parts.length === 1) {
             return { session: { ...session, id: 'iv-20261117-new1', title: '新面试', status: 'draft' } }
+          }
+          // 「记录清理」：批量删（逐场回结果，进行中的会被拒）。
+          if (parts[1] === 'delete-batch') {
+            const ids = Array.isArray(body?.ids) ? body.ids : []
+            return {
+              deleted: ids.map(id => ({ sessionId: id, title: id })),
+              refused: [],
+              deletedCount: ids.length,
+              refusedCount: 0,
+            }
+          }
+          // 重置：清掉面试过程的记录，状态回 draft。
+          if (parts[2] === 'reset') {
+            state.session.status = 'draft'
+            state.transcript = []
+            state.report = ''
+            state.stats.durationMs = 0
+            state.stats.asked = 0
+            state.stats.answered = 0
+            state.stats.checklistProbed = 0
+            return {
+              ok: true,
+              sessionId: parts[1],
+              cleared: {
+                turns: 30, interviewTurns: 15, report: true, recordings: 0,
+                checklistProbed: 5, checklistAdjustments: 2, agentTasks: 0, hostSessionDetached: true,
+              },
+              kept: { recordings: 2, checklistItems: 14, resume: true, jd: true },
+              session: state.session,
+            }
+          }
+          // 续接：状态回 running（transcript / 底稿 / 计时都不动）。
+          if (parts[2] === 'continue') {
+            state.session.status = 'running'
+            return { session: state.session }
           }
           // 改元信息（POST sessions/<id>）：预览里要真的改掉，否则
           // 「保存了但页头/列表没变」在截图和探针里都看不出来。
@@ -507,6 +547,35 @@ Nginx、Prometheus / Grafana、Kubernetes`
             jd: docs.jd,
             jdMeta: { url: 'https://jobs.bytedance.com/position/123456/detail', sections: {}, warnings: [] },
           }
+        }
+        if (path === '/sessions/records') {
+          // 「记录清理」弹层：每场的记录体量（真代码里只在打开弹层时算）。
+          return {
+            sessions: [
+              {
+                id: session.id, title: session.title, company: session.company, position: session.position,
+                status: session.status, createdAt: session.createdAt, updatedAt: session.updatedAt,
+                archived: false, turns: 30, hasResume: true, hasJd: true, hasReport: false,
+                checklistCount: 14, recordings: 2, bytes: 12582912, running: session.status === 'running',
+              },
+              {
+                id: 'iv-20261115-9d2e', title: '阿里 · 金融科技开发', company: '阿里巴巴', position: '金融科技开发',
+                status: 'done', createdAt: now - 86400000, updatedAt: now - 80000000,
+                archived: false, turns: 42, hasResume: true, hasJd: true, hasReport: true,
+                checklistCount: 11, recordings: 0, bytes: 3145728, running: false,
+              },
+              {
+                // 误触新建留下的空场次：清理弹层里的主要目标。
+                id: 'iv-20261117-e1f2', title: '新面试', company: '新建公司 2026-11-17', position: '新建岗位 2026-11-17',
+                status: 'draft', createdAt: now - 600000, updatedAt: now - 600000,
+                archived: false, turns: 0, hasResume: false, hasJd: false, hasReport: false,
+                checklistCount: 0, recordings: 0, bytes: 0, running: false,
+              },
+            ],
+          }
+        }
+        if (path === '/sessions/empty') {
+          return { candidates: [{ id: 'iv-20261117-e1f2', title: '新面试', createdAt: now - 600000 }] }
         }
         if (path === '/sessions') {
           // 空状态预设：一场都还没有。左栏与主区的「一句话 + 一个动作」

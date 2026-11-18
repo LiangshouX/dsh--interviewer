@@ -205,6 +205,30 @@ export const PROVIDER_VOICES = {
     { id: 'nova', label: 'nova' },
     { id: 'shimmer', label: 'shimmer' },
   ],
+  // MiMo 的预置音色（仅 mimo-v2.5-tts；voicedesign 不传 voice、voiceclone 传参考音频）。
+  // 音色 id 就是中文字符串本身，别翻译。
+  mimo: [
+    { id: 'mimo_default', label: '默认（冰糖 / Mia）' },
+    { id: '冰糖', label: '冰糖（女 · 清爽）' },
+    { id: '茉莉', label: '茉莉（女 · 轻柔）' },
+    { id: '苏打', label: '苏打（男 · 年轻）' },
+    { id: '白桦', label: '白桦（男 · 沉稳）' },
+    { id: 'Mia', label: 'Mia（女 · 英文）' },
+    { id: 'Chloe', label: 'Chloe（女 · 英文慢）' },
+    { id: 'Milo', label: 'Milo（男 · 英文慢）' },
+    { id: 'Dean', label: 'Dean（男 · 英文）' },
+  ],
+  // MiniMax 经典中文音色（跨代通用）；新式 `Chinese (Mandarin)_*` 太多，留给文本输入。
+  minimax: [
+    { id: 'female-shaonv', label: '少女（女 · 默认）' },
+    { id: 'female-yujie', label: '御姐（女）' },
+    { id: 'female-chengshu', label: '成熟女性（女）' },
+    { id: 'female-tianmei', label: '甜美女性（女）' },
+    { id: 'male-qn-qingse', label: '青涩青年（男）' },
+    { id: 'male-qn-jingying', label: '精英青年（男）' },
+    { id: 'male-qn-badao', label: '霸道青年（男）' },
+    { id: 'male-qn-daxuesheng', label: '青年大学生（男）' },
+  ],
 }
 
 /**

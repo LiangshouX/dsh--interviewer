@@ -34,7 +34,8 @@ test('发版默认值不算「显式写死」：isBundleDefault 认得 auto/mp3/
   assert.equal(isBundleDefault('ttsProvider', 'auto'), true)
   assert.equal(isBundleDefault('ttsFormat', 'mp3'), true)
   assert.equal(isBundleDefault('ttsRate', 1.0), true)
-  assert.equal(isBundleDefault('asrApiKeyEnv', 'MINIMAX_API_KEY'), true)
+  assert.equal(isBundleDefault('asrApiKeyEnv', ''), true, '凭据名默认留空，由所选预设决定')
+  assert.equal(isBundleDefault('asrApiKeyEnv', 'MINIMAX_API_KEY'), false)
   // 用户真正改过的值 ≠ 默认 → 不是默认。
   assert.equal(isBundleDefault('ttsProvider', 'dashscope'), false)
   assert.equal(isBundleDefault('ttsProvider', 'openai'), false)

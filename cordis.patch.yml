@@ -21,21 +21,37 @@
 #                   （dataRoot 是旧名，仍然认，但请换用 workspaceRoot。）
 #   jdFetchTimeoutMs  JD 链接抓取超时（毫秒）。超时即视为失败，交给手动兜底。
 #   jdMaxChars      JD 抓取后保留的最大字符数（正文裁剪）。
-#   asrProvider     语音识别来源：auto | host | openai | minimax | browser | none
-#                   auto = **宿主优先**（宿主的 speechToText 服务，provider 由宿主
-#                   决定，插件不经手凭据）→ 插件自己的服务端识别 → 浏览器原生。
-#                   host = 只用宿主语音服务；openai/minimax = 只用插件自己的端点。
-#   asrBaseUrl      服务端识别基址（仅在插件自己走服务端时用）
+#   asrProvider     语音识别来源。默认 auto = **宿主优先**（宿主的 speechToText 服务）
+#                   → 预设供应商（按 presets.js 的顺序，第一家配上凭据的生效）
+#                   → 浏览器原生。
+#                   可选值（设置页下拉的唯一真源是 src/host/voice/presets.js）：
+#                     auto | host | browser | none
+#                     预设供应商（端点/协议/模型/凭据名固定，成对使用）：
+#                       qwen-token-plan | qwen | mimo-token-plan | mimo |
+#                       minimax-token-plan | minimax-cn
+#                     任意 OpenAI 协议兼容：openai-custom（自填端点）| openai（SiliconFlow）
+#                   注意：Qwen 的 ASR 走 DashScope 原生 multimodal-generation，
+#                   MiMo 走 chat/completions + input_audio，都不是 /audio/transcriptions。
+#   asrBaseUrl      只有「OpenAI 兼容」预设读它；预设供应商的端点固定，改这里不生效。
 #   asrApiKey       明文 key（不推荐；优先用 asrApiKeyEnv）
-#   asrApiKeyEnv    凭据名（走 DSH credentials seam，密钥不进配置文件）
-#   asrModel        识别模型，留空按协议取（openai: whisper-1 / minimax: asr-1.0）
-#   asrEndpoint     转写路径，留空按协议取
+#   asrApiKeyEnv    凭据名（走 DSH credentials seam，密钥不进配置文件）。留空 =
+#                   由所选预设决定（QIANWEN_TOKEN_PLAN_API_KEY / MIMO_API_KEY /
+#                   XIAOMI_TOKEN_PLAN_CN_API_KEY / M_PLAN_API_KEY / DASHSCOPE_API_KEY …）
+#   asrModel        只有「OpenAI 兼容」预设读它；预设供应商的模型固定。
+#   asrEndpoint     只有「OpenAI 兼容」预设读它（默认 /audio/transcriptions）。
 #   asrLanguage     识别语言提示，默认 zh
-#   ttsProvider     语音播报来源：auto | host | mimo | openai | minimax | baidu | edge | browser | none
-#                   auto = 配了凭据的模型 → 免密钥的自然音（百度 / Edge 神经音色）
-#                   → 浏览器原生音色。**默认不是系统机器音。**
-#   ttsBaseUrl      合成服务基址（留空用该 provider 的默认值）
-#   ttsApiKeyEnv    合成凭据名（MIMO_API_KEY / OPENAI_API_KEY / MINIMAX_API_KEY）
+#   ttsProvider     语音播报来源。默认 auto = 配了凭据的预设供应商 → OpenAI 兼容
+#                   → 免密钥的自然音（百度 / Edge 神经音色）→ 浏览器原生音色。
+#                   **默认不是系统机器音。**
+#                   可选值：
+#                     auto | host | browser | none
+#                     qwen：dashscope-token-plan | dashscope
+#                     MiMo：mimo-token-plan | mimo
+#                     MiniMax：minimax-token-plan | minimax-cn
+#                     任意 OpenAI 兼容：openai（端点/模型/音色可改）
+#                     免密钥：baidu | edge | browser
+#   ttsBaseUrl      只有「OpenAI 兼容」预设读它（留空用该 service 默认值）。
+#   ttsApiKeyEnv    合成凭据名（留空 = 由所选预设决定）
 #   ttsApiKey       明文 key（不推荐）
 #   ttsModel        合成模型。MiMo 三种：mimo-v2.5-tts（预置音色）/
 #                   mimo-v2.5-tts-voicedesign（文本描述音色）/ mimo-v2.5-tts-voiceclone（样本复刻）
@@ -78,7 +94,7 @@
         asrProvider: 'auto'
         asrBaseUrl: ''
         asrApiKey: ''
-        asrApiKeyEnv: 'MINIMAX_API_KEY'
+        asrApiKeyEnv: ''
         asrModel: ''
         asrEndpoint: ''
         asrLanguage: 'zh'

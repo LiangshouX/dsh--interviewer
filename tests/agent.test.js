@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { InterviewService } from '../src/host/service.js'
@@ -172,5 +172,170 @@ test('requestAgentReport：让助手写报告并调 interview_finish 落盘', as
     assert.match(prompt.request.content[0].text, new RegExp(session.id))
     assert.match(prompt.request.content[0].text, /interview_finish/)
     assert.match(prompt.request.content[0].text, /interview_get_context/)
+  })
+})
+
+// ── 「等助手返回」的 loading：必须有终点（不许假活空转）──────────────────
+
+/** 把任务记录的时间往前拨，模拟「已经等了一会儿」。 */
+async function ageTask(session, kind, ms) {
+  const path = join(session.dir, 'session.json')
+  const meta = JSON.parse(await readFile(path, 'utf8'))
+  meta.agentTasks[kind].at = Date.now() - ms
+  await writeFile(path, JSON.stringify(meta, null, 2))
+}
+
+/** 一个能回答「宿主会话在不在跑」的 controller。 */
+function stateController(log, state) {
+  const controller = fakeController(log)
+  controller.state = async () => state
+  return controller
+}
+
+test('派活后 getState 出现 waiting；产物落盘后任务消失（loading 收尾）', async () => {
+  await withEnv(async ({ root }) => {
+    const log = []
+    const controller = stateController(log, { running: true, queue: [] })
+    const service = new InterviewService({
+      config: { workspaceRoot: root },
+      ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+    })
+    const session = await service.createSession({ title: '底稿场' })
+
+    await service.requestAgentChecklist(session.id)
+    const waiting = await service.getState(session.id)
+    assert.equal(waiting.agentTasks.checklist.status, 'waiting')
+    assert.equal(waiting.agentTasks.jd, undefined)
+
+    await service.saveChecklist(session.id, [{ topic: '闭包与作用域' }])
+    const done = await service.getState(session.id)
+    assert.equal(done.agentTasks.checklist, undefined, '底稿写回后 loading 必须收掉')
+  })
+})
+
+test('JD / 报告同理：派发即 waiting，正文与报告落盘后收尾', async () => {
+  await withEnv(async ({ root }) => {
+    const controller = stateController([], { running: true, queue: [] })
+    const service = new InterviewService({
+      config: { workspaceRoot: root },
+      ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+    })
+    const session = await service.createSession({ title: '多任务' })
+
+    await service.requestAgentJd(session.id, 'https://jobs.example.com/9')
+    await service.requestAgentReport(session.id)
+    const tasks = (await service.getState(session.id)).agentTasks
+    assert.equal(tasks.jd.status, 'waiting')
+    assert.equal(tasks.report.status, 'waiting')
+    assert.equal(tasks.jd.url, 'https://jobs.example.com/9', '重试要用得上原链接')
+
+    await service.setJd(session.id, { text: '岗位职责……', url: 'https://jobs.example.com/9' })
+    assert.equal((await service.getState(session.id)).agentTasks.jd, undefined)
+
+    await service.saveReport(session.id, '# 报告\n\n内容')
+    assert.equal((await service.getState(session.id)).agentTasks.report, undefined)
+  })
+})
+
+test('宿主这一轮跑完却没写回 → failed（带原因与下一步），不是无限转圈', async () => {
+  await withEnv(async ({ root }) => {
+    const controller = stateController([], { running: false, queue: [] })
+    const service = new InterviewService({
+      config: { workspaceRoot: root },
+      ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+    })
+    const session = await service.createSession({ title: '空跑' })
+    await service.requestAgentChecklist(session.id)
+    // 宽限期内仍算 waiting（派发刚入队时 running 可能还没置真）。
+    assert.equal((await service.getState(session.id)).agentTasks.checklist.status, 'waiting')
+    await ageTask(session, 'checklist', 20000)
+    const failed = (await service.getState(session.id)).agentTasks.checklist
+    assert.equal(failed.status, 'failed')
+    assert.match(failed.reason, /没有写回底稿/)
+    assert.match(failed.hint, /重新生成|interview_save_checklist/)
+  })
+})
+
+test('助手在等用户确认/回答（turn 开着、running 恒真）→ failed，指路对话区', async () => {
+  await withEnv(async ({ root }) => {
+    // 这是真机撞到的场景：助手调 ask_user_question 后 turn 一直开着，
+    // 只看 running 会永远转圈——但用户在对话区回答之前，这件事不可能推进。
+    const controller = stateController([], { running: true, queue: [], pendingInput: ['question'] })
+    const service = new InterviewService({
+      config: { workspaceRoot: root },
+      ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+    })
+    const session = await service.createSession({ title: '等人回答' })
+    await service.requestAgentChecklist(session.id)
+    const task = (await service.getState(session.id)).agentTasks.checklist
+    assert.equal(task.status, 'failed')
+    assert.match(task.reason, /问你一个问题/)
+    assert.match(task.hint, /DSH 对话区/)
+  })
+})
+
+test('等太久 → failed（超时也是终点）；状态翻转会进 revision，面板才会刷新', async () => {
+  await withEnv(async ({ root }) => {
+    const controller = stateController([], { running: true, queue: [] })
+    const service = new InterviewService({
+      config: { workspaceRoot: root },
+      ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+    })
+    const session = await service.createSession({ title: '超时' })
+    await service.requestAgentReport(session.id)
+    const waiting = await service.getState(session.id)
+    await ageTask(session, 'report', 11 * 60 * 1000)
+    const failed = await service.getState(session.id)
+    assert.equal(failed.agentTasks.report.status, 'failed')
+    assert.match(failed.agentTasks.report.reason, /等了 10 分钟/)
+    assert.notEqual(failed.revision, waiting.revision, 'waiting→failed 必须改指纹，否则面板不会重渲染')
+  })
+})
+
+test('助手会话不见了 → failed，并提示重派会重建', async () => {
+  await withEnv(async ({ root }) => {
+    const controller = fakeController([])
+    controller.state = async () => { throw Object.assign(new Error('session/not-found'), { code: 'session-not-found' }) }
+    const service = new InterviewService({
+      config: { workspaceRoot: root },
+      ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+    })
+    const session = await service.createSession({ title: '会话没了' })
+    await service.requestAgentJd(session.id, 'https://jobs.example.com/1')
+    const task = (await service.getState(session.id)).agentTasks.jd
+    assert.equal(task.status, 'failed')
+    assert.match(task.reason, /会话不见了/)
+    assert.match(task.hint, /重建/)
+  })
+})
+
+test('老宿主没有 state() 接口时：不猜「还在跑」，但超时仍然收尾', async () => {
+  await withEnv(async ({ root }) => {
+    const controller = fakeController([]) // 没有 state
+    const service = new InterviewService({
+      config: { workspaceRoot: root },
+      ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+    })
+    const session = await service.createSession({ title: '老宿主' })
+    await service.requestAgentChecklist(session.id)
+    assert.equal((await service.getState(session.id)).agentTasks.checklist.status, 'waiting')
+    await ageTask(session, 'checklist', 11 * 60 * 1000)
+    assert.equal((await service.getState(session.id)).agentTasks.checklist.status, 'failed')
+  })
+})
+
+test('忽略失败提示：记录被清掉，按钮不再挂着', async () => {
+  await withEnv(async ({ root }) => {
+    const controller = stateController([], { running: true, queue: [] })
+    const service = new InterviewService({
+      config: { workspaceRoot: root },
+      ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+    })
+    const session = await service.createSession({ title: '忽略' })
+    await service.requestAgentChecklist(session.id)
+    await ageTask(session, 'checklist', 11 * 60 * 1000)
+    assert.equal((await service.getState(session.id)).agentTasks.checklist.status, 'failed')
+    await service.dismissAgentTask(session.id, 'checklist')
+    assert.equal((await service.getState(session.id)).agentTasks.checklist, undefined)
   })
 })

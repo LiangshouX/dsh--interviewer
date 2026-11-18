@@ -50,11 +50,17 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 
 - 材料归档后点「让助手出底稿」，派活到**面试工作区的助手会话**；
   助手用 `interview_get_context` 读材料、用 `interview_save_checklist` 写回。
+  **同一个岗位的「拉 JD」与「出底稿」用同一个助手会话**（不是两个对话）；
+  面板上有一枚「助手会话 · 尾号」芯片，可溯源到具体是哪个宿主对话（见下）。
 - 清单是**活文档**：默认收起、面试中不可见；过长时在限高容器里滚动。
-- 清单生成后可一键「进入面试中」，不满意可以「重新生成」（二次确认，覆盖现有清单）。
+- 清单生成后可一键「去面试」，不满意可以「重新生成」（二次确认，覆盖现有清单）。
 
 ### 3. 面试中
 
+- **点「开始面试」= 先把设备准备好，再开始**：麦克风（桌面端再加上宿主摄像头）
+  在同一个用户手势里申请完，再置 running；设备失败也不挡面试，但会如实说
+  「麦克风已接通 / 摄像头没接上 / 全都不可用，用键盘」（见
+  [AGENTS.md §6.15](AGENTS.md)）。
 - **面试主循环是事件驱动的，不是手动的**（设计见 [docs/TURN-TAKING.md](docs/TURN-TAKING.md)）：
   点「开始面试」助手**自动开场**；候选人答完提交后助手被唤醒出下一题；
   暂停 / 继续保住上下文与计时口径。
@@ -64,13 +70,22 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
   - **暂停**：设备立刻释放（指示灯灭）、计时停走、转录留痕；**继续**：助手带着
     原上下文续接。刷新 / 崩溃后重开面板会看到「这场面试还在进行」的恢复板，
     与手动继续走同一条路。
+  - **续接**（结束之后还能接着面）：临时有事要先结束去分析，回来点「续接面试」
+    就从上一问接着问——转录、底稿、计时都保留，**中断的时间不算面试时长**，
+    助手也不会重新开场。舞台/报告页都有这个入口。
   - 派活失败不会静默：转录留痕 + 面板「重新发给助手」按钮（幂等重发）。
 - **摄像头两条采集通道**：ffmpeg（DirectShow）优先，失败自动回落 Chromium
   （Media Foundation）。「申请摄像头与麦克风」一条按钮走完整条链路：
   浏览器麦克风 → 宿主摄像头，并逐步显示「✓ 麦克风已接入 · 摄像头正在尝试宿主采集…」。
-- 语音：宿主 `speechToText`（SenseVoice 本地模型）→ 插件 HTTP 端点 → 浏览器识别 → 键盘；
-  播报：宿主 TTS（暂无）→ 配好的模型（MiMo/OpenAI/MiniMax/**DashScope·Qwen/CosyVoice**）→ 免密钥自然音 → 浏览器音色。
+- 语音：宿主 `speechToText`（SenseVoice 本地模型）→ 预设供应商（**Qwen / MiMo / MiniMax
+  的 Token Plan 与 API 直连**）→ 任意 OpenAI 兼容 → 浏览器识别 → 键盘；
+  播报：宿主 TTS（暂无）→ 同一批预设供应商 → 任意 OpenAI 兼容 → 免密钥自然音 → 浏览器音色。
   面板永远显示**现在用的是哪条链路、为什么**。
+  预设供应商的端点/协议/模型/凭据名是**成对的**（面板只读），Token Plan 与直连不会混；
+  要自定义端点选「任意 OpenAI 协议兼容」。
+- **等助手返回时有真 loading**：抓 JD / 出底稿 / 写报告派出去后，卡片上会出现
+  「助手正在…」的状态；成功即消失，失败或超时立刻停转，给出原因与「重试 / 忽略」，
+  **不会无限转圈**（状态由 Host 判定，客户端不自己计时）。
 - 语流观察（停顿、语速、填充词、重复、自我修正）由 Host 统一计算；
   只用于调整追问方式与报告「表达」一节，**不打分**。
 - 录像/录音可关（设置页隐私开关）；录像由 Host 直接写进卷宗目录。
@@ -88,8 +103,8 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 | 组 | 可改什么 |
 |---|---|
 | 外观 | 亮色 / 暗色（**默认亮色**）、**跟随 DSH 主题**（勾上后页头切换按钮失效，明暗完全由宿主决定） |
-| 语音识别 | 服务（自动 / 宿主 / OpenAI 兼容 / 自定义端点 / MiniMax / 浏览器 / 关闭）、端点、模型、语言、凭据，**测试识别** |
-| 语音播报 | 服务（自动 / 宿主 / MiMo / OpenAI 兼容 / MiniMax（两个站点）/ **DashScope·Qwen/CosyVoice（WebSocket）** / 百度 / Edge / 浏览器 / 关闭）、模型、**音色（按模型下拉）**、格式、语速、凭据，**测试播报** |
+| 语音识别 | 服务下拉（自动 / 宿主 / **预设供应商：Qwen、MiMo、MiniMax 各 Token Plan + 直连** / 任意 OpenAI 兼容 / 浏览器 / 关闭）、语言、凭据，**测试识别**；预设供应商的端点与模型只读 |
+| 语音播报 | 服务下拉（自动 / 宿主 / 同一批预设供应商 / 任意 OpenAI 兼容 / 百度 / Edge / 浏览器 / 关闭）、**模型（按预设给的下拉）**、**音色（按模型下拉）**、格式、语速、凭据，**测试播报** |
 | 摄像头 | 采集后端（auto / 仅 ffmpeg / Chromium 优先）、ffmpeg 路径、Chrome/Edge 路径 |
 | 隐私 | 允许录像、允许录音 |
 | 回答节奏 | 模式（手动 / 自动）、话轮结束静音阈值（800–6000 ms）；「面试中」页有两态快捷切换 |
@@ -108,6 +123,27 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 
 写入仍是**白名单 + 规格校验**：枚举/范围/类型不对会被拒绝并说明原因；
 配置文件里显式写过的键优先于面板设置，同样会说明。
+
+---
+
+## 场次整理：归档 / 重置 / 记录清理 / 续接
+
+误触的开始、试跑的场次、聊到一半被打断的面试——这些都得能收拾，而且收拾完
+**材料还在**。四种动作语义分明，互不顶替：
+
+| 想要 | 用哪个 | 结果 |
+|---|---|---|
+| 这场暂时看不到 | 行尾「⋯」→ **归档** | 收进「归档 N」，内容全在，随时取回 |
+| 这场面试搞脏了，重来 | 行尾「⋯」→ **重置记录…** | 清转录 / 报告 / 计时 / 「问过」标记 / 等助手任务，**留简历、JD、底稿**；录音录像默认保留（可勾选一起删） |
+| 一批场次不要了 | 左栏表头 **清理** | 勾选哪几场删哪几场，**逐场报告结果**（进行中的会被拒并说明）；另有「清理空场次」 |
+| 这场没面完，接着面 | 行尾「⋯」→ **续接面试**（或舞台上的「续接面试」） | `done → running`，从上一问接着问；转录 / 底稿 / 计时沿用，中断时间不算时长 |
+
+**助手会话是「一场一个、全程共用」。** 拉 JD、出底稿、开场、继续、写报告都发到
+**这一场专属的助手会话**（同一个宿主对话），不再共用什么「最近活跃的会话」；
+准备页的「助手会话 · 尾号」芯片可查到具体对话、建于何时、最近派活发到哪儿、
+中途重建过几次。会话被删会自动重建（派活前先探一次，撞上 `not-found` 再兜底），
+**绝不会**把请求悄悄发到另一场面试的对话里（详见 [AGENTS.md §6.14](AGENTS.md)、
+[docs/API.md §2.1.3](docs/API.md)）。
 
 ---
 
@@ -165,16 +201,18 @@ node dev/shoot.mjs                 # 截图到 dev/shots/
   `session.update` / `input_audio_buffer.append` / `response.audio.delta`、服务端 VAD
   轮次检测、音频进音频出）是另一个产品类目，本插件**没有**对应的协议适配，配上去也不会响。
   面试官「念一个问题」需要的是 TTS（如 `qwen-audio-3.0-tts-flash`），不是 realtime 对话模型。
-- **DashScope/Qwen TTS 走 WebSocket，不是 HTTP 中转。** `qwen-audio-*-tts-*` / `cosyvoice-*`
-  用 `tts_v2` 的 `wss://…/api-ws/v1/inference` 推理协议；千问 Token Plan 的
-  `compatible-mode/v1` **HTTP** 中转只开 `/chat/completions` 与 `/models`，音频路径一律 400，
-  别把端点填成它。音色**按模型**选（每个模型只支持一组特定音色，跨模型混用报
+- **Qwen / MiMo 的音频都不在 `compatible-mode` 的 HTTP 中转上。** Qwen TTS 走
+  `tts_v2` 的 `wss://…/api-ws/v1/inference`；Qwen ASR 走 **DashScope 原生
+  `multimodal-generation`**（Token Plan 主机同路径，`qwen-audio-3.0-asr-flash`）；
+  MiMo 的 ASR/TTS 都走 `chat/completions`。`compatible-mode/v1` 的
+  `/audio/transcriptions` 是 400 `url error`，别把端点填成它。
+  音色**按模型**选（每个模型只支持一组特定音色，跨模型混用报
   InvalidParameter / `[cosyvoice:]Engine error [411]`），设置页已做成按模型的下拉。
-  **key 与主机要配对**：Token Plan key（`QIANWEN_TOKEN_PLAN_API_KEY`）只在
-  `token-plan.maas.qianwenaiapi.com` 这台主机有效（`maas` / `cn-beijing.maas` / 官方
-  `dashscope.aliyuncs.com` 认的是别的 key），且该中转的 TTS 模型是
-  **`qwen-audio-3.0-tts-plus`**（没有 flash，音色 `longanlingxin` / `longanlufeng`）。
-  预设已按这套默认配好；官方 DashScope 则用 `DASHSCOPE_API_KEY` + `dashscope.aliyuncs.com`。
+  **key 与主机要配对**：Token Plan key（`QIANWEN_TOKEN_PLAN_API_KEY` /
+  `XIAOMI_TOKEN_PLAN_CN_API_KEY` / `M_PLAN_API_KEY`）只在各自的中转主机有效；
+  官方按量 key 打中转、或中转 key 打官方端点，都是 401。
+  预设表把「Token Plan / API 直连」做成两条独立条目，端点与模型锁死，
+  不会再出现「填了 A 家的端点、用了 B 家的 key」。
 
 ## 待办与未来计划
 

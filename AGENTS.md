@@ -269,9 +269,15 @@ UI 一起拍进去，且要求窗口可见——是演示 hack，不是产品路
 
 ### 6.5 语音链路：宿主优先，但说清继承的边界
 
-**识别**：宿主的 `ctx.speechToText` → 插件自己的 HTTP 端点 → 浏览器 Web Speech → 键盘。
-**播报**：宿主的 `ctx.textToSpeech`（DSH 目前没有）→ 配好的模型（MiMo / OpenAI / MiniMax）
+**识别**：宿主的 `ctx.speechToText` → 插件自己的 HTTP 端点（预设供应商：Qwen / MiMo / MiniMax 的
+Token Plan 与 API 直连 → 任意 OpenAI 兼容）→ 浏览器 Web Speech → 键盘。
+**播报**：宿主的 `ctx.textToSpeech`（DSH 目前没有）→ 同一批预设供应商
+（Qwen / MiMo / MiniMax × Token Plan / 直连）→ 任意 OpenAI 兼容
 → 免密钥自然音（百度 / Edge）→ 浏览器音色。
+
+**预设供应商 = 配好的一对。** 端点、协议、模型、凭据名是绑定的，面板只读；
+要自定义端点选「任意 OpenAI 协议兼容」。`src/host/voice/presets.js` 是下拉、
+配置枚举（`paths.js`）与解析层默认值的唯一真源——**不许在别处再写一份 provider 列表**。
 
 **已从装机包里读实，别再假设：**
 
@@ -326,10 +332,13 @@ DashScope 每个模型只支持一组特定音色，跨模型混用报 InvalidPa
 | 事实 | 含义 |
 |---|---|
 | MiniMax `POST https://api.minimax.cn/v1/t2a_v2`（Bearer）协议正确 | 200 也可能是业务失败：`base_resp.status_code` 非 0 要把 `status_msg` 原文带回界面（2056 = 用量上限） |
-| MiMo 官方端点 `api.xiaomimimo.com` 认**官方 key**，不认 Token Plan 中转 key（401） | 预设里要写清这一点，别让用户拿中转 key 白撞 |
-| Qwen Token Plan 的 **HTTP `compatible-mode/v1` 中转**只有 `/chat/completions` 与 `/models` 可用，音频路径一律 400 `url error` | 别把 TTS/ASR 端点填成这个 HTTP 中转。但 **`api-ws/v1/inference` WebSocket 推理端点是开音频的**——`qwen-audio-*-tts-*`/`cosyvoice-*` 走 `dashscope.js`（tts_v2）可用，凭据 `QIANWEN_TOKEN_PLAN_API_KEY`。两者不是同一条路 |
+| MiMo：官方端点 `api.xiaomimimo.com` 认**官方 `sk-` key**；Token Plan 端点 `token-plan-cn.xiaomimimo.com` 认**中转 `tp-` key**（混用 401） | 两条预设都要摆出来（`mimo-token-plan` / `mimo`），让用户按手里的 key 选；401 时指路另一条 |
+| Qwen Token Plan 的 **HTTP `compatible-mode/v1` 中转不开音频**：`/audio/transcriptions` 400 `url error`，`chat/completions` + `qwen3-asr-flash` 404 `model_not_found` | 别把 ASR 填成这个 HTTP 中转 |
+| Qwen 的 ASR 在 Token Plan 上**可以走通**：`POST {token-plan}/api/v1/services/aigc/multimodal-generation/generation` + `qwen-audio-3.0-asr-flash` + `input.messages[].content[].audio`（data URI）→ 200，`output.text`（2026-11-18 本机实测） | `qwen-token-plan` 预设固定走这条；和 TTS 的 `api-ws/v1/inference`（tts_v2）不是同一条路，但都不是 compatible-mode |
+| Qwen TTS 在 Token Plan 上走 `wss://token-plan.maas.qianwenaiapi.com/api-ws/v1/inference`（tts_v2），只有 `qwen-audio-3.0-tts-plus` | `dashscope-token-plan` 预设锁死端点与模型；官方百炼是另一条预设（`dashscope`，全系模型） |
 | DashScope 每个模型只支持一组特定音色，跨模型混用报 InvalidParameter / `[cosyvoice:]Engine error [411]` | 音色按模型维护在 `voices.js`，设置页做成按模型下拉；voice 留空时取**当前模型**默认音色，不拿预设音色跨模型撞 |
 | Edge 神经音色在部分出口被 WAF 403；百度朗读可用 | `auto` 候选顺序里免密钥自然音仍然有效，失败要记一段时间再试 |
+| 预设供应商的「端点 + 协议 + 模型 + 凭据名」是成对的，配错一个就 401/404/400 | `presets.js` 里 `locked: true`；面板只读展示，要自定义端点选「任意 OpenAI 协议兼容」。`paths.js` 的枚举由预设表派生，**不许再写第二份** |
 
 ### 6.6 继承岗位档案不等于照抄
 
@@ -377,6 +386,10 @@ DashScope 每个模型只支持一组特定音色，跨模型混用报 InvalidPa
   删的是卷宗目录本身；**正在进行的面试拒绝删**（先结束）；
   另提供「清理空场次」——只删无简历/JD/考点/转录/报告的场次，
   有内容的一场都不动。
+- **清理要能"勾一批"。** 误触新建 / 试跑留下的场次往往是一批；
+  逐行两步确认，十场就是二十次点击，用户会放弃。所以左栏表头有「清理」：
+  勾选哪几场删哪几场，**逐场返回结果**（谁没删掉、为什么），外加一键空场次。
+  见 §6.14。
 - **分组按公司，不按岗位。** 左栏只有 244px，「公司 · 岗位」的组头必然被
   截断，截断之后公司和岗位都认不出。组头写公司，行内小字写岗位；
   组头可折叠。认不出公司的归到「未整理」垫底。
@@ -388,7 +401,8 @@ DashScope 每个模型只支持一组特定音色，跨模型混用报 InvalidPa
 
 所以抓不到时除了说清卡在哪，还要把「让助手去抓」摆出来：
 
-- 请求发在**当前 DSH 对话**里（用户看得见、也能插话），不是后台偷偷跑；
+- 请求发在**这一场面试专属的助手会话**里（和「出底稿」同一个对话，
+  用户点开就能看、能插话），不是后台偷偷跑；
 - 提示里写清**发到哪个对话**去了；
 - 助手拿到正文后调 `interview_save_jd` 写回这场面试——
   面板要能在 JD 回来时自动显示（正文不跟轮询走，用字数变化当指纹去取）。
@@ -453,6 +467,107 @@ DashScope 每个模型只支持一组特定音色，跨模型混用报 InvalidPa
 **不要复活启发式。** 「先找公司：、再找大厂、再从后缀猜」这套在本机实测里
 错得比留空更糟；多一次猜错就多一次「助手说改不了」。
 
+### 6.13 等助手返回：loading 必须有终点
+
+> 用户原话：「一些地方应该要加上 loading 状态……这里也要注意一个陷阱，
+> 就是助手会话万一失败等这种情况，loading 状态不可假活空转」
+
+派发成功 ≠ 有结果。**客户端不许自己计时、不许自己猜「应该还在跑」**——
+那正是假活空转。规矩（`src/host/service.js` 的 `agentTaskStatus`）：
+
+1. **Host 记任务。** 派发时写 `session.json.agentTasks[kind]`（`jd` / `checklist` /
+   `report`），对应产物落盘时清掉：`setJd` / `saveChecklist` / `saveReport`。
+   成功态 = 任务直接消失，不需要第四种状态。
+2. **只有 waiting / failed。** `waiting` 才转圈；`failed` 必须停转，并给
+   `reason`（发生了什么）+ `hint`（下一步）+「重试」+「忽略」。
+3. **失败判定四条腿，缺一条就会假活：**
+   - 超过等待上限（JD 4 分钟；底稿/报告 10 分钟）；
+   - 宿主助手会话不见了（`session/not-found` / 已归档）；
+   - **宿主会话在等人**（`state.pendingInput` 非空：审批 / `ask_user_question` / 其他确认）
+     ——turn 开着、`running` 恒为真，但在用户处理之前不可能推进；
+   - 宿主 `sessionController.state({sessionId})` 说 `running=false` 且队列为空
+     ——即**这一轮跑完了却没写回**。留 12 秒宽限期，防「刚入队还没置 running」误伤。
+   老宿主没有 `state()` 接口时**只靠上限**；**不许把「读不到」当成「还在跑」续命**。
+   （本机真机撞到过第一条以外的坑：助手在它的对话里调 `ask_user_question`，
+   面板一直转圈——现在会立刻停转并指路「去对话区回答助手」。）
+4. **任务状态要进 `revision`。** 超时从 waiting 翻 failed 是时间驱动的，
+   `session.json` 的 mtime 不会变；不进指纹，面板就会永远转圈。
+5. **界面只渲染，不判定。** 一个 `AgentTaskRow`（`70-primitives.js`）在底稿、
+   JD、报告三处复用；waiting 时禁用重复派活按钮，failed 时恢复按钮。
+
+> 反例（不许回退）：点完按钮只在本地 `setBusy(true)`，请求返回就 `setBusy(false)`，
+> 之后没有任何状态——助手失败时用户看到的是「按钮又亮了，但什么也没发生」。
+
+### 6.14 生命周期：重置 / 续接 / 记录清理（一场面试不是只能开始和结束）
+
+> 用户原话：「误触了开始面试然后停掉，造成了一些比较碎的脏片段无法清理；
+> 某次面试还没结束但由于临时不方便又要拿数据去分析所以中途结束，
+> 但这场不完美的面试是期望要能够续接的。」
+
+**「结束」不是唯一的终点，「删除」也不是唯一的整理。** 三种动作各有各的语义，
+不许互相顶替：
+
+| 动作 | 语义 | 实现 |
+|---|---|---|
+| **暂停 / 继续** | 同一轮面试里暂时离开 | `pauseSession` / `resumeSession`（`paused → running`） |
+| **续接** | 这一场**已经结束**了，但接着面 | `continueSession`（`done → running`，**不重开一轮**） |
+| **重置** | 面试过程清零，材料留着 | `resetSession` |
+| **归档** | 收起来，什么都不删 | `setArchived` |
+| **删除** | 连卷宗目录一起删 | `deleteSession` / `deleteSessions` |
+
+四条硬规矩：
+
+1. **续接不是重开。** `done → running` 时**不动** `startedAt`、不清转录、不清清单；
+   中断的那段时间记进 `pausedMs`（它不是面试时长）。派活的 prompt 要明说
+   「接着中断处继续，**不要重新开场**」——否则助手会从自我介绍再来一遍，
+   那就成了「同一场面试里问了两次自我介绍」。
+2. **重置清什么、留什么要一句话说得清**，界面照抄返回值，不许自己编：
+
+   | 清掉 | 留下 |
+   |---|---|
+   | 转录（含 system 行）、报告、计时与暂停账本 | 简历、JD、考点清单本身 |
+   | 清单上的「问过」标记、证据与调整记录 | 标题 / 公司 / 岗位 / 档案关联 |
+   | 「等助手」的任务记录 | 卷宗目录本身 |
+   | 录音录像（**默认保留**，`dropRecordings` 才删） | |
+
+   录音录像是**不可恢复的文件**，默认留着；要删必须用户显式勾选。
+3. **重置必须解绑助手会话。** 旧对话里躺着一整轮面试的上下文，重置之后还用它
+   开场，助手会接着上一轮的思路说话——那正是「会话串场」。解绑只改引用
+   （`agentSessionId: ''` + 账本记 `detach`），旧对话仍在 DSH 里由用户处置。
+4. **记录清理要能勾一批，且逐场报告结果。** 误触新建/试跑留下的场次往往是一批，
+   逐行两步确认十场就是二十次点击。`deleteSessions` 逐场返回
+   `{deleted, refused}`：进行中的场次被拒并给出原因，其余照删——**不许整批失败**。
+
+界面位置：场次行的「⋯」里有**续接面试**（仅 `done`）与**重置记录…**；
+左栏表头的「清理」打开 `SessionsDialog`（勾选批量删 + 一键空场次）。
+`done` 场次的舞台给「续接板」，报告页页头也给「续接面试」——因为「报告写完了」
+不等于「这场不能接着面」。
+
+### 6.15 开始面试 = 先把设备准备好，再开始
+
+> 用户原话：「面试中点击『开始面试』后，摄像头不开、麦克风不开，
+> 这对用户体验来说是灾难性的。」
+
+**顺序错了，功能就白做。** 旧实现点「开始面试」只 `POST /start`：面板进了面试态，
+舞台上却是一块「未接通」板——用户的第一印象是「这插件坏了」。
+
+规矩：
+
+1. **先申请设备，再置 running。** 点击那一刻是**唯一可靠的用户手势**
+   （权限窗、音频解锁都靠它）。所以 `startInterview` 里先
+   `acquireMedia()`（麦克风 → 桌面端再走宿主摄像头），拿到结果再 `POST /start`。
+2. **设备失败不挡面试**（§6.3），但要**如实汇报**：接了什么、没接上什么、
+   下一步怎么办。不许用一句「已开始」盖过去。
+3. **舞台的主按钮就是「开始面试」**，它做完整的准备；「申请摄像头与麦克风」
+   退成次要按钮（权限自查用）。不许让用户先点设备、再点开始。
+4. **续接 / 继续也在同一个手势里接设备**：`continueInterview` 先
+   `POST /continue` 再 `acquireMedia()`。
+5. **重置把状态打回 draft 时，设备必须关灯**（§10.3）：客户端按「不在面试中」
+   兜底释放，Host 不知道浏览器这边还开着。
+6. **`hostCamera` 在 hooks 顺序里比 `startInterview` 晚定义**——依赖数组是
+   渲染期求值的，直接引用会踩 TDZ（`ReferenceError: Cannot access 'hostCamera'
+   before initialization`，布局闸门真抓到过）。用 `hostCameraRef` 在点击那一刻读。
+
 ---
 
 ## 8. 目录约定
@@ -460,7 +575,7 @@ DashScope 每个模型只支持一组特定音色，跨模型混用报 InvalidPa
 | 路径 | 放什么 |
 |---|---|
 | `src/host/` | Host 半边：service / api / tools / skills / jd / html / extract |
-| `src/host/voice/` | 语音：`host-asr`（宿主服务适配）/ `http-asr`（两套协议）/ `tts`（编排 + `tts/` 下的协议适配）/ `credentials`（凭据读写 seam）/ `presets`（服务表，界面与解析层唯一来源）/ `redact`（密钥擦除，唯一一处） |
+| `src/host/voice/` | 语音：`host-asr`（宿主服务适配）/ `http-asr`（四套协议：OpenAI 兼容 / MiniMax / MiMo chat-audio / DashScope 原生）/ `tts`（编排 + `tts/` 下的协议适配）/ `credentials`（凭据读写 seam）/ `presets`（服务表，界面、配置枚举与解析层唯一来源）/ `redact`（密钥擦除，唯一一处） |
 | `src/client/` | 浏览器半边源码：`00-header` / `10-prelude` / `20-locale` / `30-theme` / `40-api` / `50-hooks` / `60-voice` / `70-primitives` / `80-views` / `90-panel`（按 `manifest.json` 顺序拼装） |
 | `src/skills/<name>/SKILL.md` | 随包技能源码 |
 | `client.js` | 浏览器半边**生成物**（`node scripts/build-client.mjs` 拼装；不许手改） |
@@ -527,6 +642,10 @@ manifest 字段缺失、`client.js` 没走 `window.__ModuleLoader__.load`、
   **四级 elevation**（每级 = 接触影 + 外缝 + 蓝黑环境影）；凸面（`.iv-s1/.iv-s2/.iv-s3`）
   与凹面（`.iv-well` / `--iv-inset`：输入框、页签槽、电平表底）**必须同框出现**。
   **不许**用粗描边、单层大模糊投影、多层渐变冒充层次——那是「单薄的纸」的来源。
+  **暗色下环境影要收着**（0.55→0.82 四档递增，半径一档一档放大）：页面底本身就是
+  近黑，再叠 alpha≈1 的黑影，卡片下方会变成「一块糊住内容的黑」——底部的按钮与速记
+  字被压得读不出来（用户原话：「底部的阴影有点太重了，把按钮和信息遮挡得有点太暗」）。
+  暗角同理：只收四角，**不许收到底部发暗**。
 - **字号只有六档**（display 24 / title 17 / body 13.5 / sub 12.5 / meta 10.5 /
   nano 9.5）。层级靠字重、颜色、留白区分，不靠半像素的字号差。
 - **颜色各司其职**：中性墨底/纸白 + 单一蓝灰 accent；朱红只给 REC 与危险动作，

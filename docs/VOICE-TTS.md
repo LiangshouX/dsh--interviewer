@@ -14,13 +14,13 @@
 
 | 系列 | 插件预设 id | 协议 | 默认端点 | 凭据 ref | 模型举例 |
 |---|---|---|---|---|---|
-| Qwen-Audio-TTS | `dashscope` | **tts_v2 WebSocket**（另有 HTTP 非实时） | `wss://token-plan.maas.qianwenaiapi.com/api-ws/v1/inference` | `QIANWEN_TOKEN_PLAN_API_KEY` / `DASHSCOPE_API_KEY` | `qwen-audio-3.0-tts-plus` |
+| Qwen-Audio-TTS | `dashscope-token-plan` / `dashscope` | **tts_v2 WebSocket** | `wss://token-plan.maas.qianwenaiapi.com/api-ws/v1/inference` / `wss://dashscope.aliyuncs.com/api-ws/v1/inference` | `QIANWEN_TOKEN_PLAN_API_KEY` / `DASHSCOPE_API_KEY` | `qwen-audio-3.0-tts-plus` |
 | CosyVoice | `dashscope`（同协议） | tts_v2 WebSocket / HTTP | 同上 / 百炼 | `DASHSCOPE_API_KEY` | `cosyvoice-v3-flash` |
 | Qwen3-TTS | （未接，见 ROADMAP） | DashScope 原生 multimodal-generation HTTP | `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation` | `DASHSCOPE_API_KEY` | `qwen3-tts-flash` |
-| MiniMax | `minimax` / `minimax-cn` | HTTP `t2a_v2`（音频=**hex**） | `https://api.minimax.cn/v1/t2a_v2` | `MINIMAX_API_KEY`(+`MINIMAX_GROUP_ID`) | `speech-02-hd` |
-| MiMo | `mimo` | HTTP `chat/completions`+`audio` | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `mimo-v2.5-tts` |
+| MiniMax | `minimax-token-plan` / `minimax-cn` | HTTP `t2a_v2`（音频=**hex**） | `https://api.minimax.cn/v1/t2a_v2` | `M_PLAN_API_KEY` / `MINIMAX_API_KEY` | `speech-02-hd` |
+| MiMo | `mimo-token-plan` / `mimo` | HTTP `chat/completions`+`audio` | `https://token-plan-cn.xiaomimimo.com/v1` / `https://api.xiaomimimo.com/v1` | `XIAOMI_TOKEN_PLAN_CN_API_KEY` / `MIMO_API_KEY` | `mimo-v2.5-tts` |
 | OpenAI 兼容 | `openai` | HTTP `/audio/speech` | 任意兼容网关 | `OPENAI_API_KEY` | `gpt-4o-mini-tts` |
-| 免密钥兜底 | `baidu` / `edge` | 非公开朗读接口 / WS | — | 无 | — |
+| 免密钥兜底 | `baidu` / `edge` / `browser` | 非公开朗读接口 / WS / `speechSynthesis` | — | 无 | — |
 
 **通用坑（三家都适用）：**
 - **key 与主机/平台要配对**：Token Plan 中转 key 只在该中转主机有效，打官方端点 401；反之亦然。
@@ -82,7 +82,10 @@ Qwen 系 TTS 有**三条不同的线**，协议互不兼容，别混：
 | 千问 AI 平台（北京/通用） | `wss://cn-beijing.maas.qianwenaiapi.com/api-ws/v1/inference` / `wss://maas.qianwenaiapi.com/...` | 该平台 key（非 Token Plan key） | 视平台 |
 | 官方百炼 DashScope | `wss://dashscope.aliyuncs.com/api-ws/v1/inference` | `DASHSCOPE_API_KEY` | 全系 |
 
-> Token Plan 的 **HTTP `compatible-mode/v1` 中转不开音频路径**（`/audio/speech`、`/audio/transcriptions` 一律 400/404）。音频要走上面的 `api-ws` WebSocket 或官方端点。
+> Token Plan 的 **HTTP `compatible-mode/v1` 中转不开音频路径**（`/audio/speech`、`/audio/transcriptions` 一律 400/404）。
+> Qwen 的 TTS 走 `api-ws` WebSocket；Qwen 的 ASR 走 **原生 `multimodal-generation` 端点**
+> （`https://token-plan.maas.qianwenaiapi.com/api/v1/services/aigc/multimodal-generation/generation`，
+> 模型 `qwen-audio-3.0-asr-flash`，2026-11-18 实测 200）。两者都不是 compatible-mode 那条 HTTP 路。
 
 **协议 A：tts_v2 WebSocket（插件所用）** — 事件驱动：
 `run-task`(配 model/voice/format) → 等 `task-started` → `continue-task`(送文本) → `finish-task` → 收**二进制音频帧** + `result-generated` → `task-finished`。失败回 `task-failed`(带 error_code/error_message)。
@@ -315,7 +318,12 @@ curl -X POST "https://api.minimax.cn/v1/t2a_v2" \
 ```
 format ∈ wav/mp3/pcm/pcm16（流式默认 pcm，建议显式 pcm16=24kHz 单声道）；不支持 opus/aac。`audio.transcript` 恒 null（无时间戳）。
 
-**凭据 / 坑：** `MIMO_API_KEY`；**官方按量 key=`sk-`、Token Plan key=`tp-`，互不通用**（混用 401）。Token Plan 专属 base `https://token-plan-cn.xiaomimimo.com/v1`（-sgp/-ams 同构），且**套餐仅限编程工具用途**，后端 API 场景应用按量官方 key（TTS 限时免费）。`base_resp.status_code` 官方未记载（插件防御性保留，**待核实**）；更稳是检查 `audio.data` 是否为空+内嵌 error。voiceclone 精确时长官方仅说「数秒」+≤10MB（插件 5–30s 为自定建议）。
+**凭据 / 坑：** `MIMO_API_KEY`（官方按量，`sk-`）/ `XIAOMI_TOKEN_PLAN_CN_API_KEY`（Token Plan，`tp-`），**互不通用**（混用 401）。
+Token Plan 专属 base `https://token-plan-cn.xiaomimimo.com/v1`（-sgp/-ams 同构）；插件把它单列成
+`mimo-token-plan` 预设。官方文档名义上「套餐仅限编程工具用途」，但 Token Plan 端点确实暴露
+`mimo-v2.5-asr` / `mimo-v2.5-tts` / `-voiceclone` / `-voicedesign` 四个模型；能不能真调取决于手里套餐，
+401 时界面会直接指路「MiMo · API 直连」。
+`base_resp.status_code` 官方未记载（插件防御性保留，**待核实**）；更稳是检查 `audio.data` 是否为空+内嵌 error。voiceclone 精确时长官方仅说「数秒」+≤10MB（插件 5–30s 为自定建议）。
 
 ---
 
@@ -331,10 +339,11 @@ format ∈ wav/mp3/pcm/pcm16（流式默认 pcm，建议显式 pcm16=24kHz 单�
 |---|---|
 | `DASHSCOPE_API_KEY` | 官方百炼 DashScope |
 | `QIANWEN_TOKEN_PLAN_API_KEY` / `QWEN_TOKEN_PLAN_API_KEY` | 千问 Token Plan 中转 |
-| `MINIMAX_API_KEY` / `MINIMAX_M_PLAN_API_KEY` | MiniMax 按量 / M Plan |
+| `M_PLAN_API_KEY` / `MINIMAX_M_PLAN_API_KEY` | MiniMax Token Plan（M Plan） |
+| `MINIMAX_API_KEY` | MiniMax 按量 |
 | `MINIMAX_GROUP_ID` | MiniMax 旧账户 GroupId（社区惯例） |
 | `MIMO_API_KEY` | MiMo 官方按量 |
-| `XIAOMI_TOKEN_PLAN_CN_API_KEY` | 小米 Token Plan（中转） |
+| `XIAOMI_TOKEN_PLAN_CN_API_KEY` | 小米 MiMo Token Plan（中转） |
 | `OPENAI_API_KEY` / `SILICONFLOW_API_KEY` | OpenAI / SiliconFlow 兼容 |
 
 > 密钥只进宿主 `ctx.credentials`，不进插件配置文件（见 VOICE.md）。

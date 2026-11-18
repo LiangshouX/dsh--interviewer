@@ -366,7 +366,7 @@ fetch(url, {redirect: follow, UA: 桌面 Chrome, Accept-Language: zh-CN})
 const controller = ctx.get('sessionController')
 await controller.prompt({
   requestId: `jd-${sessionId}-${Date.now()}`,
-  sessionId: hostSessionId,           // 默认最近活跃的那个对话
+  sessionId: hostSessionId,           // 这一场面试专属的助手会话（拉 JD / 出底稿共用）
   mode: 'queue',
   content: [{ type: 'text', text: '请帮我抓取这个岗位 JD：… 然后调用 interview_save_jd …' }],
 })

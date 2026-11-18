@@ -205,6 +205,9 @@ async function readResource(service, segments, query) {
     if (rest.length === 0) return { sessions: await service.listSessions() }
     // 空场次清单（误触新建的清理候选）
     if (rest[0] === 'empty') return { candidates: await service.listEmptySessions() }
+    // 「记录清理」弹层：每场的记录体量（转录轮数 / 录音 / 占用）。
+    // **只在打开弹层时取**——它要读每场的文件，不能进 6 秒轮询。
+    if (rest[0] === 'records') return { sessions: await service.listSessionsForCleanup() }
     // **归档正文单独取。** 简历/动辄几十 KB，跟着 1.5 秒一次的轮询传
     // 是纯浪费——而且它在「准备」页才有用，面试页根本不需要。
     if (rest[1] === 'documents') {
@@ -333,6 +336,10 @@ async function runAction(service, segments, body) {
       if (rest[0] === 'cleanup') {
         return await service.purgeEmptySessions(body.ids)
       }
+      // 「记录清理」：勾选哪几场就删哪几场。逐场返回结果（进行中的会被拒）。
+      if (rest[0] === 'delete-batch') {
+        return await service.deleteSessions(body.ids)
+      }
       const sessionId = rest[0]
       const action = rest[1]
       switch (action) {
@@ -361,6 +368,13 @@ async function runAction(service, segments, body) {
           return { session: await service.startSession(sessionId) }
         case 'finish':
           return { session: await service.finishSession(sessionId) }
+        // 重置：清掉面试过程的记录（转录 / 报告 / 计时 / 「问过」标记），
+        // 留下材料与底稿；录音录像默认保留，`dropRecordings: true` 才删。
+        case 'reset':
+          return await service.resetSession(sessionId, { dropRecordings: body.dropRecordings === true })
+        // 续接：已结束的面试接着面（不重开一轮，中断时间记进 pausedMs）。
+        case 'continue':
+          return { session: await service.continueSession(sessionId) }
         // 暂停 / 继续（TURN-TAKING §6）。
         //
         // **路由名是 `unpause` 而不是 `resume`**：`sessions/<id>/resume`
@@ -413,6 +427,14 @@ async function runAction(service, segments, body) {
           String(body.sessionId ?? ''),
           body.hostSessionId,
         )
+      }
+      // 等助手返回的任务：用户点「忽略」时把这条 loading/失败记录清掉。
+      if (rest[0] === 'task') {
+        const action = String(body.action ?? '').trim().toLowerCase()
+        if (action === 'dismiss') {
+          return await service.dismissAgentTask(String(body.sessionId ?? ''), String(body.kind ?? ''))
+        }
+        throw new Error('助手任务操作只能是 dismiss。')
       }
       // 面试主循环的手动兜底/诊断入口（TURN-TAKING §7）：正常流程由
       // start/turn/unpause 自动联动，这里是「重发一次」的显式按钮路径。

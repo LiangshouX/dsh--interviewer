@@ -23,7 +23,7 @@
 
 | 方法 | 路径 | 语义 |
 |---|---|---|
-| `GET` | `voice/presets` | `{presets:[{kind,id,label,protocol,baseUrl,model,voice,apiKeyEnv,keyless,notes}]}`，设置页服务下拉的唯一来源 |
+| `GET` | `voice/presets` | `{presets:[{kind,id,group,groupLabel,vendor,label,protocol,protocolLabel,baseUrl,model,models,voice,apiKeyEnv,keyless,locked,notes}]}`，设置页服务下拉的唯一来源 |
 | `GET` | `voice/credentials` | `{credentials:[{ref,configured,source,writable}]}`，只有名字与状态 |
 | `POST` | `voice/credentials` | `{action:'set', ref, value}` 或 `{action:'clear', ref}`；响应只有 `ref` 与状态，**没有 value** |
 | `POST` | `voice/test` | `{kind:'tts'}` 或 `{kind:'asr', dataBase64, mimeType}`；真跑链路，失败带 `reason` + `hint` |
@@ -46,53 +46,84 @@
 | DSH profile 的 `cordis.patch.yml` 里 `*.apiKeyEnv` 是凭据引用名 | 这是"可继承"的唯一干净形状：同名的 `credentials.resolve()` 能取到值 |
 
 > 本机已配置的 ref 名（**值不记录、不打印**）：
-> `XIAOMI_TOKEN_PLAN_CN_API_KEY`、`MINIMAX_M_PLAN_API_KEY`、
-> `QIANWEN_TOKEN_PLAN_API_KEY`、`QWEN_TOKEN_PLAN_API_KEY`、`DEEPSEEK_API_KEY`。
+> `XIAOMI_TOKEN_PLAN_CN_API_KEY`、`M_PLAN_API_KEY`、
+> `QIANWEN_TOKEN_PLAN_API_KEY`、`DEEPSEEK_API_KEY`。
 
 ---
 
 ## 3. 协议与预设
 
-预设表在 `src/host/voice/presets.js`，**设置页下拉只从这里取**（`GET voice/presets`），
-前端不硬编码 provider。每项带 `{kind,id,label,protocol,baseUrl,model,voice,
-apiKeyEnv,keyless,notes}`；`notes` 是悬停一句话，`keyless` 决定要不要凭据行。
+预设表在 `src/host/voice/presets.js`，**设置页下拉、配置校验（`paths.js` 的枚举）
+都只从这里派生**，前端不硬编码 provider。每项带
+`{kind,id,group,label,protocol,baseUrl,model,models,voice,apiKeyEnv,keyless,locked,notes}`；
+`notes` 是悬停一句话，`keyless` 决定要不要凭据行，`locked` 是「端点/协议/模型固定」。
+
+**排列顺序是产品顺序，也是下拉顺序：**
+
+```
+控制（自动 / 宿主 / 关闭）
+→ 预设供应商：Qwen、MiMo、MiniMax —— 每家两条：Token Plan / API 直连
+→ 任意 OpenAI 协议兼容（自定义端点 / SiliconFlow）
+→ 免密钥免费方案（百度朗读 / Edge 神经音色 / 浏览器）
+```
+
+**预设供应商是「配好的一对」，不许拼。** Token Plan 的 key 只在自己的中转上有效，
+Qwen 中转没有 flash 模型，Qwen/MiMo 的 ASR 都不在 `/audio/transcriptions` 上——
+把这些端点暴露成可编辑输入框，只会制造「看起来填对了却一直失败」。
+所以 `locked: true` 的预设：端点和模型只读，凭据名由预设决定；要自定义端点请选
+「任意 OpenAI 协议兼容」。`asrBaseUrl` / `asrModel` / `asrEndpoint` / `ttsBaseUrl`
+这些键只对非 locked 的预设生效。
 
 ### 3.1 语音识别（ASR）
 
-| 预设 id | 协议 | 端点 | 默认模型 | 默认凭据 |
+| 预设 id | 协议 | 端点 | 模型 | 默认凭据 |
 |---|---|---|---|---|
-| `auto` | 控制项 | — | — | — |
-| `host` | 宿主 `ctx.speechToText` | 宿主决定 | 宿主决定 | 不经插件手 |
-| `openai` | OpenAI 兼容 | `{base}/audio/transcriptions` | `FunAudioLLM/SenseVoiceSmall`（SiliconFlow） | `SILICONFLOW_API_KEY` |
+| `auto` / `host` / `browser` / `none` | 控制项 | — | — | — |
+| `qwen-token-plan` | DashScope 原生 `multimodal-generation` | `https://token-plan.maas.qianwenaiapi.com` | `qwen-audio-3.0-asr-flash` | `QIANWEN_TOKEN_PLAN_API_KEY` |
+| `qwen` | 同上 | `https://dashscope.aliyuncs.com` | `qwen-audio-3.0-asr-flash` | `DASHSCOPE_API_KEY` |
+| `mimo-token-plan` | `chat/completions` + `input_audio` | `https://token-plan-cn.xiaomimimo.com/v1` | `mimo-v2.5-asr` | `XIAOMI_TOKEN_PLAN_CN_API_KEY` |
+| `mimo` | 同上 | `https://api.xiaomimimo.com/v1` | `mimo-v2.5-asr` | `MIMO_API_KEY` |
+| `minimax-token-plan` | MiniMax `speech_to_text` | `https://api.minimax.cn` | `asr-1.0` | `M_PLAN_API_KEY` |
+| `minimax-cn` | 同上 | `https://api.minimax.cn` | `asr-1.0` | `MINIMAX_API_KEY` |
 | `openai-custom` | OpenAI 兼容 | **必须自己填** | `whisper-1` | `OPENAI_API_KEY` |
-| `minimax` | MiniMax | `{base}/v1/speech_to_text` | `asr-1.0` | `MINIMAX_API_KEY` |
-| `minimax-cn` | MiniMax | `https://api.minimax.cn/v1/speech_to_text` | `asr-1.0` | `MINIMAX_API_KEY` || `browser` / `none` | 控制项 | — | — | — |
+| `openai` | OpenAI 兼容 | `https://api.siliconflow.cn/v1` | `FunAudioLLM/SenseVoiceSmall` | `SILICONFLOW_API_KEY` |
 
-两套协议的**语言位置不同**：OpenAI 兼容放表单字段 `language`，MiniMax 放
-HTTP 头 `language:`。协议选错通常表现为 404 / 400，错误信息不友好，
-所以 `transcribeHttp` 把实际端点、状态码与下一步一起带回来。
+**四套协议，语言位置各不相同**：DashScope 用 `parameters.language_hints`；
+MiMo 用 `asr_options.language`；OpenAI 兼容放表单字段 `language`；
+MiniMax 放 HTTP 头 `language:`。协议选错通常表现为 404 / 400，错误信息不友好，
+所以 `transcribeHttp` 把实际端点、协议、模型、状态码与下一步一起带回来。
+
+`auto` 的候选顺序 = 预设表 `auto: true` 的声明顺序（宿主继承的端点 → 六条预设供应商
+→ OpenAI 兼容）。**同一个 `asrApiKey` 明文 key 不会被分发给所有预设供应商**——
+否则配了 MiMo 的 key 会先拿 Qwen 的端点撞出 401。
 
 MiniMax 的 `GroupId` 是查询参数（`?GroupId=…`），设置页有独立字段，
 也认 `MINIMAX_GROUP_ID` 环境变量；留空就不带。
 
 ### 3.2 语音播报（TTS）
 
-| 预设 id | 协议 | 端点 | 默认音色 | 凭据 |
+| 预设 id | 协议 | 端点 | 默认模型 / 音色 | 凭据 |
 |---|---|---|---|---|
-| `auto` / `host` | 控制项 | — | — | — |
-| `mimo` | `chat/completions` + `audio` | `https://api.xiaomimimo.com/v1` | `mimo_default` | `MIMO_API_KEY` |
-| `openai` | `/audio/speech` | `https://api.openai.com/v1` | `alloy` | `OPENAI_API_KEY` |
-| `minimax` | `/v1/t2a_v2` | `https://api.minimaxi.com` | `female-shaonv` | `MINIMAX_API_KEY` |
-| `minimax-cn` | `/v1/t2a_v2` | `https://api.minimax.cn` | `female-shaonv` | `MINIMAX_API_KEY` |
-| `baidu` | 免密钥朗读 | `fanyi.baidu.com/gettts` | — | 无 |
-| `edge` | 免密钥 WebSocket | 微软朗读端点 | `zh-CN-XiaoxiaoNeural` | 无 |
-| `browser` / `none` | 控制项 | — | — | — |
+| `auto` / `host` / `browser` / `none` | 控制项 | — | — | — |
+| `dashscope-token-plan` | tts_v2 WebSocket | `wss://token-plan.maas.qianwenaiapi.com/api-ws/v1/inference` | `qwen-audio-3.0-tts-plus` / `longanlingxin` | `QIANWEN_TOKEN_PLAN_API_KEY` |
+| `dashscope` | tts_v2 WebSocket | `wss://dashscope.aliyuncs.com/api-ws/v1/inference` | `qwen-audio-3.0-tts-plus` / `longanlingxin` | `DASHSCOPE_API_KEY` |
+| `mimo-token-plan` | `chat/completions` + `audio` | `https://token-plan-cn.xiaomimimo.com/v1` | `mimo-v2.5-tts` / `mimo_default` | `XIAOMI_TOKEN_PLAN_CN_API_KEY` |
+| `mimo` | 同上 | `https://api.xiaomimimo.com/v1` | `mimo-v2.5-tts` / `mimo_default` | `MIMO_API_KEY` |
+| `minimax-token-plan` | `/v1/t2a_v2` | `https://api.minimax.cn` | `speech-02-hd` / `female-shaonv` | `M_PLAN_API_KEY` |
+| `minimax-cn` | `/v1/t2a_v2` | `https://api.minimax.cn` | `speech-02-hd` / `female-shaonv` | `MINIMAX_API_KEY` |
+| `openai` | `/audio/speech` | 可自定义（默认 `https://api.openai.com/v1`） | 可自定义 / `alloy` | `OPENAI_API_KEY` |
+| `baidu` / `edge` | 免密钥朗读 / WS | 非公开端点 | — | 无 |
 
 `auto` 的顺序就是预设表里的 `auto: true` 声明顺序：
-**MiMo → OpenAI 兼容 → MiniMax → 百度 → Edge → 浏览器**。
+**Qwen → MiMo → MiniMax → OpenAI 兼容 → 百度 → Edge → 浏览器**。
+Qwen 的模型只能从该预设声明的 `models` 里选（Token Plan 只有
+`qwen-audio-3.0-tts-plus`），音色按模型查 `voices.js`——跨模型混用会报
+`InvalidParameter` / `[cosyvoice:]Engine error [411]`。
 
 各协议的实现细节在 `src/host/voice/tts/`：
 
+- `dashscope.js`：tts_v2 WebSocket（run-task / continue-task / finish-task + 二进制帧）；
+  Token Plan 与官方百炼是**两条端点**，`dashscope` 只连官方，Token Plan 用另一个预设。
 - `mimo.js`：目标文本放 **assistant** 消息，音色进 `audio.voice`；
   voicedesign 不能传 `audio.voice`（音色由 user 描述），
   voiceclone 需要 `ttsReferenceAudio` 样本。同时带 `api-key` 与 `Bearer`。
@@ -103,11 +134,16 @@ MiniMax 的 `GroupId` 是查询参数（`?GroupId=…`），设置页有独立�
   这两点都必须把业务码与原文带回界面（例如 2056 = Token Plan 用量上限）。
 - `baidu.js` / `edge.js`：免密钥兜底。百度实测可用；Edge 在部分网络出口被 WAF 拦成 403。
 
-**Qwen Token Plan 中转不是语音预设。** 本机探活确认：`/models` 列出过
-`qwen-audio-3.0-tts-plus` / `qwen-audio-3.0-asr-flash`，但除
-`/chat/completions` 与 `/models` 外的路径一律 `400 url error`
-（含 `/audio/speech`、`/audio/transcriptions`、原生 dashscope 路径）。
-它是纯文本中转，所以**不提供 Qwen 语音选项**，避免用户白试。
+**2026-11-18 复测（本机，真链路）：**
+
+| 链路 | 结果 |
+|---|---|
+| Qwen Token Plan · ASR | ✅ `POST {token-plan}/api/v1/services/aigc/multimodal-generation/generation`，`qwen-audio-3.0-asr-flash` + `audio` data URI → 200，`output.text` 正确 |
+| Qwen Token Plan · ASR 的 OpenAI 兼容路径 | ❌ `chat/completions` + `qwen3-asr-flash` = 404 `model_not_found`；`/audio/transcriptions` = 400 `url error`。**别往这条路上接** |
+| Qwen Token Plan · TTS | ✅ `api-ws/v1/inference`（tts_v2），`qwen-audio-3.0-tts-plus` |
+| MiniMax · ASR / TTS | 协议正确；本机 M Plan 套餐返回 429 / 业务码 2056（用量上限），界面原样显示 |
+| MiMo | 本机没有官方 key；Token Plan 的 `tp-` key 打官方端点会 401，所以两条预设都要摆出来，由用户手里的 key 决定选哪条 |
+| 宿主语音服务 | 本机 profile 引用的 `dsh-enable-voice-input` tarball 已不在磁盘上，`ctx.speechToText` 不存在 → `host` 不可用 |
 
 ---
 
@@ -120,10 +156,10 @@ MiniMax 的 `GroupId` 是查询参数（`?GroupId=…`），设置页有独立�
    与 `settingsPath()` 同一套优先级；文件不存在/读不了就跳过，**不抛**。
 2. 宿主 credentials 存储里 `listRecords()` 的 ref 名（只取 `ref`/`name`/`id`，
    **不读值**）。
-3. 常见候选名：`MIMO_API_KEY`、`OPENAI_API_KEY`、`MINIMAX_API_KEY`、
-   `MINIMAX_M_PLAN_API_KEY`、`SILICONFLOW_API_KEY`、`DASHSCOPE_API_KEY`、
-   `QWEN_TOKEN_PLAN_API_KEY`、`QIANWEN_TOKEN_PLAN_API_KEY`、
-   `XIAOMI_TOKEN_PLAN_CN_API_KEY`。
+3. 常见候选名：`MIMO_API_KEY`、`XIAOMI_TOKEN_PLAN_CN_API_KEY`、`M_PLAN_API_KEY`、
+   `MINIMAX_M_PLAN_API_KEY`、`OPENAI_API_KEY`、`MINIMAX_API_KEY`、
+   `SILICONFLOW_API_KEY`、`DASHSCOPE_API_KEY`、`QWEN_TOKEN_PLAN_API_KEY`、
+   `QIANWEN_TOKEN_PLAN_API_KEY`。
 
 返回 `[{ref, configured, source, writable}]`，**没有值**。已配置的排前面。
 `source` 与 `resolveSecret` 的顺序一致：`host`（宿主凭据）优先，
@@ -189,34 +225,39 @@ MiniMax 的 `GroupId` 是查询参数（`?GroupId=…`），设置页有独立�
 | 现象 | reason 里写什么 | hint 里给什么 |
 |---|---|---|
 | 缺凭据 | 缺哪个 ref（只写名字） | 选已有凭据 / 填一个 / 改用环境变量 + 重启 |
-| HTTP 401 / 403 | 状态码 + 服务返回体的前 200 字符（已擦密钥） | 确认 key 属于该服务；或用浏览器识别 + 键盘 / 百度朗读 |
-| HTTP 404 | 状态码与端点 | 协议路径写错了：`/audio/transcriptions` vs `/v1/speech_to_text` |
-| HTTP 400 | 状态码与返回体 | 音频格式、模型 id、MiniMax Group ID |
+| HTTP 401 / 403 | 状态码 + 服务返回体的前 300 字符（已擦密钥） | **Token Plan 的 key 只在自己的中转有效**；确认凭据名与预设配对 |
+| HTTP 404 | 状态码与端点 | 这个预设被改过：OpenAI 兼容是 `/audio/transcriptions`，MiniMax 是 `/v1/speech_to_text`，MiMo 是 `/chat/completions`，Qwen 是 DashScope 原生端点 |
+| HTTP 400 | 状态码与返回体 | 音频格式（要 wav/mp3，不要 webm）、模型与端点不配对、参数不支持 |
 | 超时 | 具体毫秒数 | 检查网络/代理；换一条兜底链路 |
 | 200 但无音频/文字 | 缺的字段 | 换模型 / 检查额度 / 先用键盘 |
-| MiniMax 业务码 | `base_resp.status_code` + `status_msg` 原文（如 2056 用量上限） | 升级套餐 / 换 MiMo、OpenAI 兼容 |
-| MiMo 401 | HTTP 401 | **Token Plan 中转的 key 只能走它自己的中转**，要 MiMo 音色得申请官方 key |
+| MiniMax 业务码 | `base_resp.status_code` + `status_msg` 原文（如 2056 用量上限） | 升级套餐 / 换 Qwen、MiMo、OpenAI 兼容 |
+| MiMo 401 | HTTP 401 | **Token Plan 的 tp- key 打官方端点必 401**；要官方音频用官方按量 key |
 | 写凭据没有 seam | 宿主不提供 `ctx.credentials` | 环境变量 + 重启 DSH；插件设置文件里从来没存过密钥 |
 
 ---
 
-## 8. 现在这台机器上的实情（2026-11 探活）
+## 8. 现在这台机器上的实情（2026-11-18 探活）
 
-- **播报**：百度朗读（免密钥）可用，是 `auto` 的实际兜底；Edge 被 WAF 拦（403）。
-- **MiniMax 合成**：端点/协议正确，但本机 Token Plan 返回业务码
-  `2056`（用量上限），界面上会原样显示 status_msg。
-- **MiMo TTS**：本机的 `XIAOMI_TOKEN_PLAN_CN_API_KEY` 是 Token Plan 中转的 key，
-  打 MiMo 官方端点回 401；要 MiMo 音色需要官方 key。
-- **ASR**：宿主没启用语音服务；服务端目前没有可用凭据；Qwen 中转只支持文本。
-  所以识别实际走浏览器 Web Speech / 键盘，设置页的提示行会如实说明，
-  并给出「选 OpenAI 兼容预设 + 填 `/audio/transcriptions` 端点 + 配凭据」的出路。
+- **播报**：`auto` 选中 Qwen Token Plan（`dashscope-token-plan`），实测可用；
+  没有 Qwen 凭据时回落到百度朗读（免密钥），Edge 可能被 WAF 拦（403）。
+- **识别**：`auto` 选中 Qwen Token Plan（`qwen-token-plan`），
+  DashScope 原生 `multimodal-generation` 端点实测返回正确文字。
+  这是之前「不管走 Token Plan 还是别的路径都失败」的根因修复：
+  Qwen/MiMo 的 ASR 本来就不在 `/audio/transcriptions` 上。
+- **MiniMax**：M Plan 套餐本机返回 429 / 业务码 2056（用量上限）；
+  端点、协议、错误回显都是对的。
+- **MiMo**：本机没有官方 key；Token Plan 的 key 如果只覆盖编程工具，
+  打 `token-plan-cn.xiaomimimo.com` 也会 401——界面会指路「MiMo · API 直连」。
+- **宿主语音服务**：本机 profile 里引用的 `dsh-enable-voice-input` tarball
+  已不在磁盘上，`ctx.speechToText` 不存在，`host` 预设会如实说不可用。
 
 ---
 
 ## 9. 不做什么
 
 - 不把宿主的聊天 provider 当语音端点（宿主没给 baseUrl）；
-- 不为 Qwen 中转造一个"看起来能跑"的语音预设；
+- 不让「预设供应商」的端点/模型可编辑——Token Plan 与官方主机、key、模型是成对的，
+  可编辑只会制造「看起来填对了却一直失败」；要自定义端点选「OpenAI 兼容」；
 - 不静默换链路：每次转写带 `attempts`，每次播报回落都说 `reason`；
 - 不把密钥写进插件设置文件，也不在 agent 工具面提供写入入口；
 - 不做流式：宿主的识别是整段转写，「准实时」靠客户端按静音切段。

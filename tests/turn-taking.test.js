@@ -158,7 +158,8 @@ test('pause/resume：system 行留痕、pausedMs 累计、durationMs 扣掉暂�
     assert.equal(resumedMeta.pausedAt, 0)
     assert.ok(resumedMeta.pausedMs >= 50, `pausedMs 应至少覆盖睡眠段，实际 ${resumedMeta.pausedMs}`)
     const resumeLine = await lastSystemLine(service, session.id)
-    assert.match(resumeLine.text, /^面试继续（本次暂停 \d+ 分钟）$/)
+    // 留痕说**真实**的暂停时长：这里只睡了 100ms，写「1 分钟」会让时间线对不上。
+    assert.match(resumeLine.text, /^面试继续（本次暂停 \d+ 秒）$/)
 
     // resume 联动派活：助手带着完整上下文续接（§6.4/§6.5）。
     await service.lastDispatch
@@ -306,7 +307,7 @@ test('助手会话 per-session：两场面试各存各的，不串场、不漂�
   })
 })
 
-test('老数据迁移：**只有老场次**（无 agentSessionId 字段）继承全局键', async () => {
+test('老数据迁移：**老场次也不继承全局键**——那正是「会话乱飞」的来源', async () => {
   await withEnv(async ({ root }) => {
     await writeSettings({ agentSessionId: 'legacy-session' })
     const { controller, log } = makeController()
@@ -319,18 +320,22 @@ test('老数据迁移：**只有老场次**（无 agentSessionId 字段）继承
     delete meta.agentSessionId
     await writeFile(metaPath, JSON.stringify(meta, undefined, 2))
 
+    // 全局键是「最近一次 create」的面包屑，属于**另一场**面试。
+    // 老场次继承它 = 新岗位拉 JD 时请求被发到某个面试中的对话里（串场）。
+    // 所以没有记录就新建，绝不拿面包屑当寻址依据。
     const result = await service.requestAgentStart(legacy.id)
     assert.equal(result.dispatched, true)
-    assert.equal(log.creates.length, 0, '老场次有可继承的全局会话就不该 create')
-    assert.equal(log.prompts[0].sessionId, 'legacy-session')
-    assert.equal((await service.getSession(legacy.id)).agentSessionId, 'legacy-session', '迁移要落盘（一次性）')
+    assert.equal(log.creates.length, 1, '没有自己的会话就建一个')
+    assert.equal(log.prompts[0].sessionId, 'host-session-1')
+    assert.notEqual(log.prompts[0].sessionId, 'legacy-session', '不许把别人的会话当自己的')
+    assert.equal((await service.getSession(legacy.id)).agentSessionId, 'host-session-1')
 
-    // **新场次不继承**：全局键只是面包屑，继承它等于两场共用一个助手（串场）。
+    // 新场次同理：不继承，各建各的。
     const fresh = await service.createSession({ title: '新场次' })
     await service.requestAgentStart(fresh.id)
-    assert.equal(log.creates.length, 1, '新场次必须建自己的会话')
-    assert.equal(log.prompts[1].sessionId, 'host-session-1')
-    assert.equal((await service.getSession(fresh.id)).agentSessionId, 'host-session-1')
+    assert.equal(log.creates.length, 2)
+    assert.equal(log.prompts[1].sessionId, 'host-session-2')
+    assert.equal((await service.getSession(fresh.id)).agentSessionId, 'host-session-2')
   })
 })
 

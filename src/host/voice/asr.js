@@ -214,7 +214,9 @@ function publicServer(server) {
   }
   return {
     available: true,
+    label: server.label,
     protocol: server.protocol,
+    protocolLabel: server.protocolLabel,
     endpoint: server.endpoint,
     model: server.model,
     source: server.source,
@@ -233,7 +235,7 @@ export function hintFor(resolved, host, server) {
   if (resolved.mode === ASR_MODE.NONE) return '服务端识别被配置关闭了；需要的话把 asrProvider 改回 auto。'
   const hints = []
   if (host.available === false) hints.push('宿主没有启用语音识别服务（voice-input bundle）')
-  if (server.available !== true) hints.push('插件也没有可用的服务端识别凭据')
+  if (server.available !== true) hints.push('也没有一条能用的服务端识别（在设置页选一个预设，并配好它对应的凭据）')
   hints.push('现在是浏览器识别 + 键盘输入，面试不受影响')
   return `${hints.join('；')}。`
 }

@@ -124,6 +124,61 @@ const DEFAULT_TRANSCRIPT_LIMIT = 200
 const VOICE_TEST_SENTENCE = '这是一次语音播报测试。听到这句话，说明面试官的声音已经接通。'
 
 /**
+ * 「等助手返回」的三件事：抓 JD / 出底稿 / 写报告。
+ *
+ * **为什么要宿主记状态。** 面板点完按钮只拿到「已派发」；助手什么时候回、
+ * 有没有回，客户端自己猜不出来——**猜出来的 loading 就是假活空转**。
+ * 所以派发时落一条记录（`session.json.agentTasks`），对应写入落盘时清掉；
+ * 读取状态时按「宿主会话在不在跑 + 有没有超过等待上限」给结论：
+ *
+ *   waiting —— 还在跑（或在宿主队列里排队），继续转；
+ *   failed  —— 有终点的失败：会话没了、这一轮跑完却没写回、或者超时。
+ *
+ * 三种失败都必须能把「下一步」交给用户（AGENTS §7），不许无限转圈。
+ */
+const AGENT_TASK_DEADLINE_MS = {
+  jd: 4 * 60 * 1000,
+  checklist: 10 * 60 * 1000,
+  report: 10 * 60 * 1000,
+}
+
+/**
+ * 判定「这一轮跑完了却没写回」的宽限期。
+ *
+ * 派发刚入队时宿主可能还没把 `running` 置真；太早判定会误伤，
+ * 所以只对**已经等了 12 秒以上**的任务做「settled = 失败」的判断。
+ */
+const AGENT_TASK_GRACE_MS = 12000
+
+/** 三种任务的失败话术（reason 说事实，hint 给下一步）。 */
+const AGENT_TASK_FAILURE = {
+  checklist: {
+    reason: '助手这一轮结束了，但没有写回底稿',
+    hint: '再点「重新生成」派一次；也可以让助手在对话里用 interview_save_checklist 写入。',
+  },
+  jd: {
+    reason: '助手这一轮结束了，但没有写回 JD 正文',
+    hint: '再点「让助手去抓」；也可以把正文粘进 JD 框，或上传纯文本。',
+  },
+  report: {
+    reason: '助手这一轮结束了，但没有写回报告',
+    hint: '再点一次「生成事后报告」；也可以在对话里让助手用 interview_finish 写。',
+  },
+}
+
+/** 任务类型白名单。 */
+const AGENT_TASK_KINDS = ['jd', 'checklist', 'report']
+
+/**
+ * 助手会话账本最多留多少条。
+ *
+ * 它是**溯源**用的，不是日志文件：够回答「这场面试用了哪个宿主会话、
+ * 什么时候重建过、最近几次派活发到哪儿」就行。留太多会让 session.json
+ * 跟着每次轮询变大。
+ */
+const AGENT_LOG_MAX = 40
+
+/**
  * One interview session, with every operation the callers need.
  */
 export class InterviewService {
@@ -541,9 +596,10 @@ export class InterviewService {
       updatedAt: now,
       jdUrl: typeof input.jdUrl === 'string' ? input.jdUrl : '',
       profileId: typeof input.profileId === 'string' ? input.profileId : '',
-      // 这一场专属的宿主助手会话（派活寻址用，TURN-TAKING §6.2）。
-      // 新建即带空串字段：**区别于老场次**（老场次没有这个字段，
-      // 才走「从全局设置继承」的一次性迁移）。
+      // 这一场专属的宿主助手会话（派活寻址用，AGENTS §6.14）。
+      // 新建即带空串字段：**空串 = 「明确还没有」**，于是第一次派活会
+      // create 一个（老场次连字段都没有，同样走 create——**谁也不继承
+      // 全局 `settings.agentSessionId`**，那是另一场面试的面包屑）。
       agentSessionId: '',
     }
     await writeJsonAtomic(join(dir, 'session.json'), meta)
@@ -710,7 +766,7 @@ export class InterviewService {
     const minutes = Math.max(1, Math.round(pausedSegment / 60000))
     await this.appendTurn(sessionId, {
       role: 'system',
-      text: `面试继续（本次暂停 ${minutes} 分钟）`,
+      text: `面试继续（本次暂停 ${describeGap(pausedSegment)}）`,
       meta: { event: 'resume', pausedSegmentMs: pausedSegment },
     })
     this.fireAgentDispatch(sessionId, {
@@ -745,6 +801,232 @@ export class InterviewService {
       pausedAt: 0,
       pausedMs,
     })
+  }
+
+  // ── 重置 / 续接 / 批量清理（把「一场面试」当成可整理的东西）────────────
+
+  /**
+   * 重置一场面试：**清掉面试过程的记录，留下材料与底稿。**
+   *
+   * 为什么需要它：误触「开始面试」再停掉，会留下几条零碎 system 行、
+   * 一段假的计时、一个「结束了」的状态——这些脏片段既进不了报告，
+   * 又不能用「删除」清掉（用户不想连简历 / JD / 底稿一起删）。
+   *
+   * **清什么、留什么必须一句话说得清**（界面照抄这一段）：
+   *
+   * | 清掉 | 留下 |
+   * |---|---|
+   * | 转录（含 system 行）、报告、计时与暂停账本 | 简历、JD、考点清单本身 |
+   * | 清单上的「问过」标记、证据与调整记录 | 标题 / 公司 / 岗位 / 档案关联 |
+   * | 「等助手」的任务记录 | 卷宗目录本身 |
+   * | 录音录像（**默认保留**，`dropRecordings` 才删） | |
+   *
+   * **助手会话要解绑，不是留着。** 旧会话里躺着一整轮面试的上下文；
+   * 重置之后还用它开场，助手会接着上一轮的思路说话——那正是「会话串场」
+   * （AGENTS §6.14）。解绑只改引用，旧对话仍在 DSH 里，用户自己处置。
+   *
+   * @param {string} sessionId
+   * @param {{dropRecordings?: boolean}} [input]
+   */
+  async resetSession(sessionId, input = {}) {
+    const meta = await this.getSession(sessionId)
+    const dir = await this.sessionDir(sessionId)
+    const transcript = await readJsonl(join(dir, 'transcript.jsonl'))
+    const cleared = {
+      turns: transcript.length,
+      interviewTurns: transcript.filter(row => row.role !== 'system').length,
+      report: false,
+      recordings: 0,
+      checklistProbed: 0,
+      checklistAdjustments: 0,
+      agentTasks: meta.agentTasks !== null && typeof meta.agentTasks === 'object'
+        ? Object.keys(meta.agentTasks).length
+        : 0,
+    }
+
+    // 1. 转录与报告：删文件，不写空文件——空文件会让「有没有记录」的判断失真。
+    await rm(join(dir, 'transcript.jsonl'), { force: true })
+    if (await isFile(join(dir, 'report.md'))) {
+      await rm(join(dir, 'report.md'), { force: true })
+      cleared.report = true
+    }
+
+    // 2. 录音录像是**不可恢复的文件**：默认留着，要删得显式要求。
+    const recordingsDir = join(dir, 'recordings')
+    const recordings = await listDirIfExists(recordingsDir)
+    if (input.dropRecordings === true) {
+      for (const name of recordings) {
+        await rm(join(recordingsDir, name), { recursive: true, force: true })
+      }
+      cleared.recordings = recordings.length
+    }
+
+    // 3. 底稿：只清「这场问过什么」，不清考点本身——底稿是准备阶段的成果。
+    const checklist = await readJsonIfExists(join(dir, 'checklist.json'))
+    if (checklist !== null && typeof checklist === 'object') {
+      const items = Array.isArray(checklist.items) ? checklist.items : []
+      cleared.checklistProbed = items.filter(item => item.probed === true).length
+      cleared.checklistAdjustments = Array.isArray(checklist.adjustments) ? checklist.adjustments.length : 0
+      await writeJsonAtomic(join(dir, 'checklist.json'), {
+        ...checklist,
+        items: items.map(item => {
+          const next = { ...item }
+          delete next.probed
+          delete next.note
+          delete next.evidence
+          return next
+        }),
+        adjustments: [],
+        updatedAt: Date.now(),
+      })
+    }
+
+    // 4. session.json：回到「还没开始」，解绑助手会话，清掉等助手的任务。
+    const previousAgent = typeof meta.agentSessionId === 'string' ? meta.agentSessionId.trim() : ''
+    for (const key of ['startedAt', 'endedAt', 'pausedAt', 'pausedMs', 'agentTasks']) delete meta[key]
+    meta.status = SESSION_STATUS.DRAFT
+    meta.agentSessionId = ''
+    meta.updatedAt = Date.now()
+    if (previousAgent !== '') {
+      meta.agentLog = [
+        ...(Array.isArray(meta.agentLog) ? meta.agentLog : []),
+        { at: meta.updatedAt, event: 'detach', hostSessionId: previousAgent, reason: 'reset' },
+      ].slice(-AGENT_LOG_MAX)
+    }
+    await writeJsonAtomic(join(dir, 'session.json'), meta)
+
+    return {
+      ok: true,
+      sessionId,
+      cleared: { ...cleared, hostSessionDetached: previousAgent !== '' },
+      kept: {
+        recordings: input.dropRecordings === true ? 0 : recordings.length,
+        checklistItems: Array.isArray(checklist?.items) ? checklist.items.length : 0,
+        resume: await isFile(join(dir, 'resume.txt')),
+        jd: await isFile(join(dir, 'jd.txt')),
+      },
+      session: { ...meta, dir },
+    }
+  }
+
+  /**
+   * 续接一场**已经结束**的面试。
+   *
+   * 场景：某次面试没聊完，但用户临时不方便，先「结束」把数据落定去分析；
+   * 之后想把这场不完美的面试接着面完——而不是重新开一场。
+   *
+   * 与 `startSession` 的区别是**计时口径**：续接不重开一轮，
+   * 中断的那段时间记进 `pausedMs`（它不是面试时长），所以报告里的
+   * durationMs 仍然只算真正在面的时间；转录、清单、助手会话全部沿用。
+   *
+   * @param {string} sessionId
+   */
+  async continueSession(sessionId) {
+    const meta = await this.getSession(sessionId)
+    if (meta.status !== SESSION_STATUS.DONE) {
+      throw new Error(`只有已结束的面试能续接（当前：${meta.status}）`)
+    }
+    const now = Date.now()
+    const endedAt = Number.isFinite(meta.endedAt) && meta.endedAt > 0 ? meta.endedAt : (meta.updatedAt || now)
+    const gap = Math.max(0, now - endedAt)
+    const pausedMs = (Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0) + gap
+    const session = await this.updateSession(sessionId, {
+      status: SESSION_STATUS.RUNNING,
+      endedAt: 0,
+      pausedAt: 0,
+      pausedMs,
+    })
+    const minutes = Math.max(1, Math.round(gap / 60000))
+    await this.appendTurn(sessionId, {
+      role: 'system',
+      // 留痕说**真实**的中断时长：只断了两秒却写「中断 1 分钟」，
+      // 事后复盘会以为中间隔了很久（`describeGap`）。
+      text: `面试续接（中断 ${describeGap(gap)}，接着上一轮）`,
+      meta: { event: 'continue', gapMs: gap },
+    })
+    this.fireAgentDispatch(sessionId, {
+      kind: 'continue-session',
+      requestId: `continue-session-${sessionId}-${now}`,
+      text: agentResumePrompt(sessionId, minutes, { continued: true }),
+    })
+    return session
+  }
+
+  /**
+   * 批量删除场次（「记录清理」）：用户勾选哪几场就删哪几场。
+   *
+   * **逐场报告结果，不整批失败。** 正在进行的面试会被拒（要先把设备关掉、
+   * 把转录收尾），其余照删；谁没删掉、为什么，逐条带回去。
+   *
+   * @param {string[]} ids
+   */
+  async deleteSessions(ids) {
+    const list = Array.isArray(ids) ? [...new Set(ids.map(value => String(value).trim()).filter(value => value !== ''))] : []
+    if (list.length === 0) throw new Error('没选要删的场次')
+    const deleted = []
+    const refused = []
+    for (const id of list) {
+      try {
+        const result = await this.deleteSession(id, {})
+        if (result.ok === false) refused.push({ id, reason: result.error ?? '删不掉', hint: result.hint })
+        else deleted.push(result)
+      } catch (error) {
+        refused.push({ id, reason: error && error.message ? error.message : String(error) })
+      }
+    }
+    return { deleted, refused, deletedCount: deleted.length, refusedCount: refused.length }
+  }
+
+  /**
+   * 「记录清理」弹层要的清单：每场面试的记录体量。
+   *
+   * **只在这个弹层打开时算。** 每场要读转录行数、报告字数、录音个数、
+   * 目录大小——放进 6 秒轮询的列表接口就是白烧 CPU（AGENTS §11）。
+   *
+   * @returns {Promise<Array<object>>}
+   */
+  async listSessionsForCleanup() {
+    const rows = await this.listSessions()
+    const out = []
+    for (const row of rows) {
+      const dir = row.dir
+      const sizeOf = async name => {
+        try {
+          return (await stat(join(dir, name))).size
+        } catch {
+          return 0
+        }
+      }
+      const turns = (await readJsonl(join(dir, 'transcript.jsonl'))).length
+      const recordings = await listDirIfExists(join(dir, 'recordings'))
+      let recordingsBytes = 0
+      for (const name of recordings) {
+        try {
+          recordingsBytes += (await stat(join(dir, 'recordings', name))).size
+        } catch { /* 读不到就不计 */ }
+      }
+      out.push({
+        id: row.id,
+        title: row.title,
+        company: row.company,
+        position: row.position,
+        status: row.status,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        archived: row.archived,
+        turns,
+        hasResume: row.hasResume,
+        hasJd: row.hasJd,
+        hasReport: row.hasReport,
+        checklistCount: row.checklistCount,
+        recordings: recordings.length,
+        // 「占用」= 卷宗里真正的大件之和（简历 / JD / 转录 / 报告 / 录音）。
+        bytes: await sizeOf('resume.txt') + await sizeOf('jd.txt')
+          + await sizeOf('transcript.jsonl') + await sizeOf('report.md') + recordingsBytes,
+        running: row.status === SESSION_STATUS.RUNNING,
+      })
+    }
+    return out
   }
 
   // ── 简历库 ──────────────────────────────────────────────────────────────
@@ -932,6 +1214,8 @@ export class InterviewService {
     })
 
     await this.touch(sessionId)
+    // 正文落盘 = 这次「等助手抓 JD」有结果了，把 loading 收掉。
+    await this.clearAgentTask(sessionId, 'jd')
     return { chars: trimmed.length }
   }
 
@@ -1045,10 +1329,14 @@ export class InterviewService {
   /**
    * 确保有一个**落在面试工作区**的宿主助手会话，并且是**这一场面试专属**的。
    *
-   * **为什么 per-session 而不是全局设置。** 全局 `agentSessionId` 多场面试
-   * 共用 → 上下文串场；暂停/继续要求「精确找回**这一场**的助手会话」，
-   * 全局键撑不住这个语义（docs/TURN-TAKING.md §6.2）。现在存进
-   * `session.json.agentSessionId`；老场次读时从全局键**一次性迁移**。
+   * **一场面试 = 一个助手会话，全流程共用。** 拉 JD、出底稿、开场、继续、
+   * 写报告都寻址到同一个 `sessionId`：助手在同一个对话里攒上下文，
+   * 用户点开左栏也只看到一条相关对话（AGENTS §6.14）。
+   *
+   * **绝不从「全局面包屑」继承会话 id。** 旧实现让没有 `agentSessionId`
+   * 的场次继承 `settings.agentSessionId`——那是「最近一次 create」的记录，
+   * 属于**另一场**面试。于是新岗位拉 JD 时请求被发到某个面试中的场次里，
+   * 上下文直接串台。现在没有记录就**新建**，旧的全局键只当诊断面包屑。
    *
    * **为什么不再把已存在的 id 塞给 create。** 宿主语义（装机包 README 读实）：
    * `create` 只复用**空白**（未开始任何轮次）的会话；对非空白的指定 id
@@ -1057,7 +1345,7 @@ export class InterviewService {
    * 正确姿势：**有 id 就直接返回**（prompt 时宿主自会恢复冷会话，历史在
    * 持久日志里完整重建）；create 只在完全没有会话时用一次。
    *
-   * @param {string} [interviewSessionId] 面试会话 id；省略时只读/建全局诊断键
+   * @param {string} [interviewSessionId] 面试会话 id；省略时只读全局诊断键
    */
   async ensureAgentSession(interviewSessionId = undefined) {
     const workspacePath = await this.effectiveRoot()
@@ -1074,19 +1362,13 @@ export class InterviewService {
       // 会话不存在就抛——派活落错地方比失败更糟。
       const meta = await this.getSession(id)
       const stored = typeof meta.agentSessionId === 'string' ? meta.agentSessionId.trim() : ''
-      if (stored !== '') return describe(stored, { reused: true })
-
-      // 一次性迁移：**只认老场次**（session.json 里还没有这个字段）。
-      // 新建场次从 createSession 起就带着 agentSessionId:''——全局键是
-      // 「最近一次 create」的面包屑，不能让新场次去继承它，否则两场
-      // 面试又共用同一个助手（串场，TURN-TAKING §1.3-1 要消灭的正是它）。
-      if (meta.agentSessionId === undefined) {
-        const settings = await readSettings()
-        const inherited = typeof settings.agentSessionId === 'string' ? settings.agentSessionId.trim() : ''
-        if (inherited !== '') {
-          await this.updateSession(id, { agentSessionId: inherited })
-          return describe(inherited, { reused: true, inherited: true })
-        }
+      if (stored !== '') {
+        // **先问宿主它在不在。** 只在 prompt 失败时才重建，等于让用户先
+        // 看一次失败；宿主有 `state()` 就先探一次（读不到 ≠ 不在，见
+        // `hostAgentState`——`unknown` 一律当还在）。
+        const alive = await this.agentSessionAlive(stored)
+        if (alive !== 'gone') return describe(stored, { reused: true })
+        await this.clearAgentSession(id, 'gone-before-dispatch')
       }
     } else {
       // 没给面试 id（interview_agent_session 的诊断路径）：全局键只读不寻址。
@@ -1108,7 +1390,15 @@ export class InterviewService {
     const created = await controller.create(request)
     const agentSessionId = String(created?.sessionId ?? '')
     if (agentSessionId === '') throw new Error('宿主没有返回会话 id')
-    if (id !== '') await this.updateSession(id, { agentSessionId })
+    if (id !== '') {
+      await this.updateSession(id, { agentSessionId })
+      await this.noteAgentLog(id, {
+        event: 'open',
+        hostSessionId: agentSessionId,
+        workspaceId: workspace.workspaceId,
+        reason: '首次派活',
+      })
+    }
     // 全局键留作「最近一次 create 用过的会话」的面包屑（诊断用，不再参与寻址）。
     try {
       await writeSettings({ agentSessionId })
@@ -1124,20 +1414,86 @@ export class InterviewService {
   }
 
   /**
-   * 清掉这一场存着的助手会话 id（会话被宿主删除后重建用）。
+   * 宿主那边这个会话还在不在：`alive` / `gone` / `unknown`。
    *
-   * **置空串而不是删字段**：字段缺失 = 「老场次」，会触发从全局面包屑
-   * 继承的迁移——而那个面包屑正是刚死掉的会话 id，删字段等于把死的
-   * 继承回来。空串 = 「明确没有」，直接走 create 重建。
+   * **`unknown` 一律当还在用。** 老宿主没有 `state()`、或者这一次探测自身
+   * 出错时，重建会话会把用户正在用的上下文丢掉——那是比「一个已死的 id」
+   * 更糟的结果。真死了的话，prompt 会报 `session/not-found`，那条路照样兜底。
+   *
+   * @param {string} agentSessionId
+   */
+  async agentSessionAlive(agentSessionId) {
+    const id = typeof agentSessionId === 'string' ? agentSessionId.trim() : ''
+    if (id === '') return 'gone'
+    const state = await this.hostAgentState(id)
+    if (state.phase === 'gone') return 'gone'
+    if (state.phase === 'unknown') return 'unknown'
+    return 'alive'
+  }
+
+  /**
+   * 往这一场的**助手会话账本**里记一笔（可溯源：用了哪个会话、谁重建过）。
+   *
+   * 写账本失败**不挡派活**——账本是给人事后看的，不是主流程的一部分。
    *
    * @param {string} interviewSessionId
+   * @param {{event: string, hostSessionId?: string, workspaceId?: string, reason?: string, kind?: string, requestId?: string, explicit?: boolean}} entry
    */
-  async clearAgentSession(interviewSessionId) {
+  async noteAgentLog(interviewSessionId, entry) {
+    const id = typeof interviewSessionId === 'string' ? interviewSessionId.trim() : ''
+    if (id === '') return
+    try {
+      const dir = await this.sessionDir(id)
+      const meta = await readJsonIfExists(join(dir, 'session.json'))
+      if (meta === undefined) return
+      const at = Date.now()
+      const record = {
+        at,
+        event: String(entry.event ?? ''),
+        ...(typeof entry.hostSessionId === 'string' && entry.hostSessionId !== ''
+          ? { hostSessionId: entry.hostSessionId }
+          : {}),
+        ...(typeof entry.workspaceId === 'string' && entry.workspaceId !== ''
+          ? { workspaceId: entry.workspaceId }
+          : {}),
+        ...(typeof entry.kind === 'string' && entry.kind !== '' ? { kind: entry.kind } : {}),
+        ...(typeof entry.requestId === 'string' && entry.requestId !== '' ? { requestId: entry.requestId } : {}),
+        ...(entry.explicit === true ? { explicit: true } : {}),
+        ...(typeof entry.reason === 'string' && entry.reason !== '' ? { reason: entry.reason } : {}),
+      }
+      meta.agentLog = [...(Array.isArray(meta.agentLog) ? meta.agentLog : []), record].slice(-AGENT_LOG_MAX)
+      meta.updatedAt = at
+      await writeJsonAtomic(join(dir, 'session.json'), meta)
+    } catch { /* 账本丢了只影响溯源 */ }
+  }
+
+  /**
+   * 清掉这一场存着的助手会话 id（会话被宿主删除后重建用）。
+   *
+   * **置空串而不是删字段**：字段缺失 = 「老场次」，旧实现会去继承全局面包屑
+   * （见 `ensureAgentSession`）；空串 = 「明确没有」，直接走 create 重建。
+   *
+   * @param {string} interviewSessionId
+   * @param {string} [reason] 记进账本的原因（gone / reset / manual）
+   */
+  async clearAgentSession(interviewSessionId, reason = undefined) {
     const dir = await this.sessionDir(interviewSessionId)
     const meta = await readJsonIfExists(join(dir, 'session.json'))
     if (meta === undefined) return
+    const previous = typeof meta.agentSessionId === 'string' ? meta.agentSessionId.trim() : ''
     meta.agentSessionId = ''
     meta.updatedAt = Date.now()
+    if (previous !== '') {
+      meta.agentLog = [
+        ...(Array.isArray(meta.agentLog) ? meta.agentLog : []),
+        {
+          at: meta.updatedAt,
+          event: 'clear',
+          hostSessionId: previous,
+          ...(typeof reason === 'string' && reason !== '' ? { reason } : {}),
+        },
+      ].slice(-AGENT_LOG_MAX)
+    }
     await writeJsonAtomic(join(dir, 'session.json'), meta)
   }
 
@@ -1149,19 +1505,29 @@ export class InterviewService {
    *  - `requestId` 幂等：客户端重试、轮询竞态都不会重复派活；
    *  - 冷会话由 prompt 自动唤醒（历史在持久日志里），DSH 重启也不丢。
    *
+   * **寻址只有两种，且都要留痕**（AGENTS §6.14）：
+   *  - 默认：这一场面试专属的助手会话（`ensureAgentSession`），
+   *    拉 JD / 出底稿 / 开场 / 继续 / 报告共用同一个；
+   *  - 显式：调用方点名某个宿主对话（`dispatch.hostSessionId`），
+   *    账本里记 `explicit: true`，**它不在了也不许悄悄换别的会话**——
+   *    那正是「会话乱飞」。这种情况让错误抛回调用方，由人来决定。
+   *
    * 存的会话已被删除（session/not-found）→ 清 id、重建、**同一 requestId**
    * 重发一次，并在转录记 system 行「助手会话已重建」——卷宗才是唯一真源，
    * 助手会话只是工作记忆，重建无损（§5.2）。
    *
    * @param {string} sessionId 面试会话 id
-   * @param {{kind: string, requestId: string, text: string}} dispatch
+   * @param {{kind: string, requestId: string, text: string, hostSessionId?: string}} dispatch
    */
   async dispatchAgentPrompt(sessionId, dispatch) {
     const controller = this.ctx?.get?.('sessionController')
     if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
       throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
     }
-    const hostSession = await this.ensureAgentSession(sessionId)
+    const explicitId = typeof dispatch.hostSessionId === 'string' ? dispatch.hostSessionId.trim() : ''
+    const hostSession = explicitId !== ''
+      ? { sessionId: explicitId, workspace: undefined, explicit: true }
+      : { ...(await this.ensureAgentSession(sessionId)), explicit: false }
     // **signal 是必填的第二个参数。** 宿主实现的第一句就是
     // `signal.throwIfAborted()`——不传就炸。
     const send = target => controller.prompt({
@@ -1170,13 +1536,25 @@ export class InterviewService {
       mode: 'queue',
       content: [{ type: 'text', text: dispatch.text }],
     }, new AbortController().signal)
+    const note = (target, extra = {}) => this.noteAgentLog(sessionId, {
+      event: 'dispatch',
+      hostSessionId: target,
+      kind: dispatch.kind,
+      requestId: dispatch.requestId,
+      explicit: hostSession.explicit === true,
+      ...extra,
+    })
     try {
       await send(hostSession.sessionId)
+      await note(hostSession.sessionId)
     } catch (error) {
       if (!isAgentSessionGone(error)) throw error
-      await this.clearAgentSession(sessionId)
+      // 点名的对话已经不在了：如实抛回，不偷偷换一个会话去发。
+      if (hostSession.explicit === true) throw error
+      await this.clearAgentSession(sessionId, 'dispatch-gone')
       const rebuilt = await this.ensureAgentSession(sessionId)
       await send(rebuilt.sessionId)
+      await note(rebuilt.sessionId, { reason: 'rebuilt' })
       await this.appendTurn(sessionId, {
         role: 'system',
         text: '助手会话已重建，上下文从卷宗恢复。',
@@ -1194,8 +1572,14 @@ export class InterviewService {
       dispatched: true,
       kind: dispatch.kind,
       requestId: dispatch.requestId,
-      hostSession: { id: hostSession.sessionId, workspace: hostSession.workspace, explicit: false },
-      message: `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
+      hostSession: {
+        id: hostSession.sessionId,
+        workspace: hostSession.workspace,
+        explicit: hostSession.explicit === true,
+      },
+      message: hostSession.explicit === true
+        ? '请求已发到你指定的对话。'
+        : `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
     }
   }
 
@@ -1370,8 +1754,9 @@ export class InterviewService {
   /**
    * Hand a JD link to the host's assistant and let **it** fetch the page.
    *
-   * **发到哪里由我们决定：** 默认在面试工作区里新建/复用一个会话；
-   * 只有调用方明确给了 hostSessionId 才用那个会话，并在返回里说清楚。
+   * **发到哪里由我们决定：** 默认发到**这一场面试专属**的助手会话——和
+   * 「出底稿」是同一个（AGENTS §6.14）。只有调用方明确给了 hostSessionId
+   * 才用那个对话，并在返回里说清楚（explicit: true）。
    *
    * @param {string} sessionId the interview session the JD belongs to
    * @param {string} url
@@ -1380,37 +1765,16 @@ export class InterviewService {
   async requestAgentJd(sessionId, url, hostSessionId = undefined) {
     const target = String(url ?? '').trim()
     if (target === '') throw new Error('没给链接')
-    const controller = this.ctx?.get?.('sessionController')
-    if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
-      throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
-    }
-    let hostSession
-    if (typeof hostSessionId === 'string' && hostSessionId.trim() !== '') {
-      hostSession = { sessionId: hostSessionId.trim(), workspace: undefined, explicit: true }
-    } else {
-      hostSession = { ...(await this.ensureAgentSession(sessionId)), explicit: false }
-    }
+    const requestId = `jd-${sessionId}-${Date.now()}`
     const text = [
       `请帮我抓取这个岗位 JD：${target}`,
       '用浏览器打开它（这个页面可能需要登录或前端渲染），把岗位描述的正文完整抄下来，',
       `然后调用 interview_save_jd 工具，把正文写入面试会话 ${sessionId}（url 填 ${target}）。`,
       '写完之后再调用 interview_get_context 确认已落盘。如果实在拿不到正文，如实说明卡在哪一步。',
     ].join('\n')
-    await controller.prompt({
-      requestId: `jd-${sessionId}-${Date.now()}`,
-      sessionId: hostSession.sessionId,
-      mode: 'queue',
-      content: [{ type: 'text', text }],
-      // **signal 是必填的第二个参数。** 宿主实现的第一句就是
-      // `signal.throwIfAborted()`——不传就炸。
-    }, new AbortController().signal)
-    return {
-      dispatched: true,
-      hostSession: { id: hostSession.sessionId, workspace: hostSession.workspace, explicit: hostSession.explicit },
-      message: hostSession.explicit
-        ? '请求已发到你指定的对话。'
-        : `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
-    }
+    const result = await this.dispatchAgentPrompt(sessionId, { kind: 'jd', requestId, text, hostSessionId })
+    await this.recordAgentTask(sessionId, 'jd', { requestId, url: target })
+    return result
   }
 
   /**
@@ -1419,17 +1783,14 @@ export class InterviewService {
    * 底稿由模型写，插件只负责派活与落盘（interview_save_checklist）。
    * 没有这个动作时，用户填完简历和 JD 就卡住了——面板必须给出下一步。
    *
+   * **和「拉 JD」共用同一个助手会话**：同一个岗位的调研是同一段对话，
+   * 助手在出底稿时还看得到它刚抄回来的 JD 与当时的判断。
+   *
    * @param {string} sessionId
    * @param {string} [hostSessionId]
    */
   async requestAgentChecklist(sessionId, hostSessionId = undefined) {
-    const controller = this.ctx?.get?.('sessionController')
-    if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
-      throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
-    }
-    const hostSession = typeof hostSessionId === 'string' && hostSessionId.trim() !== ''
-      ? { sessionId: hostSessionId.trim(), workspace: undefined, explicit: true }
-      : { ...(await this.ensureAgentSession(sessionId)), explicit: false }
+    const requestId = `checklist-${sessionId}-${Date.now()}`
     const text = [
       `请为面试会话 ${sessionId} 出一份「面试官底稿」（考点清单）。`,
       '1. 先调用 interview_get_context 读简历、JD 与已有清单；',
@@ -1437,17 +1798,9 @@ export class InterviewService {
       '3. 调用 interview_save_checklist 写入这场面试（items 数组）。',
       '如果简历或 JD 还缺，就别编造，直接说明缺哪一份。',
     ].join('\n')
-    await controller.prompt({
-      requestId: `checklist-${sessionId}-${Date.now()}`,
-      sessionId: hostSession.sessionId,
-      mode: 'queue',
-      content: [{ type: 'text', text }],
-    }, new AbortController().signal)
-    return {
-      dispatched: true,
-      hostSession: { id: hostSession.sessionId, workspace: hostSession.workspace, explicit: hostSession.explicit },
-      message: hostSession.explicit ? '请求已发到你指定的对话。' : `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
-    }
+    const result = await this.dispatchAgentPrompt(sessionId, { kind: 'checklist', requestId, text, hostSessionId })
+    await this.recordAgentTask(sessionId, 'checklist', { requestId })
+    return result
   }
 
   /**
@@ -1460,13 +1813,7 @@ export class InterviewService {
    * @param {string} [hostSessionId]
    */
   async requestAgentReport(sessionId, hostSessionId = undefined) {
-    const controller = this.ctx?.get?.('sessionController')
-    if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
-      throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
-    }
-    const hostSession = typeof hostSessionId === 'string' && hostSessionId.trim() !== ''
-      ? { sessionId: hostSessionId.trim(), workspace: undefined, explicit: true }
-      : { ...(await this.ensureAgentSession(sessionId)), explicit: false }
+    const requestId = `report-${sessionId}-${Date.now()}`
     const text = [
       `请为面试会话 ${sessionId} 写一份事后分析报告。`,
       '1. 先调用 interview_get_context 读简历、JD、考点清单、转录与统计；',
@@ -1474,16 +1821,179 @@ export class InterviewService {
       '3. 数据不足就如实写「样本不足」，不要编造没发生过的对话；',
       '4. 最后调用 interview_finish，把整篇报告写进 report 字段。',
     ].join('\n')
-    await controller.prompt({
-      requestId: `report-${sessionId}-${Date.now()}`,
-      sessionId: hostSession.sessionId,
-      mode: 'queue',
-      content: [{ type: 'text', text }],
-    }, new AbortController().signal)
-    return {
-      dispatched: true,
-      hostSession: { id: hostSession.sessionId, workspace: hostSession.workspace, explicit: hostSession.explicit },
-      message: hostSession.explicit ? '请求已发到你指定的对话。' : `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
+    const result = await this.dispatchAgentPrompt(sessionId, { kind: 'report', requestId, text, hostSessionId })
+    await this.recordAgentTask(sessionId, 'report', { requestId })
+    return result
+  }
+
+  // ── 「等助手返回」的任务状态（loading 的唯一真源）──────────────────────
+
+  /**
+   * 记下「这件事已经派给助手了」。
+   *
+   * **写记录失败不挡派活**：记录只影响 loading 文案与失败判定，派活本身
+   * 已经发出去了——为了日志把主流程弄失败是本末倒置。
+   *
+   * @param {string} sessionId
+   * @param {'jd'|'checklist'|'report'} kind
+   * @param {{requestId?: string, url?: string}} [extra]
+   */
+  async recordAgentTask(sessionId, kind, extra = {}) {
+    if (!AGENT_TASK_KINDS.includes(kind)) return
+    try {
+      const dir = await this.sessionDir(sessionId)
+      const meta = await readJsonIfExists(join(dir, 'session.json'))
+      if (meta === undefined) return
+      const at = Date.now()
+      const tasks = meta.agentTasks !== null && typeof meta.agentTasks === 'object' ? meta.agentTasks : {}
+      meta.agentTasks = {
+        ...tasks,
+        [kind]: {
+          kind,
+          at,
+          requestId: typeof extra.requestId === 'string' ? extra.requestId : '',
+          ...(typeof extra.url === 'string' && extra.url !== '' ? { url: extra.url } : {}),
+        },
+      }
+      meta.updatedAt = at
+      await writeJsonAtomic(join(dir, 'session.json'), meta)
+    } catch { /* 记录丢了只影响 loading 文案 */ }
+  }
+
+  /**
+   * 对应产物落盘了 → 这件「等人」的事结束了。
+   *
+   * @param {string} sessionId
+   * @param {'jd'|'checklist'|'report'} kind
+   */
+  async clearAgentTask(sessionId, kind) {
+    if (!AGENT_TASK_KINDS.includes(kind)) return
+    try {
+      const dir = await this.sessionDir(sessionId)
+      const meta = await readJsonIfExists(join(dir, 'session.json'))
+      if (meta === undefined) return
+      const tasks = meta.agentTasks
+      if (tasks === null || typeof tasks !== 'object' || tasks[kind] === undefined) return
+      delete tasks[kind]
+      if (Object.keys(tasks).length === 0) delete meta.agentTasks
+      meta.updatedAt = Date.now()
+      await writeJsonAtomic(join(dir, 'session.json'), meta)
+    } catch { /* 同 recordAgentTask：清不掉只影响文案 */ }
+  }
+
+  /**
+   * 用户选择「忽略」这条失败提示。
+   *
+   * @param {string} sessionId
+   * @param {string} kind
+   */
+  async dismissAgentTask(sessionId, kind) {
+    if (!AGENT_TASK_KINDS.includes(kind)) throw new Error(`未知的助手任务：${kind}`)
+    await this.clearAgentTask(sessionId, kind)
+    return { dismissed: true, kind }
+  }
+
+  /**
+   * 现在有哪些「等助手」的任务、各自等到哪一步。
+   *
+   * 判定只认三件事：**宿主会话在不在跑**、**跑完有没有写回**、**等多久了**。
+   * 任何一条都不能给出 endless waiting：
+   *
+   * @param {object} meta session.json 的内容（含 agentTasks / agentSessionId）
+   * @returns {Promise<Record<string, object>>}
+   */
+  async agentTaskStatus(meta) {
+    const recorded = meta?.agentTasks
+    if (recorded === null || typeof recorded !== 'object') return {}
+    const now = Date.now()
+    const host = await this.hostAgentState(meta.agentSessionId)
+    const tasks = {}
+    for (const kind of AGENT_TASK_KINDS) {
+      const raw = recorded[kind]
+      if (raw === null || typeof raw !== 'object') continue
+      const at = Number.isFinite(raw.at) ? raw.at : 0
+      const age = Math.max(0, now - at)
+      const deadline = AGENT_TASK_DEADLINE_MS[kind] ?? 10 * 60 * 1000
+      const base = {
+        kind,
+        at,
+        requestId: typeof raw.requestId === 'string' ? raw.requestId : '',
+        ...(typeof raw.url === 'string' && raw.url !== '' ? { url: raw.url } : {}),
+      }
+      if (host.phase === 'gone') {
+        tasks[kind] = {
+          ...base,
+          status: 'failed',
+          reason: '助手会话不见了（可能被删除或归档）',
+          hint: '再派一次会自动重建助手会话；也可以直接在 DSH 对话区让它继续。',
+        }
+        continue
+      }
+      if (host.phase === 'blocked') {
+        // **这一步最容易被当成"还在跑"。** 助手在自己的对话里弹了确认/提问，
+        // turn 一直开着，`running` 永远为真——但这件事**不可能自己推进**，
+        // 必须有人去 DSH 对话区回答。继续转圈就是假活。
+        // 先于超时判定：等人比「等太久」更具体，指路也更准。
+        tasks[kind] = {
+          ...base,
+          status: 'failed',
+          reason: host.blocked === 'approval'
+            ? '助手在等你批准一个操作，这件事没有进展'
+            : host.blocked === 'question'
+              ? '助手在问你一个问题，这件事没有进展'
+              : '助手在等你处理一条确认，这件事没有进展',
+          hint: '去 DSH 对话区回答助手（或批准/拒绝那条操作），再点重试；也可以直接手动完成这件事。',
+        }
+        continue
+      }
+      if (age > deadline) {
+        tasks[kind] = {
+          ...base,
+          status: 'failed',
+          reason: `等了 ${Math.round(deadline / 60000)} 分钟还没有结果`,
+          hint: AGENT_TASK_FAILURE[kind].hint,
+        }
+        continue
+      }
+      if (host.phase === 'settled' && age > AGENT_TASK_GRACE_MS) {
+        tasks[kind] = { ...base, status: 'failed', reason: AGENT_TASK_FAILURE[kind].reason, hint: AGENT_TASK_FAILURE[kind].hint }
+        continue
+      }
+      tasks[kind] = { ...base, status: 'waiting' }
+    }
+    return tasks
+  }
+
+  /**
+   * 宿主助手会话在干什么：`running` / `blocked` / `settled` / `gone` / `unknown`。
+   *
+   * `blocked` = 宿主会话在等**人**（审批 / 提问 / 其他确认）——turn 开着，
+   * 但在用户处理之前不会有任何进展，不能算「还在跑」。
+   * `unknown` 不是失败——老宿主没有 `state()` 接口时，**超时**仍然是终点。
+   * 这里绝不把「读不到」当成「在跑」来续命。
+   *
+   * @param {string} agentSessionId
+   * @returns {Promise<{phase: 'running'|'blocked'|'settled'|'gone'|'unknown', blocked?: string}>}
+   */
+  async hostAgentState(agentSessionId) {
+    const id = typeof agentSessionId === 'string' ? agentSessionId.trim() : ''
+    if (id === '') return { phase: 'unknown' }
+    const controller = this.ctx?.get?.('sessionController')
+    if (controller === undefined || controller === null || typeof controller.state !== 'function') return { phase: 'unknown' }
+    try {
+      const state = await controller.state({ sessionId: id }, new AbortController().signal)
+      if (state === null || state === undefined || typeof state !== 'object') return { phase: 'unknown' }
+      // 等人在对话区处理（审批 / ask_user_question）。**先判这个**：
+      // 这种 turn 的 `running` 会一直是 true，按 running 处理就永远转圈。
+      const pendingInput = Array.isArray(state.pendingInput)
+        ? state.pendingInput.filter(item => typeof item === 'string')
+        : []
+      if (pendingInput.length > 0) return { phase: 'blocked', blocked: pendingInput[0] }
+      const queue = Array.isArray(state.queue) ? state.queue : []
+      if (state.running === true || queue.length > 0) return { phase: 'running' }
+      return { phase: 'settled' }
+    } catch (error) {
+      return { phase: isAgentSessionGone(error) ? 'gone' : 'unknown' }
     }
   }
 
@@ -1586,6 +2096,8 @@ export class InterviewService {
     }
     await writeJsonAtomic(join(dir, 'checklist.json'), doc)
     await this.touch(sessionId)
+    // 底稿落盘 = 这次「等助手出底稿」有结果了。
+    if (normalized.length > 0) await this.clearAgentTask(sessionId, 'checklist')
     return doc
   }
 
@@ -1622,7 +2134,7 @@ export class InterviewService {
         if (target === undefined) throw new Error(`清单里没有 id=${op.id} 的考点`)
         if (op.topic !== undefined) target.topic = String(op.topic)
         if (op.why !== undefined) target.why = String(op.why)
-        if (op.level !== undefined && CHECKLIST_LEVEL[String(op.level)] !== undefined) target.level = op.level
+        if (op.level !== undefined) target.level = normalizeChecklistLevel(op.level)
         if (op.source !== undefined) target.source = String(op.source)
         if (Array.isArray(op.tags)) target.tags = op.tags.map(tag => String(tag))
         adjustment = { ...adjustment, id: target.id }
@@ -2260,6 +2772,8 @@ export class InterviewService {
     const dir = await this.sessionDir(sessionId)
     await writeTextAtomic(join(dir, 'report.md'), String(markdown ?? ''))
     await this.updateSession(sessionId, { status: SESSION_STATUS.DONE, endedAt: Date.now() })
+    // 报告落盘 = 这次「等助手写报告」有结果了（空报告不算结果）。
+    if (String(markdown ?? '').trim() !== '') await this.clearAgentTask(sessionId, 'report')
     return { chars: String(markdown ?? '').length }
   }
 
@@ -2298,7 +2812,15 @@ export class InterviewService {
     const limit = Number.isFinite(options.transcriptLimit) && options.transcriptLimit > 0
       ? Math.trunc(options.transcriptLimit)
       : DEFAULT_TRANSCRIPT_LIMIT
-    const revision = await this.revisionOf(meta.dir)
+    // 「等助手」的任务状态：**必须有终点**（见 AGENT_TASK_DEADLINE_MS）。
+    // 它也会进 revision：超时从 waiting 翻成 failed 是**时间驱动**的，
+    // 文件 mtime 不会变——不把它算进指纹，面板就会永远转圈。
+    const agentTasks = await this.agentTaskStatus(meta)
+    const taskSignature = AGENT_TASK_KINDS
+      .filter(kind => agentTasks[kind] !== undefined)
+      .map(kind => `${kind}:${agentTasks[kind].status}`)
+      .join(',')
+    const revision = `${await this.revisionOf(meta.dir)}|agent:${taskSignature}`
     const visible = transcript.length > limit ? transcript.slice(-limit) : transcript
     const turns = transcript.filter(row => row.role !== 'system')
     const asked = turns.filter(row => row.role === 'interviewer').length
@@ -2325,6 +2847,10 @@ export class InterviewService {
         pausedMs: Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0,
         // 这一场专属的宿主助手会话（派活寻址用；空 = 还没建过）。
         agentSessionId: typeof meta.agentSessionId === 'string' ? meta.agentSessionId : '',
+        // 助手会话的**可溯源摘要**（AGENTS §6.14）：最近的派活发到了哪个
+        // 宿主对话、有没有重建过。面板据此显示「这场面试的助手在哪」，
+        // 用户不必去 DSH 会话列表里猜。
+        agent: summarizeAgentLog(meta.agentLog, meta.agentSessionId),
         // 归档标记：主区要能告诉用户「这场已经收起来了」。
         archived: meta.archived === true,
         dir: meta.dir,
@@ -2347,6 +2873,9 @@ export class InterviewService {
       },
       recordings,
       report,
+      // 等助手返回的任务（抓 JD / 出底稿 / 写报告）：面板据此显示 loading，
+      // **loading 一定有终点**——成功即消失，失败带 reason + hint（AGENTS §7）。
+      agentTasks,
       // 语流：整场面试的表达习惯观察（停顿 / 语速 / 口头语 …）。
       // **不是评分**，是观察值；报告与面试官都读它，但不许念给候选人听。
       fluency: summarizeFluency(transcript),
@@ -2355,13 +2884,8 @@ export class InterviewService {
         answered,
         // 计时公式**必须扣 pausedMs**（docs/TURN-TAKING.md §6.2）：不扣就会把
         // 「暂停两小时」算进面试时长，报告与 tooShortForReport(<3min) 判断全歪。
-        // `||` 而不是 `??`：重开场次会把 endedAt 清成 0，0 是「没有值」。
-        durationMs: Math.max(
-          0,
-          (meta.endedAt || meta.updatedAt || 0)
-          - (meta.startedAt || meta.createdAt || 0)
-          - (Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0),
-        ),
+        // 没开始过的场次是 0 秒——`updatedAt` 是「最后一次改动」，不是「面了多久」。
+        durationMs: computeDurationMs(meta),
         checklistTotal: checklist.items.length,
         checklistProbed: checklist.items.filter(item => item.probed === true).length,
         adjustments: checklist.adjustments.length,
@@ -2595,6 +3119,22 @@ export class InterviewService {
 }
 
 /**
+ * 归一化考点档位：`core` / `deep` / `bonus`，不认识的一律落到 `core`。
+ *
+ * **必须按「值」判断，不能按「键」判断。** `CHECKLIST_LEVEL` 是
+ * `{ CORE: 'core', DEEP: 'deep', BONUS: 'bonus' }`——用 `CHECKLIST_LEVEL[值]`
+ * 去查的话，`CHECKLIST_LEVEL['deep']` 是 `undefined`，助手写进来的
+ * `deep` / `bonus` 会被**静默压成 core**，底稿的三档分级整个失效
+ * （面板、报告、`probed` 统计都跟着看不出重点）。
+ *
+ * @param {unknown} value
+ */
+function normalizeChecklistLevel(value) {
+  const text = String(value ?? '').trim().toLowerCase()
+  return Object.values(CHECKLIST_LEVEL).includes(text) ? text : CHECKLIST_LEVEL.CORE
+}
+
+/**
  * Normalize one checklist item.
  *
  * @param {object} raw
@@ -2610,7 +3150,7 @@ function normalizeChecklistItem(raw, index, existing = []) {
     id = `c${index + 1}-${suffix}`
     suffix += 1
   }
-  const level = CHECKLIST_LEVEL[String(item.level)] !== undefined ? item.level : CHECKLIST_LEVEL.CORE
+  const level = normalizeChecklistLevel(item.level)
   return {
     id,
     topic: String(item.topic ?? '').trim() || '未命名考点',
@@ -2796,13 +3336,21 @@ function agentContinuePrompt(sessionId, answer) {
   ].join('\n')
 }
 
-/** 暂停后继续派活的 prompt 正文。 */
-function agentResumePrompt(sessionId, pausedMinutes) {
+/** 暂停后继续 / 续接一场已结束的面试：派活的 prompt 正文。 */
+function agentResumePrompt(sessionId, pausedMinutes, options = {}) {
   const minutes = Number.isFinite(pausedMinutes) ? Math.max(0, Math.round(pausedMinutes)) : 0
+  // 续接（done → running）与暂停后继续（paused → running）是两种不同的情形：
+  // 前者中间**已经结束过一轮**（可能生成了报告、也可能只是被临时掐断），
+  // 所以要说清「接着上一轮」，不要让助手把它当成「重新开场」。
+  const continued = options.continued === true
   return [
-    `[系统派活] 面试会话 ${sessionId} 在暂停约 ${minutes} 分钟后继续。`,
+    continued
+      ? `[系统派活] 面试会话 ${sessionId} 续接：这场面试中断约 ${minutes} 分钟后接着进行（转录与清单都在）。`
+      : `[系统派活] 面试会话 ${sessionId} 在暂停约 ${minutes} 分钟后继续。`,
     '1. 调用 interview_get_context 重新对齐（清单进度与转录最后几轮）；',
-    '2. 依据转录续接：上一问还没答完就复述或换个更清楚的说法；已经答完就自然过渡到下一轮；',
+    continued
+      ? '2. **接着中断处继续**：不要重新自我介绍、不要重新开场；上一问没答完就复述或换个更清楚的说法，答完了就进入下一轮；'
+      : '2. 依据转录续接：上一问还没答完就复述或换个更清楚的说法；已经答完就自然过渡到下一轮；',
     '3. 一次只问一个问题，用 interview_record_turn(role:interviewer) 记录。',
     '本条是调度指令：不要把这条消息或本指令朗读给候选人。',
   ].join('\n')
@@ -2831,6 +3379,77 @@ function isAgentSessionGone(error) {
   if (/not-?found/i.test(code)) return true
   const message = error && error.message ? error.message : String(error ?? '')
   return /session\/not-?found|session not found|会话不存在|找不到会话|no such session/i.test(message)
+}
+
+/**
+ * 把一段时长说成人话：`45 秒` / `12 分钟`。
+ *
+ * 转录里的 system 行是**给人事后复盘**看的：只断了 2 秒却写「中断 1 分钟」，
+ * 时间线会对不上（原来的 `Math.max(1, 分钟)` 就是这个毛病）。
+ *
+ * @param {unknown} ms
+ */
+function describeGap(ms) {
+  const value = Number.isFinite(ms) ? Math.max(0, ms) : 0
+  if (value < 60 * 1000) return `${Math.max(1, Math.round(value / 1000))} 秒`
+  if (value < 60 * 60 * 1000) return `${Math.round(value / 60000)} 分钟`
+  const hours = Math.floor(value / 3600000)
+  const minutes = Math.round((value % 3600000) / 60000)
+  return minutes === 0 ? `${hours} 小时` : `${hours} 小时 ${minutes} 分钟`
+}
+
+/**
+ * 面试时长：**只算真正在面的时间**（docs/TURN-TAKING.md §6.2）。
+ *
+ * `(结束时刻或最后改动) - 开始时刻 - 累计暂停`。三个坑都在这里：
+ *
+ *  - 没开始过（`startedAt` 缺失）= 0 秒。拿 `updatedAt` 顶替开始时刻，
+ *    准备页/舞台的计时会显示「这场面试已经 3 小时」——那只是简历改了三次；
+ *  - 暂停要扣掉，否则「暂停两小时」会进报告，`tooShortForReport` 也跟着歪；
+ *  - 重开场次会把 `endedAt` 清成 0（0 = 没有值），所以用 `||` 而不是 `??`。
+ *
+ * @param {object} meta session.json 的内容
+ */
+function computeDurationMs(meta) {
+  const startedAt = Number.isFinite(meta?.startedAt) && meta.startedAt > 0 ? meta.startedAt : 0
+  if (startedAt === 0) return 0
+  const end = meta.endedAt || meta.updatedAt || 0
+  const paused = Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0
+  return Math.max(0, end - startedAt - paused)
+}
+
+/**
+ * 把助手会话账本压成面板要的那几项。
+ *
+ * 只回**能回答问题**的部分：现在用哪个宿主会话、它是不是新建的、
+ * 最近的派活发到了哪里、中途重建过几次。完整账本留在 session.json。
+ *
+ * @param {unknown} log session.json 里的 agentLog
+ * @param {unknown} currentId 当前的 agentSessionId
+ */
+function summarizeAgentLog(log, currentId) {
+  const entries = Array.isArray(log) ? log.filter(item => item !== null && typeof item === 'object') : []
+  const current = typeof currentId === 'string' ? currentId.trim() : ''
+  const opened = entries.find(entry => entry.event === 'open')
+  const dispatches = entries
+    .filter(entry => entry.event === 'dispatch')
+    .slice(-6)
+    .map(entry => ({
+      at: Number.isFinite(entry.at) ? entry.at : 0,
+      kind: typeof entry.kind === 'string' ? entry.kind : '',
+      requestId: typeof entry.requestId === 'string' ? entry.requestId : '',
+      explicit: entry.explicit === true,
+    }))
+  return {
+    sessionId: current,
+    // 这个会话是什么时候开的（0 = 账本里没有 / 老场次）。
+    createdAt: opened !== undefined && Number.isFinite(opened.at) ? opened.at : 0,
+    workspaceId: opened !== undefined && typeof opened.workspaceId === 'string' ? opened.workspaceId : '',
+    // 中途换过几次宿主会话（重建 / 解绑）。
+    rebuilds: entries.filter(entry => entry.event === 'clear').length,
+    dispatches,
+    lastDispatchAt: dispatches.length > 0 ? dispatches[dispatches.length - 1].at : 0,
+  }
 }
 
 /** The absolute workspace root in force, for display. */

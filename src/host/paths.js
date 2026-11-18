@@ -26,6 +26,10 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// 服务 id 的唯一真源在预设表里。这里**不再硬编码第二份枚举**：
+// 以前 `SETTING_SPECS`、`resolveConfig`、`presets.js` 各写一遍，加一个预设
+// 要改三处，漏一处就是「面板选了却存不进去 / 存进去了却认不出来」。
+import { normalizeProviderId, providerIds } from './voice/presets.js'
 
 /** Absolute path of the package root (one level above `src/host/`). */
 export const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -121,16 +125,16 @@ export const SETTING_SPECS = {
   workspaceRoot: { kind: 'path' },
   ffmpegPath: { kind: 'path' },
   chromiumPath: { kind: 'path' },
-  // 语音识别
-  asrProvider: { kind: 'enum', values: ['auto', 'host', 'browser', 'none', 'minimax', 'minimax-cn', 'openai', 'openai-custom'] },
+  // 语音识别（值域 = 预设表里的全部 id，含兼容别名；见 voice/presets.js）
+  asrProvider: { kind: 'enum', values: providerIds('asr') },
   asrEndpoint: { kind: 'string' },
   asrBaseUrl: { kind: 'string' },
   asrModel: { kind: 'string' },
   asrApiKeyEnv: { kind: 'string' },
   asrGroupId: { kind: 'string' },
   asrLanguage: { kind: 'string' },
-  // 语音合成
-  ttsProvider: { kind: 'enum', values: ['auto', 'host', 'mimo', 'openai', 'minimax', 'minimax-cn', 'dashscope', 'baidu', 'edge', 'browser', 'none'] },
+  // 语音合成（同上）
+  ttsProvider: { kind: 'enum', values: providerIds('tts') },
   ttsBaseUrl: { kind: 'string' },
   ttsApiKeyEnv: { kind: 'string' },
   ttsGroupId: { kind: 'string' },
@@ -198,7 +202,13 @@ export function normalizeSetting(key, value) {
     if (!spec.values.includes(candidate)) {
       return { ok: false, reason: `${key} 只能是 ${spec.values.join(' / ')}` }
     }
-    return { ok: true, value: candidate }
+    // 旧 id 存进来也归一成当前 id（读设置与面板保存走同一条规则）。
+    const value = key === 'asrProvider'
+      ? normalizeProviderId('asr', candidate)
+      : key === 'ttsProvider'
+        ? normalizeProviderId('tts', candidate)
+        : candidate
+    return { ok: true, value }
   }
   // string：空串 = 用默认值
   return { ok: true, value: trimmed }
@@ -215,10 +225,75 @@ export async function readSettings() {
       const normalized = normalizeSetting(key, parsed[key])
       if (normalized.ok) settings[key] = normalized.value
     }
-    return settings
+    return migrateSettings(settings)
   } catch {
     return {}
   }
+}
+
+/** Qwen 中转的两种凭据名。 */
+const QWEN_TOKEN_PLAN_REFS = ['QIANWEN_TOKEN_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY']
+/** MiniMax Token Plan 的两种凭据名。 */
+const MINIMAX_TOKEN_PLAN_REFS = ['M_PLAN_API_KEY', 'MINIMAX_M_PLAN_API_KEY']
+
+/**
+ * 旧配置迁移：**预设拆分后，provider 与端点/凭据名必须仍然指向同一条链路。**
+ *
+ * 0.5.0 之前只有 `dashscope` / `mimo` / `minimax` 三个播报预设，端点靠
+ * `ttsBaseUrl` 覆盖：用户把 `ttsBaseUrl` 填成 Token Plan 主机、`ttsApiKeyEnv`
+ * 填成 Token Plan 的 key，选的是 `dashscope`。0.5.1 把 Token Plan 与官方拆成
+ * 两条预设后，`dashscope` 只连官方百炼，继续拿中转 key 打官方端点就是 401。
+ * 所以读设置时按「端点 + 凭据名」把旧配置归到正确的那条预设上——
+ * 用户不必知道自己被重命名过。
+ *
+ * 只迁移**能唯一判定**的情况（主机或凭据名带 token-plan 标记）；
+ * 其余保持原样，交给解析层报错。
+ *
+ * @param {object} settings
+ * @returns {object}
+ */
+export function migrateSettings(settings) {
+  const next = { ...settings }
+  const ttsEnv = typeof next.ttsApiKeyEnv === 'string' ? next.ttsApiKeyEnv : ''
+  const ttsBase = typeof next.ttsBaseUrl === 'string' ? next.ttsBaseUrl.toLowerCase() : ''
+  if (next.ttsProvider === 'dashscope'
+    && (ttsBase.includes('token-plan.maas.qianwenaiapi') || QWEN_TOKEN_PLAN_REFS.includes(ttsEnv))) {
+    next.ttsProvider = 'dashscope-token-plan'
+    next.ttsBaseUrl = ''
+  }
+  if (next.ttsProvider === 'mimo'
+    && (ttsBase.includes('token-plan-cn.xiaomimimo') || ttsEnv === 'XIAOMI_TOKEN_PLAN_CN_API_KEY')) {
+    next.ttsProvider = 'mimo-token-plan'
+    next.ttsBaseUrl = ''
+  }
+  if (next.ttsProvider === 'minimax-cn' && MINIMAX_TOKEN_PLAN_REFS.includes(ttsEnv)) {
+    next.ttsProvider = 'minimax-token-plan'
+  }
+
+  // 识别：旧版没有 Qwen/MiMo 预设，用户只能把中转端点填进「OpenAI 兼容」。
+  // 那个端点对 ASR 是死路（compatible-mode 不开音频），归到正确的预设上。
+  const asrEnv = typeof next.asrApiKeyEnv === 'string' ? next.asrApiKeyEnv : ''
+  const asrBase = typeof next.asrBaseUrl === 'string' ? next.asrBaseUrl.toLowerCase() : ''
+  const asrProvider = next.asrProvider ?? ''
+  const asrIsCustom = asrProvider === 'auto' || asrProvider === 'openai' || asrProvider === 'openai-custom'
+  if (asrIsCustom && asrBase !== '') {
+    const qwen = asrBase.includes('token-plan.maas.qianwenaiapi') || QWEN_TOKEN_PLAN_REFS.includes(asrEnv)
+    const mimoPlan = asrBase.includes('token-plan-cn.xiaomimimo') || asrEnv === 'XIAOMI_TOKEN_PLAN_CN_API_KEY'
+    const mimoDirect = !mimoPlan && asrBase.includes('xiaomimimo')
+    if (qwen) {
+      next.asrProvider = 'qwen-token-plan'
+    } else if (mimoPlan) {
+      next.asrProvider = 'mimo-token-plan'
+    } else if (mimoDirect) {
+      next.asrProvider = 'mimo'
+    }
+    if (next.asrProvider !== asrProvider) {
+      next.asrBaseUrl = ''
+      next.asrModel = ''
+      next.asrEndpoint = ''
+    }
+  }
+  return next
 }
 
 /**
@@ -264,7 +339,9 @@ export const BUNDLE_DEFAULTS = {
   asrProvider: 'auto',
   asrBaseUrl: '',
   asrApiKey: '',
-  asrApiKeyEnv: 'MINIMAX_API_KEY',
+  // 凭据名默认留空：由所选预设决定（Qwen/MiMo/MiniMax 三家的 ref 各不相同）。
+  // 以前这里写死 MINIMAX_API_KEY，选别家时就会去找一把根本不存在的钥匙。
+  asrApiKeyEnv: '',
   asrModel: '',
   asrEndpoint: '',
   asrLanguage: 'zh',
@@ -331,7 +408,8 @@ export function resolveConfig(raw) {
     jdFetchTimeoutMs: number(config.jdFetchTimeoutMs, 1000, 120000, 15000),
     jdMaxChars: number(config.jdMaxChars, 500, 200000, 20000),
     // 语音识别：host（宿主 speechToText）> 服务端（插件自己直连）> 浏览器。
-    asrProvider: oneOf(config.asrProvider, ['auto', 'host', 'browser', 'none', 'minimax', 'minimax-cn', 'openai', 'openai-custom'], 'auto'),
+    // 值域与默认端点/模型全部来自 `voice/presets.js`；旧 id 在这里归一。
+    asrProvider: normalizeProviderId('asr', oneOf(config.asrProvider, providerIds('asr'), 'auto')),
     // 服务端语音识别（回落链路）：填了 key 与 baseUrl 就用服务端，否则继承宿主，再否则回落浏览器。
     asrBaseUrl: text(config.asrBaseUrl) ?? '',
     asrApiKey: text(config.asrApiKey) ?? '',
@@ -343,10 +421,10 @@ export function resolveConfig(raw) {
     asrModel: text(config.asrModel) ?? '',
     asrEndpoint: text(config.asrEndpoint) ?? '',
     asrLanguage: text(config.asrLanguage) ?? 'zh',
-    // 语音合成：宿主 > 按配置的模型（mimo/openai/minimax）> 免密钥自然音
+    // 语音合成：宿主 > 按配置的模型（Qwen/MiMo/MiniMax/OpenAI 兼容）> 免密钥自然音
     // （baidu/edge）> 浏览器。**默认不是机器音**：auto 会先找模型，再找
-    // 免密钥的自然音，最后才用系统音色。
-    ttsProvider: oneOf(config.ttsProvider, ['auto', 'host', 'mimo', 'openai', 'minimax', 'minimax-cn', 'dashscope', 'baidu', 'edge', 'browser', 'none'], 'auto'),
+    // 免密钥的自然音，最后才用系统音色。值域同上，来自预设表。
+    ttsProvider: normalizeProviderId('tts', oneOf(config.ttsProvider, providerIds('tts'), 'auto')),
     ttsBaseUrl: text(config.ttsBaseUrl) ?? '',
     ttsApiKeyEnv: text(config.ttsApiKeyEnv) ?? '',
     ttsGroupId: text(config.ttsGroupId) ?? '',

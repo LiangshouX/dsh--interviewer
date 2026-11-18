@@ -38,6 +38,8 @@
 | `sessions` | `{sessions: SessionSummary[]}` | 会话列表，最新在前 |
 | `sessions/<id>` | `SessionState` | 单场面试的全量状态 |
 | `sessions/<id>/documents` | `{resume, jd, jdMeta}` | **归档正文**。单独取，不跟轮询走——简历动辄几十 KB，1.5 秒一次地传是纯浪费，而且它只有「准备」页用得上 |
+| `sessions/records` | `{sessions: CleanupRow[]}` | **记录清理弹层专用**：每场的记录体量。要读转录行数、录音个数与目录大小，所以**只在打开弹层时取**，不许进 6 秒轮询（AGENTS §11） |
+| `sessions/empty` | `{candidates: [{id, title, createdAt}]}` | 空场次候选（没有任何内容的场次，误触新建的典型产物） |
 | `resumes` | `{resumes: ResumeSummary[]}` | **简历库**列表，只含元信息（不带正文），最新在前 |
 | `resumes/<id>` | `{resume: ResumeFull}` | 简历库里某一份的正文 |
 | `host-sessions` | `{sessions: HostSession[]}` | 宿主自己的对话列表（`{id, title, updatedAt}`），用来把「让助手去抓」的请求派过去 |
@@ -100,16 +102,50 @@
 
 ```jsonc
 {
-  "session": { "id", "title", "role", "status", "createdAt", "startedAt", "endedAt", "updatedAt", "position", "company", "resumeId", "pausedAt", "pausedMs", "agentSessionId", "dir" },
+  "session": { "id", "title", "role", "status", "createdAt", "startedAt", "endedAt", "updatedAt", "position", "company", "resumeId", "pausedAt", "pausedMs", "agentSessionId", "agent", "dir" },
   "checklist": { "version": 2, "items": ChecklistItem[], "adjustments": Adjustment[] },
   "transcript": TranscriptRow[],
   "documents": { "resumeChars", "jdChars", "jdUrl", "jdSections", "jdWarnings" },
   "recordings": [{ "name", "kind", "bytes", "modifiedAt", "path" }],
   "report": "# 报告…",
+  "agentTasks": { "checklist": AgentTask, "jd": AgentTask, "report": AgentTask },
   "fluency": { "turns", "speechMs", "silenceMs", "speechRate", "pauseCount", "longestPauseMs", "fillerCount", "repeats", "corrections", "notes" },
   "stats": { "asked", "answered", "durationMs", "checklistTotal", "checklistProbed", "adjustments" }
 }
 ```
+
+`agent` 是**助手会话的可溯源摘要**（面板准备页那枚「助手会话 · 尾号」芯片读它）：
+
+```jsonc
+{
+  "sessionId": "sess_7f3a91c2",   // 当前这一场用的宿主对话（空 = 还没有）
+  "createdAt": 1763485200000,     // 什么时候开的（0 = 账本里没有 / 老场次）
+  "workspaceId": "ws-20261116-b7d2",
+  "rebuilds": 0,                  // 中途换过几次（重建 / 解绑）
+  "dispatches": [{ "at": 1763485200000, "kind": "checklist", "requestId": "checklist-iv-…", "explicit": false }],
+  "lastDispatchAt": 1763485200000
+}
+```
+
+`agentSessionId` 与 `agent.sessionId` 是同一个值；前者是存量字段（老客户端/工具还在读）。
+
+`agentTasks` 是「已经派给助手、还没拿到产物」的任务（抓 JD / 出底稿 / 写报告），
+**loading 的唯一真源**，见 §2.1.4。`AgentTask`：
+
+```jsonc
+{
+  "kind": "checklist",            // jd | checklist | report
+  "status": "waiting",            // waiting | failed（成功 = 任务直接消失）
+  "at": 1763485200000,            // 派发时刻
+  "requestId": "checklist-iv-…",  // 派活用过的幂等 id
+  "url": "https://…",             // 仅 jd：重试要用
+  "reason": "助手这一轮结束了，但没有写回底稿",   // 仅 failed
+  "hint": "再点「重新生成」…"                     // 仅 failed：下一步
+}
+```
+
+`revision` 会带上 `agent:…` 指纹：**超时把 waiting 翻成 failed 是时间驱动的**，
+文件 mtime 不会变，不算进指纹面板就会一直转圈。
 
 `fluency` 是整场的**语流观察**（没有带语流的回答时为 `undefined`）。
 它是观察值，**不是评分**；报告与面试官读它，但不许念给候选人听。
@@ -118,8 +154,10 @@
 （resume 时清零）；`pausedMs` = 累计暂停时长；`agentSessionId` = **这一场**
 面试专属的宿主助手会话（派活寻址用它，全局设置键已退役为诊断信息）。
 
-**计时口径**：`stats.durationMs = (endedAt ‖ updatedAt) − (startedAt ‖ createdAt) − pausedMs`
-——暂停时长**不计入**面试时长（不扣的话「暂停两小时」会全算进去，
+**计时口径**：`stats.durationMs = (endedAt ‖ updatedAt) − startedAt − pausedMs`，
+**没开始过（`startedAt` 缺失）= 0**——`updatedAt` 是「最后一次改动」，不是「面了多久」，
+拿它顶替开始时刻会让准备页的计时显示「这场面试已经 3 小时」。
+暂停时长**不计入**面试时长（不扣的话「暂停两小时」会全算进去，
 报告与 `tooShortForReport`(<3min) 判断全歪）。
 
 ### 1.3 `ChecklistItem`
@@ -210,6 +248,19 @@ POST 时的上报形状：
 | `sessions/<id>/recording` | `{kind, filename?, mimeType?, dataBase64}` | 保存录像/录音 |
 | `sessions/<id>/report` | `{markdown}` | 写分析报告并置 `done` |
 | `sessions/<id>/archive` | `{archived: true \| false}` | **归档 / 取回**。只是收起来，内容、报告、底稿都还在；取消归档时 `archivedAt` 一并抹掉 |
+| `sessions/<id>/continue` | `{}` | **续接**（仅 `done`）：`done → running`，**不重开一轮**——转录、底稿、计时都沿用；中断的时长记进 `pausedMs`（不算面试时长），system 行留痕，并**异步派活**让助手从上一问接着问（不会重新开场）。暂停中的「继续」走 `unpause`，二者不混 |
+| `sessions/<id>/reset` | `{dropRecordings?: false}` | **重置记录**：清转录、报告、计时与暂停账本、「等助手」任务、清单上的「问过」标记与调整记录，**并把助手会话解绑**（旧对话仍在 DSH 里）；**保留**简历 / JD / 考点清单本身与元信息。录音录像默认保留，`dropRecordings:true` 才删。返回 `cleared`（清了多少）与 `kept`（留了什么）——界面照抄，不自己编 |
+| `sessions/delete-batch` | `{ids: ["iv-…", …]}` | **记录清理**：勾选哪几场删哪几场。**逐场返回** `{deleted, refused}`；进行中的场次会被拒（先结束再删），绝不整批失败 |
+
+`sessions/reset` 的返回形状（面板通知文案直接取自这里）：
+
+```jsonc
+{ "ok": true, "sessionId": "iv-…",
+  "cleared": { "turns": 34, "interviewTurns": 17, "report": true, "recordings": 0,
+               "checklistProbed": 5, "checklistAdjustments": 2, "agentTasks": 0, "hostSessionDetached": true },
+  "kept": { "recordings": 2, "checklistItems": 14, "resume": true, "jd": true },
+  "session": { "id": "iv-…", "status": "draft", "…": "…" } }
+```
 
 ### 2.1.1 简历库
 
@@ -233,14 +284,17 @@ POST /interviewer/api/jd/request-agent  { "sessionId": "iv-…", "url": "https:/
 POST /interviewer/api/jd/save           { "sessionId": "iv-…", "text": "…", "url": "https://…" }
 ```
 
-`request-agent` 把抓取请求发到**宿主的对话**里（默认最近活跃的那个），
-让有浏览器的助手去把正文抄回来：
+`request-agent` 把抓取请求发到**这一场面试专属的助手会话**里（和「出底稿」是同一个，
+见 §2.1.3），让有浏览器的助手去把正文抄回来：
 
 ```jsonc
 { "dispatched": true,
-  "hostSession": { "id": "s-…", "title": "当前的对话" },
-  "message": "请求已经发给助手了。在 DSH 对话里能看到它跑，抓到后正文会自动回到这一场面试。" }
+  "hostSession": { "id": "sess_7f3a91c2", "workspace": "D:\\DSH-REALTIME-INTERVIEW", "explicit": false },
+  "message": "请求已发到面试工作区里的助手会话：D:\\DSH-REALTIME-INTERVIEW" }
 ```
+
+`hostSessionId` 给了就是**点名某个对话**（`explicit: true`）：它不在了也**不许偷偷换**
+别的会话重发——那正是「会话乱飞」，此时如实抛错，由人来决定。
 
 助手拿到正文后调 `interview_save_jd`（或本接口 `jd/save`）写回这场面试。
 宿主没有会话接口时，接口要**如实说**并给出下一步，不能静默失败。
@@ -258,15 +312,66 @@ POST /interviewer/api/agent/session    { "sessionId"? }          # 读（必要�
 
 派活一律走 `sessionController.prompt` + `mode:'queue'` + **幂等 requestId**
 （`start-<id>-<startedAt>` / `continue-<id>-<turnTs>` / `resume-<id>-<pausedAt>` /
-`silence-<id>-<ts>`）：客户端重试、轮询竞态都不会重复派活。助手会话是
-**per-session** 的（存 `session.json.agentSessionId`）；冷会话被 prompt 唤醒时
-历史完整重建，DSH 重启也不丢上下文（`docs/TURN-TAKING.md` §5.2/§6.5）。
-存的会话被删（session/not-found）时自动重建重发一次，并记 system 行。
+`silence-<id>-<ts>` / `jd-<id>-<ts>` / `checklist-<id>-<ts>` / `report-<id>-<ts>`）：
+客户端重试、轮询竞态都不会重复派活。
+
+**寻址只有两条，且都要留痕（AGENTS §6.14）：**
+
+1. **默认**：这一场面试专属的助手会话（`session.json.agentSessionId`）。
+   拉 JD、出底稿、开场、继续、写报告**共用同一个对话**——同一场面试的上下文
+   不被打散。冷会话被 prompt 唤醒时历史完整重建，DSH 重启也不丢上下文
+   （`docs/TURN-TAKING.md` §5.2/§6.5）。
+2. **显式**：调用方点名 `hostSessionId`，账本里记 `explicit: true`。
+
+**账本**：每次派活在 `session.json.agentLog` 追加一条
+`{at, event, hostSessionId, kind, requestId, explicit}`（上限 40 条），
+会话新建 / 重建 / 解绑各记 `open` / `clear` / `detach`。`GET sessions/<id>`
+把它压成 `session.agent`（见 §1.2）——「这场面试的助手在哪」不用去 DSH 会话列表里猜。
+
+**没有记录就新建，绝不继承全局键。** `settings.agentSessionId` 是「最近一次
+create」的面包屑，属于**另一场**面试；老代码让没有 `agentSessionId` 的场次继承它，
+于是新岗位拉 JD 时请求被发到某个面试中的对话里（串场）。现在它只当诊断信息。
+
+**派活前先问宿主在不在**：有 `state()` 就先探一次，`gone` 就当场重建再发
+（不让用户先看到一次失败）；`unknown`（老宿主）一律当「还在用」，不自作主张重建。
+prompt 撞上 `session/not-found` 时仍然兜底：清 id → 重建 → **同一 requestId** 重发，
+并记 system 行「助手会话已重建」。
 
 **失败出路**：派活失败在转录留 system 行
 `meta.dispatch: {kind, requestId, text, ok:false, error, hint}`；
 面板轮询到就显示「重新发给助手」→ `POST sessions/<id>/agent-retry`
 用原 requestId 重发，成功后补记 `ok:true` 行，按钮消失。
+
+### 2.1.4 等助手返回：loading 的后端契约
+
+抓 JD / 出底稿 / 写报告这三件事，**派发成功 ≠ 有结果**。派发时在
+`session.json.agentTasks[kind]` 记一条，对应写入落盘时清掉：
+
+| 任务 | 落盘清任务的写入 | 等待上限 |
+|---|---|---|
+| `jd` | `setJd`（正文非空） | 4 分钟 |
+| `checklist` | `saveChecklist`（items 非空） | 10 分钟 |
+| `report` | `saveReport`（报告非空） | 10 分钟 |
+
+`GET sessions/<id>` 读状态时逐条判定（Host 侧 `agentTaskStatus`）：
+
+1. 超过上限 → `failed`（「等了 N 分钟还没有结果」+ 下一步）；
+2. 宿主助手会话读不到（session/not-found）→ `failed`（重派会重建）；
+3. 宿主会话在等人（`state.pendingInput` 非空：审批 / 提问 / 其他确认）→ `failed`
+   （turn 开着、`running` 恒为真，但用户不去对话区处理就不可能推进）；
+4. `sessionController.state({sessionId})` 返回 `running=false` 且队列为空、
+   且已等过 12 秒宽限期 → `failed`（这一轮跑完却没写回）；
+5. 其余 → `waiting`。老宿主没有 `state()` 接口 → 只能靠上限兜底，
+   **绝不把「读不到」当成「还在跑」续命**。
+
+用户点「忽略」清掉提示：
+
+```
+POST /interviewer/api/agent/task  { "sessionId": "iv-…", "kind": "report", "action": "dismiss" }
+```
+
+面板不自己计时、不自己猜：`waiting` 才转圈，`failed` 立即停转，
+按钮恢复可点（重试/重新生成）。
 
 ### 2.2 JD 抓取
 
@@ -529,6 +634,8 @@ ffmpeg -version          # 能出版本号就说明在 PATH 里
 | `interview_record_turn` | `sessionId? role text meta?` | 记录一轮对话。**助手记的 candidate 行不触发「请继续」派活**（只有面板提交 `meta.source:"panel"` 的行才联动，避免助手自己给自己派活成环） |
 | `interview_pause` | `sessionId?` | 暂停进行中的面试：计时停走、转录留痕；面板释放设备（指示灯熄灭） |
 | `interview_resume` | `sessionId?` | 继续暂停中的面试：累计暂停时长并自动派活续接（用户在对话里说「继续吧」也能走通） |
+| `interview_continue_session` | `sessionId?` | **续接已结束的面试**（`done → running`）：不重开一轮，中断时长记进 `pausedMs`，转录/底稿沿用，并派活让助手从上一问接着问 |
+| `interview_reset_session` | `sessionId? dropRecordings?` | **重置记录**：清转录/报告/计时/「问过」标记/等助手任务，并解绑助手会话；保留简历、JD、考点清单与元信息。录音录像默认保留，`dropRecordings:true` 才删 |
 | `interview_request_agent` | `sessionId? task url? hostSessionId?` | 派活：`fetch-jd` / `checklist` / `report` / `start` / `continue` / `resume`（后三个正常由面板自动联动，这里是诊断与手动兜底） |
 | `interview_agent_session` | `sessionId?` | 读（必要时建）助手会话；带 sessionId 返回**那一场专属**的会话（派活寻址用的就是它） |
 | `interview_get_context` | `sessionId?` | 读全部上下文（简历/JD/清单/转录/统计） |

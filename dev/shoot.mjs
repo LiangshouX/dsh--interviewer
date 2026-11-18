@@ -44,9 +44,13 @@ const SHOTS = (() => {
 const PRESETS = [
   // 三页的基本形态：亮暗两套主题各看一遍。
   { name: 'prepare', tab: 0, media: 'granted', width: 1600, height: 1000 },
+  // 等助手返回：真的 loading（Host 给 waiting），不是本地假转圈。
+  { name: 'prepare-drafting', tab: 0, media: 'granted', width: 1600, height: 1000, tasks: 'drafting' },
   { name: 'live', tab: 1, media: 'granted', width: 1600, height: 1000 },
   { name: 'live-media-denied', tab: 1, media: 'denied', width: 1600, height: 1000 },
   { name: 'report', tab: 2, media: 'granted', width: 1600, height: 1000 },
+  // 失败也要有终点：reason + hint + 重试/忽略，不是一直转圈。
+  { name: 'report-failed', tab: 2, media: 'granted', width: 1007, height: 704, tasks: 'report-failed' },
   // **设置页。** `openPreview()` 只点「准备 / 面试中 / 报告」三个页签，
   // 所以 tab=3 的预设必须由这里自己点一次——这正是 settings.png 曾经
   // 截成准备页、变成一张没人看的假图的原因。
@@ -115,6 +119,18 @@ const PRESETS = [
   // **面试中右栏的四个「？」。** 要宽到右栏真的在右边（窄了会上下堆叠），
   // 否则点开的弹层在首屏之外，截出来什么都看不见。
   { name: 'live-hints', tab: 1, media: 'granted', width: 1600, height: 1000, hints: true },
+  // 已结束的场次：舞台给「续接板」（转录/底稿/计时都还在）。
+  // `media: 'none'` = 不点器材按钮（已结束的场次没有「继续面试」可点，
+  // 点右栏那个会把滚动容器推歪，截出来的就不是首屏了）。
+  { name: 'live-done', tab: 1, media: 'none', width: 1007, height: 704, status: 'done' },
+  { name: 'live-done-dark', tab: 1, media: 'none', width: 1007, height: 704, status: 'done', theme: 'dark' },
+  // 宽屏暗色：整块回答框与底部按钮都在视野里——用来目检「底部阴影是否遮住内容」。
+  { name: 'live-dark-tall', tab: 1, media: 'denied', width: 1600, height: 1000, theme: 'dark' },
+  { name: 'live-tall', tab: 1, media: 'denied', width: 1600, height: 1000 },
+  // 记录清理弹层 / 重置确认弹层。
+  { name: 'records', tab: 0, media: 'granted', width: 1007, height: 704, manager: true },
+  { name: 'records-dark', tab: 0, media: 'granted', width: 1007, height: 704, theme: 'dark', manager: true },
+  { name: 'reset-dialog', tab: 0, media: 'granted', width: 1007, height: 704, resetDialog: true },
 ]
 
 /**
@@ -142,6 +158,18 @@ async function interact(page, preset, errors) {
     }
     if (preset.library === true) {
       await page.getByRole('button', { name: /简历库 3/ }).first().click({ timeout: 5000 })
+      await page.waitForTimeout(400)
+    }
+    if (preset.manager === true) {
+      // 「记录清理」在左栏场次表头。它是弹层，不依赖当前页签。
+      await page.getByRole('button', { name: '记录清理', exact: true }).first().click({ timeout: 5000 })
+      await page.waitForTimeout(500)
+    }
+    if (preset.resetDialog === true) {
+      // 场次行尾的「⋯」→「重置记录…」。
+      await page.getByRole('button', { name: '场次操作', exact: true }).first().click({ timeout: 5000 })
+      await page.waitForTimeout(200)
+      await page.getByRole('button', { name: /重置记录/ }).first().click({ timeout: 5000 })
       await page.waitForTimeout(400)
     }
     if (preset.toast === true) {
@@ -240,6 +268,20 @@ async function main() {
       if (preset.media === 'granted' || preset.media === 'denied'
         || preset.media === 'partial' || preset.media === 'host-blocked') {
         await requestMediaPermission(page)
+        // **等设备真的接上再截。** 假设备的 getUserMedia 不是瞬时返回的，
+        // 900ms 之后可能还停在「正在申请…」——那截出来的是半成品状态，
+        // 会让人以为按钮卡住了（产品本身的 busy 态是对的）。
+        await page.waitForFunction(
+          () => !document.body.innerText.includes('正在申请'),
+          null,
+          { timeout: 6000 },
+        ).catch(() => {})
+        // 点器材按钮会让 Playwright 先把元素滚进视野——截图要的是「页面顶部」。
+        // 这里把面试页的滚动容器归零（只影响截图，不影响产品行为）。
+        await page.evaluate(() => {
+          const live = document.querySelector('[data-iv-live]')
+          if (live !== null) live.scrollTop = 0
+        })
       }
       await interact(page, preset, errors)
       const file = join(SHOTS, `${preset.name}.png`)

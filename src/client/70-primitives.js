@@ -70,6 +70,64 @@
     }
 
     /**
+     * 「等助手返回」的状态行：转圈 / 失败 + 出路。
+     *
+     * **它是 loading 的唯一表现，而且必须有终点。** Host 的 `agentTasks`
+     * 给出 `waiting` 或 `failed`：waiting 转圈；failed 立刻停转、说明原因、
+     * 给「重试」与「忽略」。组件自己**不维护计时，也不自己决定何时结束**——
+     * 靠客户端猜「应该还在跑」，就是假活空转的来源。
+     */
+    function AgentTaskRow(props) {
+      const { task, waitingLabel, retryLabel, onRetry, onDismiss, style } = props
+      if (task === undefined || task === null) return null
+      const waiting = task.status !== 'failed'
+      const reason = waiting ? (waitingLabel ?? '助手正在处理…') : (task.reason ?? '没有等到结果')
+      const hint = waiting ? '' : (task.hint ?? '')
+      return h('div', {
+        role: 'status',
+        'aria-live': 'polite',
+        style: {
+          display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap',
+          marginTop: 10, padding: waiting ? '2px 0' : '9px 12px', borderRadius: RADIUS.sm,
+          ...(waiting ? {} : { border: `1px solid ${TONES.amber.edge}`, background: TONES.amber.wash }),
+          ...(style ?? {}),
+        },
+      }, [
+        h('span', {
+          key: 'dot',
+          'aria-hidden': true,
+          className: waiting ? 'iv-spin' : undefined,
+          style: {
+            width: 11, height: 11, marginTop: 4, flex: '0 0 auto', borderRadius: '50%',
+            borderWidth: 1.5, borderStyle: 'solid',
+            borderColor: waiting ? C.rule : TONES.amber.edge,
+            borderTopColor: waiting ? C.accent : C.amber,
+            background: waiting ? 'transparent' : C.amber,
+          },
+        }),
+        h('div', { key: 'text', style: { flex: '1 1 200px', minWidth: 0, ...TYPE.sub, lineHeight: 1.6 } }, [
+          h('div', { key: 'r', style: { color: waiting ? C.boneDim : C.amber } }, reason),
+          hint === '' ? null : h('div', { key: 'h', style: { color: C.boneFaint, marginTop: 2 } }, hint),
+        ]),
+        waiting || typeof onRetry !== 'function'
+          ? null
+          : h('button', {
+            key: 'retry',
+            style: { ...S.btn(false, false), flex: '0 0 auto' },
+            onClick: onRetry,
+          }, retryLabel ?? '重试'),
+        waiting || typeof onDismiss !== 'function'
+          ? null
+          : h('button', {
+            key: 'dismiss',
+            style: { ...S.btn(false, false), flex: '0 0 auto' },
+            title: '清掉这条提示；助手那边照常跑',
+            onClick: onDismiss,
+          }, '忽略'),
+      ])
+    }
+
+    /**
      * 图标按钮：行内动作，默认低调。
      *
      * `ghost` 为 true 时默认透明，悬停才显形（左栏的归档/删除用它）——

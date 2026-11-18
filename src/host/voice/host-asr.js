@@ -167,7 +167,7 @@ export async function transcribeWithHost(service, input, signal) {
       mode: 'host',
       text: '',
       reason: `宿主语音识别失败：${messageOf(error)}`,
-      hint: '如果是模型还没准备好，先在面板上点「准备语音模型」。',
+      hint: '如果是模型还没准备好，先在面板上点「准备语音模型」；也可以把识别服务改成「自动」或某个预设供应商（宿主失败时会接着试服务端）。',
     }
   }
 }

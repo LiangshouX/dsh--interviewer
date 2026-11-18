@@ -278,6 +278,9 @@
       const [pendingDelete, setPendingDelete] = useState(undefined)
       // 哪一行的「⋯」菜单是打开的（同一时刻只开一个）。
       const [rowMenu, setRowMenu] = useState(undefined)
+      // 记录清理（批量删场次 + 空场次清理）与重置确认：两个弹层。
+      const [managerOpen, setManagerOpen] = useState(false)
+      const [resetTarget, setResetTarget] = useState(undefined)
       const settingsPoll = usePoll(() => apiGet('settings'), 8000, [])
       const guardQuiet = settingsPoll.data?.settings?.guardQuiet === true
       // 保护总开关：关掉后不再弹确认，但**设备仍然在离开时释放**。
@@ -470,6 +473,46 @@
           notify('删不掉', failure instanceof Error ? failure.message : String(failure), 'error')
         }
       }, [notify, refreshAll, selected])
+
+      /**
+       * 续接一场**已结束**的面试（AGENTS §6.14）。
+       *
+       * 与「暂停后继续」不同：这是 done → running，不重开一轮，
+       * 中断的那段时间记进 pausedMs（不算面试时长）。
+       */
+      const continueSession = useCallback(async row => {
+        try {
+          await apiPost(`sessions/${row.id}/continue`, {})
+          setSelected(row.id)
+          setTab('live')
+          notify('续接上了', '助手会带着这场面试的转录与底稿，接着中断处继续问。', 'ok')
+          refreshAll()
+        } catch (failure) {
+          notify('没法续接', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [notify, refreshAll])
+
+      /** 重置一场面试的记录：面试过程清零，材料与底稿保留。 */
+      const resetSession = useCallback(async (row, dropRecordings) => {
+        try {
+          const result = await apiPost(`sessions/${row.id}/reset`, { dropRecordings })
+          const cleared = result?.cleared ?? {}
+          const parts = []
+          if (cleared.turns > 0) parts.push(`${cleared.turns} 条转录`)
+          if (cleared.report === true) parts.push('报告')
+          if (cleared.checklistProbed > 0) parts.push(`${cleared.checklistProbed} 个「问过」标记`)
+          if (cleared.recordings > 0) parts.push(`${cleared.recordings} 个录音录像`)
+          setResetTarget(undefined)
+          notify(
+            '已重置',
+            `${parts.length > 0 ? `清掉 ${parts.join('、')}；` : ''}简历、JD、底稿都还在。`,
+            'ok',
+          )
+          refreshAll()
+        } catch (failure) {
+          notify('没重置成', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [notify, refreshAll])
 
       const createSession = useCallback(async () => {
         try {
@@ -892,6 +935,24 @@
                   animation: 'ivRise 160ms var(--iv-ease) backwards',
                 },
               }, [
+                // 续接：只有「已结束」的场次才有这一步。它不重开一轮——
+                // 转录、底稿、计时都接着上一轮走（AGENTS §6.14）。
+                row.status === 'done'
+                  ? h('button', {
+                    key: 'cont',
+                    type: 'button',
+                    title: '接着这场面试继续（转录与底稿都保留）',
+                    style: menuItemStyle(),
+                    onClick: () => { setRowMenu(undefined); void continueSession(row) },
+                  }, '续接面试')
+                  : null,
+                h('button', {
+                  key: 'reset',
+                  type: 'button',
+                  title: '清掉这场面试的记录（转录 / 报告 / 计时），保留简历、JD 与底稿',
+                  style: menuItemStyle(),
+                  onClick: () => { setRowMenu(undefined); setResetTarget(row) },
+                }, '重置记录…'),
                 h('button', {
                   key: 'arch',
                   type: 'button',
@@ -1252,17 +1313,32 @@
             }, [
               h(Meta, { key: 'l', tone: 'faint' }, '面试场次'),
               // 归档只是「收起来」——收起来之后得有个地方把它再翻出来。
-              archivedRows.length > 0
-                ? h(IconBtn, {
-                  key: 'a',
-                  label: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
-                  title: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
+              // 清理是另一件事：勾选一批场次删掉，或一键收拾空场次。
+              rows.length === 0
+                ? null
+                : h('div', {
+                  key: 'acts',
                   style: {
-                    marginLeft: 'auto', flex: '0 0 auto', minWidth: 0, minHeight: 0, padding: '2px 8px',
+                    marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto',
                   },
-                  onClick: () => setShowArchived(value => !value),
-                }, showArchived ? '收起' : `归档 ${archivedRows.length}`)
-                : null,
+                }, [
+                  h(IconBtn, {
+                    key: 'mgr',
+                    label: '记录清理',
+                    title: '记录清理：勾选要删的场次，或一键清理空场次',
+                    style: { minWidth: 0, minHeight: 0, padding: '2px 8px' },
+                    onClick: () => setManagerOpen(true),
+                  }, '清理'),
+                  archivedRows.length > 0
+                    ? h(IconBtn, {
+                      key: 'a',
+                      label: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
+                      title: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
+                      style: { flex: '0 0 auto', minWidth: 0, minHeight: 0, padding: '2px 8px' },
+                      onClick: () => setShowArchived(value => !value),
+                    }, showArchived ? '收起' : `归档 ${archivedRows.length}`)
+                    : null,
+                ]),
             ]),
             // 空状态：一句话 + 一个动作（Empty 自带虚线框，不写说明书）。
             visibleRows.length === 0
@@ -1380,12 +1456,19 @@
                     config,
                     onChanged: refreshAll,
                     notify,
-                    // 清单出来后直接进面试中——不用再让用户自己去点页签。
-                    onGoLive: () => guardRun('进入面试中', () => setTab('live')),
+                    // 清单出来后直接去面试间——不用再让用户自己去点页签。
+                    onGoLive: () => guardRun('去面试', () => setTab('live')),
                   })
                   : tab === 'live'
                     ? h(LiveView, { key: 'live', session, config, onChanged: refreshAll, notify })
-                    : h(ReportView, { key: 'report', session, config, onChanged: refreshAll, notify }),
+                    : h(ReportView, {
+                      key: 'report',
+                      session,
+                      config,
+                      onChanged: refreshAll,
+                      notify,
+                      onGoLive: () => guardRun('续接面试', () => setTab('live')),
+                    }),
             sessionPoll.error !== undefined && !sessionGone
               ? h('div', {key: 'k26',  style: { ...S.hint, color: C.amber, marginTop: 12 } }, `读不到会话状态：${sessionPoll.error}`)
               : null,
@@ -1410,6 +1493,24 @@
             action()
           },
         }),
+        // 记录清理与重置确认都**浮在面板之上**：它们改的是磁盘上的卷宗，
+        // 不是这一页的临时状态——所以必须能在任何页签下打开。
+        managerOpen
+          ? h(SessionsDialog, {
+            key: 'manager',
+            onCancel: () => setManagerOpen(false),
+            onApplied: refreshAll,
+            notify,
+          })
+          : null,
+        resetTarget === undefined
+          ? null
+          : h(ResetDialog, {
+            key: 'reset',
+            row: resetTarget,
+            onCancel: () => setResetTarget(undefined),
+            onConfirm: drop => { void resetSession(resetTarget, drop) },
+          }),
       ])
     }
 

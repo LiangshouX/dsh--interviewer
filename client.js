@@ -321,19 +321,27 @@ window.__ModuleLoader__.load({
         '--iv-edge': 'inset 0 1px 0 var(--iv-hi), inset 0 -1px 0 var(--iv-lo)',
         // 四级 elevation：contact（接触影）+ seam（外缝）+ ambient（环境影）。
         // 影是**蓝黑**的（rgba(2,4,9)）：真实场景里影由天光补色，纯黑影会显得像脏。
-        '--iv-elev-1': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.025), inset 0 -1px 0 rgba(2,4,9,0.45), inset 0 -16px 24px -20px rgba(2,4,9,0.75), 0 1px 2px rgba(2,4,9,0.62), 0 0 0 1px rgba(2,4,9,0.50), 0 20px 42px -20px rgba(2,4,9,0.92)',
-        '--iv-elev-2': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.48), inset 0 -16px 24px -20px rgba(2,4,9,0.78), 0 1px 3px rgba(2,4,9,0.68), 0 0 0 1px rgba(2,4,9,0.52), 0 30px 60px -22px rgba(2,4,9,0.96)',
-        '--iv-elev-3': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.50), 0 2px 6px rgba(2,4,9,0.70), 0 0 0 1px rgba(2,4,9,0.55), 0 48px 96px -30px rgba(2,4,9,1)',
-        '--iv-elev-4': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.75), 0 0 0 1px rgba(2,4,9,0.60), 0 70px 130px -40px #000',
+        //
+        // **暗色下环境影要收着。** 页面底本身就是近黑（#04060A→#06080D），
+        // 再叠一层 alpha≈1 的黑影，卡片下方那片区域会从「有层次」变成
+        // 「一块糊住内容的黑」（底部的按钮与速记字被压得几乎看不见）。
+        // 现在：接触影与外缝照旧，环境影的 alpha 收到 0.5–0.8、半径缩一档——
+        // 四级**仍然分得开**（alpha 递增 + 半径递增），但不再吃掉内容。
+        '--iv-elev-1': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.025), inset 0 -1px 0 rgba(2,4,9,0.45), inset 0 -16px 24px -20px rgba(2,4,9,0.75), 0 1px 2px rgba(2,4,9,0.62), 0 0 0 1px rgba(2,4,9,0.50), 0 16px 34px -20px rgba(2,4,9,0.55)',
+        '--iv-elev-2': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.48), inset 0 -16px 24px -20px rgba(2,4,9,0.78), 0 1px 3px rgba(2,4,9,0.68), 0 0 0 1px rgba(2,4,9,0.52), 0 24px 48px -22px rgba(2,4,9,0.66)',
+        '--iv-elev-3': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(2,4,9,0.50), 0 2px 6px rgba(2,4,9,0.70), 0 0 0 1px rgba(2,4,9,0.55), 0 36px 72px -30px rgba(2,4,9,0.74)',
+        '--iv-elev-4': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.75), 0 0 0 1px rgba(2,4,9,0.60), 0 52px 96px -40px rgba(2,4,9,0.82)',
         // 舞台专用：比 elev-4 收一点——它下面还压着回答框，影太散会把下一条盖住。
-        '--iv-elev-stage': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.72), 0 0 0 1px rgba(2,4,9,0.58), 0 44px 84px -34px rgba(2,4,9,0.95)',
+        '--iv-elev-stage': 'inset 0 1px 0 var(--iv-hi), inset 1px 0 0 rgba(255,255,255,0.03), 0 2px 8px rgba(2,4,9,0.72), 0 0 0 1px rgba(2,4,9,0.58), 0 32px 62px -34px rgba(2,4,9,0.60)',
         // 主按钮：**一块被按在台面上的骨白键**。上亮下暗才是实体。
         '--iv-primary-top': '#F4F6F9',
         '--iv-primary-bottom': '#D2D7DE',
         '--iv-primary-text': '#080A0D',
         '--iv-primary-shadow': 'inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(0,0,0,0.22), 0 1px 2px rgba(0,0,0,0.55), 0 10px 22px -14px rgba(0,0,0,0.85)',
         '--iv-glass': 'rgba(7,9,13,0.72)',
-        '--iv-vignette': 'radial-gradient(125% 92% at 50% 4%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.42) 82%, rgba(0,0,0,0.62) 100%)',
+        // 暗角：只收四角一点点光。**不许收到底部发暗**——页面底部压着
+        // 回答框与速记，暗角一重，那些字就读不出来了（见 elevation 的注释）。
+        '--iv-vignette': 'radial-gradient(132% 96% at 50% 2%, rgba(0,0,0,0) 46%, rgba(0,0,0,0.20) 84%, rgba(0,0,0,0.32) 100%)',
         '--iv-rule': 'rgba(255,255,255,0.115)',
         '--iv-rule-soft': 'rgba(255,255,255,0.06)',
         '--iv-bone': '#EBEDF0',
@@ -957,6 +965,9 @@ window.__ModuleLoader__.load({
         background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
         animation: ivShimmer 1.6s linear infinite;
       }
+      /* 等助手返回：一圈很淡的旋转环。只在真有等待时出现，**不是装饰**。 */
+      @keyframes ivSpin { to { transform: rotate(360deg); } }
+      [data-iv-page] .iv-spin { animation: ivSpin 1.1s linear infinite; }
       @media (prefers-reduced-motion: reduce) {
         [data-iv-page] *, [data-iv-page] *::before, [data-iv-page] *::after {
           animation-duration: 0.001ms !important; transition-duration: 0.001ms !important;
@@ -2606,6 +2617,64 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 「等助手返回」的状态行：转圈 / 失败 + 出路。
+     *
+     * **它是 loading 的唯一表现，而且必须有终点。** Host 的 `agentTasks`
+     * 给出 `waiting` 或 `failed`：waiting 转圈；failed 立刻停转、说明原因、
+     * 给「重试」与「忽略」。组件自己**不维护计时，也不自己决定何时结束**——
+     * 靠客户端猜「应该还在跑」，就是假活空转的来源。
+     */
+    function AgentTaskRow(props) {
+      const { task, waitingLabel, retryLabel, onRetry, onDismiss, style } = props
+      if (task === undefined || task === null) return null
+      const waiting = task.status !== 'failed'
+      const reason = waiting ? (waitingLabel ?? '助手正在处理…') : (task.reason ?? '没有等到结果')
+      const hint = waiting ? '' : (task.hint ?? '')
+      return h('div', {
+        role: 'status',
+        'aria-live': 'polite',
+        style: {
+          display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap',
+          marginTop: 10, padding: waiting ? '2px 0' : '9px 12px', borderRadius: RADIUS.sm,
+          ...(waiting ? {} : { border: `1px solid ${TONES.amber.edge}`, background: TONES.amber.wash }),
+          ...(style ?? {}),
+        },
+      }, [
+        h('span', {
+          key: 'dot',
+          'aria-hidden': true,
+          className: waiting ? 'iv-spin' : undefined,
+          style: {
+            width: 11, height: 11, marginTop: 4, flex: '0 0 auto', borderRadius: '50%',
+            borderWidth: 1.5, borderStyle: 'solid',
+            borderColor: waiting ? C.rule : TONES.amber.edge,
+            borderTopColor: waiting ? C.accent : C.amber,
+            background: waiting ? 'transparent' : C.amber,
+          },
+        }),
+        h('div', { key: 'text', style: { flex: '1 1 200px', minWidth: 0, ...TYPE.sub, lineHeight: 1.6 } }, [
+          h('div', { key: 'r', style: { color: waiting ? C.boneDim : C.amber } }, reason),
+          hint === '' ? null : h('div', { key: 'h', style: { color: C.boneFaint, marginTop: 2 } }, hint),
+        ]),
+        waiting || typeof onRetry !== 'function'
+          ? null
+          : h('button', {
+            key: 'retry',
+            style: { ...S.btn(false, false), flex: '0 0 auto' },
+            onClick: onRetry,
+          }, retryLabel ?? '重试'),
+        waiting || typeof onDismiss !== 'function'
+          ? null
+          : h('button', {
+            key: 'dismiss',
+            style: { ...S.btn(false, false), flex: '0 0 auto' },
+            title: '清掉这条提示；助手那边照常跑',
+            onClick: onDismiss,
+          }, '忽略'),
+      ])
+    }
+
+    /**
      * 图标按钮：行内动作，默认低调。
      *
      * `ghost` 为 true 时默认透明，悬停才显形（左栏的归档/删除用它）——
@@ -3773,6 +3842,342 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 确认弹层：**一次不可撤销的动作**才用它。
+     *
+     * 文案纪律（§10.0.1）：标题写「做什么」，正文写「后果」，note 写
+     * 「还能不能退回」。不放解释设计的句子。
+     */
+    function ConfirmDialog(props) {
+      const { title, body, note, confirmLabel, tone, busy, onConfirm, onCancel } = props
+      useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const handler = event => { if (event.key === 'Escape') onCancel() }
+        window.addEventListener('keydown', handler)
+        return () => window.removeEventListener('keydown', handler)
+      }, [onCancel])
+      return h('div', {
+        style: S.overlay,
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-label': title,
+        onClick: event => { if (event.target === event.currentTarget) onCancel() },
+      }, h('div', {
+        key: 'card',
+        style: { ...S.modal, width: 'min(480px, 100%)', display: 'flex', flexDirection: 'column', gap: 14 },
+      }, [
+        h('div', { key: 't', style: S.cardTitle }, title),
+        body === undefined || body === null
+          ? null
+          : h('div', {
+            key: 'b',
+            style: { ...TYPE.sub, color: C.boneDim, lineHeight: 1.8, whiteSpace: 'pre-wrap' },
+          }, body),
+        note === undefined || note === null ? null : h(Quiet, { key: 'n', tone: 'warn' }, note),
+        h('div', {
+          key: 'a',
+          style: { display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' },
+        }, [
+          h('button', { key: 'c', type: 'button', style: S.btn(false, busy), onClick: onCancel }, '取消'),
+          h('button', {
+            key: 'ok',
+            type: 'button',
+            style: S.btn(tone === 'tally' ? 'tally' : 'primary', busy),
+            onClick: onConfirm,
+          }, busy ? '处理中…' : confirmLabel),
+        ]),
+      ]))
+    }
+
+    /**
+     * 重置一场面试的记录。
+     *
+     * **清什么、留什么要当面说清**（AGENTS §6.14）——「重置」听起来像
+     * 「重新开始」，但用户最怕的是「我的简历和底稿还在吗」。所以正文
+     * 直接列两栏，录音录像做成显式勾选（文件不可恢复，默认留着）。
+     */
+    function ResetDialog(props) {
+      const { row, onCancel, onConfirm } = props
+      const [dropRecordings, setDropRecordings] = useState(false)
+      const [busy, setBusy] = useState(false)
+      const run = async () => {
+        setBusy(true)
+        try { await onConfirm(dropRecordings) } finally { setBusy(false) }
+      }
+      useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const handler = event => { if (event.key === 'Escape') onCancel() }
+        window.addEventListener('keydown', handler)
+        return () => window.removeEventListener('keydown', handler)
+      }, [onCancel])
+      return h('div', {
+        style: S.overlay,
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-label': '重置这场面试的记录',
+        onClick: event => { if (event.target === event.currentTarget) onCancel() },
+      }, h('div', {
+        key: 'card',
+        style: { ...S.modal, width: 'min(520px, 100%)', display: 'flex', flexDirection: 'column', gap: 14 },
+      }, [
+        h('div', { key: 't', style: S.cardTitle }, '重置这场面试的记录'),
+        h('div', {
+          key: 'n',
+          style: {
+            ...TYPE.sub, color: C.boneDim, lineHeight: 1.75, minWidth: 0,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          },
+          title: row?.title ?? '',
+        }, row?.title ?? ''),
+        h('div', {
+          key: 'p',
+          style: { display: 'flex', flexDirection: 'column', gap: 10 },
+        }, [
+          h('div', { key: 'clear', style: { ...TYPE.sub, color: C.boneDim, lineHeight: 1.75 } }, [
+            h('div', { key: 'h', style: { color: C.tally, fontWeight: 600, marginBottom: 2 } }, '会被清掉'),
+            h('div', { key: 'b' }, '转录与计时、报告、底稿上的「问过」标记与调整记录、等助手的任务。'),
+          ]),
+          h('div', { key: 'keep', style: { ...TYPE.sub, color: C.boneDim, lineHeight: 1.75 } }, [
+            h('div', { key: 'h', style: { color: C.jade, fontWeight: 600, marginBottom: 2 } }, '会留下来'),
+            h('div', { key: 'b' }, '简历、JD、考点清单本身，以及标题 / 公司 / 岗位。'),
+          ]),
+        ]),
+        h('label', {
+          key: 'rec',
+          style: {
+            display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer',
+            fontSize: TYPE.sub.fontSize, color: C.boneDim,
+          },
+        }, [
+          h('input', {
+            key: 'c',
+            type: 'checkbox',
+            checked: dropRecordings,
+            onChange: event => setDropRecordings(event.target.checked),
+            style: { marginTop: 2 },
+          }),
+          h('span', { key: 's' }, '连录音录像一起删（文件删了找不回来；不勾就留在卷宗目录里）'),
+        ]),
+        h(Quiet, { key: 'q' }, '助手会话会解绑（新的一轮用新对话）；旧对话仍在 DSH 里，可以自己归档。'),
+        h('div', {
+          key: 'a',
+          style: { display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' },
+        }, [
+          h('button', { key: 'c', type: 'button', style: S.btn(false, busy), onClick: onCancel }, '取消'),
+          h('button', {
+            key: 'ok',
+            type: 'button',
+            style: S.btn('tally', busy),
+            onClick: () => { void run() },
+          }, busy ? '重置中…' : '重置'),
+        ]),
+      ]))
+    }
+
+    /**
+     * 记录清理：**勾选哪几场就删哪几场**，外加「空场次」的一键收拾。
+     *
+     * 为什么单独一个弹层，而不是在左栏逐行删：误触新建 / 试跑留下的场次
+     * 往往是**一批**。逐行两步确认，十场就是二十次点击，用户会放弃。
+     *
+     * **数据只在打开时取**（`sessions/records` 要读每场的转录与录音大小）——
+     * 它不能进 6 秒轮询。
+     */
+    function SessionsDialog(props) {
+      const { onCancel, onApplied, notify } = props
+      const [rows, setRows] = useState([])
+      const [empties, setEmpties] = useState([])
+      const [loading, setLoading] = useState(true)
+      const [error, setError] = useState(undefined)
+      const [picked, setPicked] = useState({})
+      const [armed, setArmed] = useState(false)
+      const [busy, setBusy] = useState(false)
+
+      const load = useCallback(async () => {
+        setLoading(true)
+        try {
+          const [records, emptyResult] = await Promise.all([
+            apiGet('sessions/records'),
+            apiGet('sessions/empty'),
+          ])
+          setRows(Array.isArray(records?.sessions) ? records.sessions : [])
+          setEmpties(Array.isArray(emptyResult?.candidates) ? emptyResult.candidates : [])
+          setError(undefined)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setLoading(false)
+        }
+      }, [])
+
+      useEffect(() => { void load() }, [load])
+      useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const handler = event => { if (event.key === 'Escape') onCancel() }
+        window.addEventListener('keydown', handler)
+        return () => window.removeEventListener('keydown', handler)
+      }, [onCancel])
+
+      // 选中的场次一变，两步确认就作废——否则「上膛」会跨选择生效。
+      const ids = Object.keys(picked).filter(id => picked[id] === true)
+      useEffect(() => { setArmed(false) }, [ids.length])
+
+      const toggle = id => setPicked(previous => {
+        const next = { ...previous }
+        if (next[id] === true) delete next[id]
+        else next[id] = true
+        return next
+      })
+
+      const removeSelected = async () => {
+        if (ids.length === 0) return
+        if (!armed) {
+          setArmed(true)
+          return
+        }
+        setBusy(true)
+        try {
+          const result = await apiPost('sessions/delete-batch', { ids })
+          const deleted = Number(result?.deletedCount ?? 0)
+          const refused = Array.isArray(result?.refused) ? result.refused : []
+          notify(
+            deleted > 0 ? `删了 ${deleted} 场` : '一场都没删',
+            refused.length > 0
+              ? refused.map(item => `${item.id.slice(-6)}：${item.reason}`).join('；')
+              : '卷宗目录已从磁盘删除。',
+            refused.length > 0 ? 'warn' : 'ok',
+          )
+          setPicked({})
+          setArmed(false)
+          await load()
+          onApplied?.()
+        } catch (failure) {
+          notify('没删掉', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const purgeEmpty = async () => {
+        setBusy(true)
+        try {
+          const result = await apiPost('sessions/cleanup', {})
+          const removed = Array.isArray(result?.removed) ? result.removed.length : 0
+          notify(removed > 0 ? `清掉 ${removed} 场空场次` : '没有空场次', undefined, 'ok')
+          await load()
+          onApplied?.()
+        } catch (failure) {
+          notify('没清掉', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const rowNode = row => {
+        const on = picked[row.id] === true
+        const disabled = row.running === true
+        return h('label', {
+          key: row.id,
+          title: disabled ? '正在进行中：先结束再删（避免把转录删到一半）' : row.title,
+          style: {
+            display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px',
+            borderRadius: RADIUS.sm,
+            borderBottom: `1px solid ${C.ruleSoft}`,
+            background: on ? C.ink750 : 'transparent',
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            opacity: disabled ? 0.5 : 1,
+          },
+        }, [
+          h('input', {
+            key: 'c',
+            type: 'checkbox',
+            checked: on,
+            disabled,
+            onChange: () => toggle(row.id),
+            style: { flex: '0 0 auto' },
+          }),
+          h('div', { key: 'b', style: { flex: '1 1 auto', minWidth: 0 } }, [
+            h('div', {
+              key: 't',
+              style: {
+                ...TYPE.body, color: C.bone,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              },
+            }, row.title),
+            h('div', { key: 'm', style: { ...S.row, gap: 8, marginTop: 3 } }, [
+              h(Meta, { key: 's' }, disabled ? '进行中' : `${row.status ?? 'draft'}`),
+              h(Meta, { key: 'd' }, shortDate(row.updatedAt ?? row.createdAt ?? 0)),
+              h(Meta, { key: 't' }, `转录 ${row.turns ?? 0} 轮`),
+              (row.recordings ?? 0) > 0 ? h(Meta, { key: 'r' }, `录音 ${row.recordings}`) : null,
+              h(Meta, { key: 'b' }, formatBytes(row.bytes ?? 0)),
+              row.archived === true ? h(Meta, { key: 'a', tone: 'amber' }, '已归档') : null,
+            ]),
+          ]),
+        ])
+      }
+
+      return h('div', {
+        style: S.overlay,
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-label': '记录清理',
+        onClick: event => { if (event.target === event.currentTarget) onCancel() },
+      }, h('div', {
+        key: 'card',
+        style: {
+          ...S.modal, width: 'min(620px, 100%)', maxHeight: 'min(78vh, 720px)',
+          display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0,
+        },
+      }, [
+        h('div', {
+          key: 'h',
+          style: { display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' },
+        }, [
+          h('div', { key: 't', style: S.cardTitle }, '记录清理'),
+          h(Meta, { key: 'n' }, `${rows.length} 场`),
+          empties.length > 0
+            ? h('button', {
+              key: 'e',
+              type: 'button',
+              style: { ...S.btn(false, busy), marginLeft: 'auto', padding: '4px 10px' },
+              title: '只删没有任何内容的场次',
+              onClick: () => { void purgeEmpty() },
+            }, `清理 ${empties.length} 场空场次`)
+            : null,
+        ]),
+        error !== undefined
+          ? h(Quiet, { key: 'err', tone: 'warn' }, `读不到场次：${error}`)
+          : null,
+        h('div', {
+          key: 'list',
+          style: {
+            flex: '1 1 auto', minHeight: 120, overflowY: 'auto', overscrollBehavior: 'contain',
+            background: C.ink850, border: `1px solid ${C.ruleSoft}`,
+            borderRadius: RADIUS.sm, padding: '4px 6px',
+          },
+        }, loading
+          ? [h(Quiet, { key: 'l' }, '正在读场次…')]
+          : rows.length === 0
+            ? [h(Quiet, { key: 'l' }, '还没有面试场次。')]
+            : rows.map(rowNode)),
+        h('div', {
+          key: 'a',
+          style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+        }, [
+          h(Meta, { key: 'c' }, ids.length > 0 ? `已选 ${ids.length} 场` : '勾选要删的场次'),
+          h('div', { key: 'b', style: { display: 'flex', gap: 8, marginLeft: 'auto' } }, [
+            h('button', { key: 'cancel', type: 'button', style: S.btn(false, busy), onClick: onCancel }, '关闭'),
+            h('button', {
+              key: 'del',
+              type: 'button',
+              style: S.btn('tally', busy || ids.length === 0),
+              onClick: () => { void removeSelected() },
+            }, busy ? '处理中…' : armed ? `再点一次确认删 ${ids.length} 场` : '删除选中的'),
+          ]),
+        ]),
+      ]))
+    }
+
+    /**
      * The flow spine: where this session sits in the four-step arc.
      *
      * 一场面试要走四步：归档材料 → 底稿调研 → 面试中 → 评估表。
@@ -4203,6 +4608,28 @@ window.__ModuleLoader__.load({
       //   - 留空 = 没填 → 写回带日期的占位值（新建公司 / 新建岗位）；
       //   - 标题留空 → 用「公司 · 岗位」拼；
       //   - 用户改过标题 → 保留，不再跟着公司/岗位动。
+      const agentInfo = session?.session?.agent
+      /**
+       * 助手会话芯片：**这场面试的对话在哪**（AGENTS §6.14）。
+       *
+       * 它必须存在，但不能是常驻说明文字——这里只留一个会话尾号，
+       * 完整信息（全 id、建于何时、最近派活、重建过几次）在 `title` 里。
+       */
+      const agentChip = (agentInfo?.sessionId ?? '') === ''
+        ? null
+        : h(Meta, {
+          key: 'agent',
+          title: [
+            `助手会话：${agentInfo.sessionId}`,
+            agentInfo.createdAt > 0 ? `建于 ${new Date(agentInfo.createdAt).toLocaleString()}` : '',
+            agentInfo.lastDispatchAt > 0
+              ? `最近派活：${new Date(agentInfo.lastDispatchAt).toLocaleTimeString()}`
+              : '还没有派过活',
+            agentInfo.rebuilds > 0 ? `中途换过 ${agentInfo.rebuilds} 次会话` : '',
+            '拉 JD、出底稿、开场、写报告都在这一个对话里',
+          ].filter(part => part !== '').join('\n'),
+        }, `助手会话 · ${agentInfo.sessionId.slice(-6)}`)
+
       const saveIdentity = useCallback(async () => {
         setBusy(true)
         try {
@@ -4228,29 +4655,31 @@ window.__ModuleLoader__.load({
       // 把正文抄下来——所以抓不到的时候，正确的做法不是让用户复制粘贴，
       // 而是**请助手去拿**。
       const askAgent = useCallback(async () => {
-        if (jdUrl.trim() === '') {
+        // 重试时输入框可能是空的（刷新/换页回来），用会话里记着的来源链接兜底。
+        const target = (jdUrl.trim() || String(session?.documents?.jdUrl ?? '')).trim()
+        if (target === '') {
           notify('没链接', '先把岗位链接填上，再交给助手。', 'error')
           return
         }
         setBusy(true)
         try {
-          const result = await apiPost('jd/request-agent', { sessionId, url: jdUrl.trim() })
-          setJdNote({
-            ok: true,
-            text: `${result?.message ?? '已经交给助手了。'}`,
-          })
+          const result = await apiPost('jd/request-agent', { sessionId, url: target })
+          setJdUrl(previous => (previous.trim() === '' ? target : previous))
+          // 成功不写常驻提示：下面那条 AgentTaskRow 才是「还在等」的真状态。
+          setJdNote(undefined)
           notify(
             '交给助手了',
-            `${result?.message ?? '已经交给助手了。'}在 DSH 对话区能看到它跑；抓到的正文会自动回到这一场。`,
+            `${result?.message ?? '已经交给助手了。'}抓到正文会自动回到这一场；等太久或失败会在卡片上给出下一步。`,
             'ok',
           )
+          onChanged()
         } catch (failure) {
           const message = failure instanceof Error ? failure.message : String(failure)
           setJdNote({ ok: false, text: `${message}。可以改用下面的手动兜底：把正文粘进 JD 框里。` })
         } finally {
           setBusy(false)
         }
-      }, [jdUrl, sessionId, notify])
+      }, [jdUrl, session?.documents?.jdUrl, sessionId, notify, onChanged])
 
       // ── 让助手出底稿 ──────────────────────────────────────────────
       //
@@ -4260,19 +4689,36 @@ window.__ModuleLoader__.load({
         setBusy(true)
         try {
           const result = await apiPost('agent/checklist', { sessionId })
-          const host = result?.hostSession ?? {}
           notify(
             '已让助手出底稿',
-            `${result?.message ?? ''}。产出后会自动出现在这张卡里。`,
+            `${result?.message ?? ''}产出后会自动出现在这张卡里；失败或等太久会有下一步。`,
             'ok',
           )
-          void host
+          onChanged()
         } catch (failure) {
           notify('派不出去', failure instanceof Error ? failure.message : String(failure), 'error')
         } finally {
           setBusy(false)
         }
-      }, [sessionId, notify])
+      }, [sessionId, notify, onChanged])
+
+      /** 清掉一条「等助手」的提示（助手那边照常跑，只是不再占版面）。 */
+      const dismissTask = useCallback(async kind => {
+        try {
+          await apiPost('agent/task', { sessionId, kind, action: 'dismiss' })
+          onChanged()
+        } catch (failure) {
+          notify('没清掉', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [sessionId, onChanged, notify])
+
+      // 等助手返回的三个任务：**状态由 Host 判定，界面只渲染**。
+      // waiting 时按钮禁用（避免重复派活），failed 时给原因 + 重试 + 忽略。
+      const agentTasks = session?.agentTasks ?? {}
+      const checklistTask = agentTasks.checklist
+      const checklistWaiting = checklistTask?.status === 'waiting'
+      const jdTask = agentTasks.jd
+      const jdWaiting = jdTask?.status === 'waiting'
 
       const checklist = session?.checklist?.items ?? []
       const probed = checklist.filter(item => item.probed === true).length
@@ -4501,10 +4947,10 @@ window.__ModuleLoader__.load({
         h('button', { key: 'fetch', style: S.btn(false, busy || jdUrl.trim() === ''), onClick: fetchJd }, '抓取'),
         h('button', {
           key: 'agent',
-          style: S.btn(false, busy || jdUrl.trim() === ''),
+          style: S.btn(false, busy || jdWaiting || (jdUrl.trim() === '' && String(session?.documents?.jdUrl ?? '') === '')),
           title: '把链接发给 DSH 对话里的助手，让它把正文抄回来',
           onClick: askAgent,
-        }, '让助手去抓'),
+        }, jdWaiting ? '助手正在抓…' : '让助手去抓'),
       ])
 
       // **抓不到不是死路：**把卡在哪、以及两条能走的路都摆出来。
@@ -4534,6 +4980,16 @@ window.__ModuleLoader__.load({
             ])
             : null,
         ])
+
+      // 助手正在抓 / 抓失败：和底稿、报告共用同一条状态行，语义一致。
+      const jdTaskRow = h(AgentTaskRow, {
+        key: 'jd-task',
+        task: jdTask,
+        waitingLabel: '助手正在抓 JD…拿到正文会自动回到这里',
+        retryLabel: '再让助手抓',
+        onRetry: () => { void askAgent() },
+        onDismiss: () => { void dismissTask('jd') },
+      })
 
       // 底稿收起时只留计数与主行动；调整次数是仪表读数，理由在 title 里。
       const checklistExtra = h('div', { key: 'x', style: S.row }, [
@@ -4571,6 +5027,7 @@ window.__ModuleLoader__.load({
             session?.session?.archived === true
               ? h(Pill, { key: 'a', tone: 'amber' }, '已归档')
               : null,
+            agentChip,
             h('button', { key: 'b', style: S.btn('primary', busy), onClick: saveIdentity }, '保存'),
           ]),
         }, [
@@ -4632,7 +5089,7 @@ window.__ModuleLoader__.load({
               title: '目标岗位 JD',
               index: 2,
               extra: h(Meta, { key: 'chars' }, jdArchived ? `${session.documents.jdChars} 字` : '待归档'),
-            }, [jdLinkRow, jdNoteBlock, jdSlot]),
+            }, [jdLinkRow, jdTaskRow, jdNoteBlock, jdSlot]),
           ]),
 
           // ── 右栏：底稿与档案 ────────────────────────────────────────
@@ -4650,7 +5107,7 @@ window.__ModuleLoader__.load({
                   title: '还没有底稿',
                   action: h('button', {
                     key: 'ask',
-                    style: S.btn('primary', busy),
+                    style: S.btn('primary', busy || checklistWaiting),
                     title: config?.workspaceRoot?.path ?? '',
                     onClick: askChecklist,
                   }, busy ? '派活中…' : '让助手出底稿'),
@@ -4667,20 +5124,31 @@ window.__ModuleLoader__.load({
                     },
                   }, checklist.map(item => h(ChecklistRow, { key: item.id, item }))),
                 ]),
+              // loading / 失败：Host 给 waiting 或 failed（带 reason + hint）。
+              h(AgentTaskRow, {
+                key: 'task',
+                task: checklistTask,
+                waitingLabel: '助手正在写底稿…产出后会自动出现在这里',
+                retryLabel: checklist.length > 0 ? '重新生成' : '再派一次',
+                onRetry: () => { void askChecklist() },
+                onDismiss: () => { void dismissTask('checklist') },
+              }),
               checklist.length === 0
                 ? null
                 : h('div', { key: 'next', style: { ...S.row, marginTop: 14 } }, [
                   h('button', {
                     key: 'go',
                     style: S.btn('primary', false),
+                    // 「去面试」而不是「进入面试中」：动词 + 目的地，是动作不是状态。
                     onClick: () => props.onGoLive?.(),
-                  }, '进入面试中 →'),
+                  }, '去面试 →'),
                   h('button', {
                     key: 're',
-                    style: S.btn(regenArm ? 'tally' : false, busy),
+                    style: S.btn(regenArm ? 'tally' : false, busy || checklistWaiting),
                     // 破坏性操作的后果写在悬停里：点下去会覆盖现有清单。
                     title: regenArm ? '会覆盖现有清单' : '让助手重新调研，生成新清单',
                     onClick: () => {
+                      if (checklistWaiting) return
                       if (!regenArm) {
                         setRegenArm(true)
                         setTimeout(() => setRegenArm(false), 5000)
@@ -4766,6 +5234,8 @@ window.__ModuleLoader__.load({
       const [speaking, setSpeaking] = useState(false)
       // 一条按钮走完整条申请链路时的分步反馈。
       const [acquireStage, setAcquireStage] = useState(undefined)
+      // 「开始面试」里正在准备设备的中间态（按钮文案要跟着走）。
+      const [preparing, setPreparing] = useState(false)
       const lastQuestionRef = useRef('')
 
       // ── 话轮状态机（docs/TURN-TAKING.md §3）─────────────────────────────
@@ -4776,6 +5246,8 @@ window.__ModuleLoader__.load({
       const status = session?.session?.status
       const running = status === 'running'
       const paused = status === 'paused'
+      // 已结束 ≠ 作废：还能续接（见 continueSession / continueBoard）。
+      const isDone = status === 'done'
       /** idle | questioning（播报提问）| listening | submitting（反悔窗口）| thinking */
       const [turnPhase, setTurnPhase] = useState('idle')
       const turnPhaseRef = useRef(turnPhase)
@@ -5078,21 +5550,80 @@ window.__ModuleLoader__.load({
         }
       }, [audioRecorder, notify])
 
+      // 「开始面试」要先判断宿主摄像头开没开，而 `hostCamera` 在下面才创建
+      // （hooks 顺序决定的）。**依赖数组是渲染期求值的**，直接引用会踩 TDZ
+      // （`performanc/§11` 记过这条）；用 ref 在点击那一刻读最新值。
+      const hostCameraRef = useRef(undefined)
+
+      /**
+       * 开始面试：**先把设备准备好，再让面试开始。**
+       *
+       * 用户点「开始面试」时只有一个念头：开始。旧实现只 POST /start——
+       * 进到面试间却是一片「未接通板」，摄像头、麦克风一个都没申请。
+       * 顺序应该反过来：此刻正是用户手势（权限窗唯一能弹出来的时机），
+       * 先接通麦克风（桌面端再加上宿主摄像头），再置 running。
+       *
+       * **设备失败不挡面试**（AGENTS §6.3）：没有麦克风就键盘，没有摄像头
+       * 就未接通板——但**结果要如实说出来**，不能用一句「已开始」盖过去。
+       */
       const startInterview = useCallback(async () => {
         // 这是整个面试里最可靠的一次用户手势：在这里解锁音频，
         // 第一句提问自动播报时才不会被浏览器拦掉。
         unlockAudio()
+        setPreparing(true)
+        const hadDevices = media.stream !== undefined || hostCameraRef.current?.active === true
+        let ready
         try {
+          if (!hadDevices) {
+            setAcquireStage({ text: '正在准备摄像头与麦克风…' })
+            ready = await acquireMediaRef.current?.()
+          }
           // Host 端 startSession 置 running 并**异步派活开场**（§5.1）：
           // 点完这一下，助手自己会开口，不需要再去 DSH 对话区做任何事。
           await apiPost(`sessions/${session.session.id}/start`, {})
           // 本地先进 thinking：开场白由轮询带回来（新问题 → questioning）。
           setTurnPhase('thinking')
           onChanged()
+          if (hadDevices) {
+            notify('面试开始了', undefined, 'ok')
+          } else if (ready?.mic === true && ready?.cam === true) {
+            notify('面试开始了', '摄像头与麦克风已接通。', 'ok')
+          } else if (ready?.mic === true) {
+            notify('面试开始了', '麦克风已接通；摄像头没接上——舞台会给画面留位置，随时可以补。', 'warn')
+          } else {
+            notify('面试开始了', '设备没接上：提问照常、回答用键盘，面试不会中断。', 'warn')
+          }
         } catch (failure) {
           notify('没能开始', failure instanceof Error ? failure.message : String(failure), 'error')
+        } finally {
+          setPreparing(false)
         }
-      }, [session?.session?.id, onChanged, notify])
+      }, [session?.session?.id, media.stream, onChanged, notify])
+
+      /**
+       * 续接一场**已结束**的面试：状态回 running，并在同一个手势里把设备接上。
+       *
+       * 和「继续面试」（paused → running）的区别只在服务端：续接不重开一轮，
+       * 中断的那段时间记进 pausedMs。客户端这边两者一样——接设备、等下一问。
+       */
+      const continueInterview = useCallback(async () => {
+        unlockAudio()
+        setPreparing(true)
+        try {
+          await apiPost(`sessions/${session.session.id}/continue`, {})
+          onChanged()
+          notify('续接上了', '助手会从上一问接着问，不会重新开场。', 'ok')
+        } catch (failure) {
+          notify('没法续接', failure instanceof Error ? failure.message : String(failure), 'error')
+          return
+        } finally {
+          setPreparing(false)
+        }
+        if (media.stream === undefined && hostCameraRef.current?.active !== true) {
+          setAcquireStage({ text: '正在准备摄像头与麦克风…' })
+          await acquireMediaRef.current?.()
+        }
+      }, [session?.session?.id, media.stream, onChanged, notify])
 
       const finishInterview = useCallback(async () => {
         try {
@@ -5124,6 +5655,8 @@ window.__ModuleLoader__.load({
        * 它和浏览器的摄像头**互斥**——设备是独占的，两边同时开必然有一个失败。
        */
       const hostCamera = useHostCamera()
+      // 「开始面试」在点击那一刻读它（见上面的 hostCameraRef 注释）。
+      hostCameraRef.current = hostCamera
       const hasHostVideo = hostCamera.active
       /**
        * 宿主画面是不是真的接上了。
@@ -5140,6 +5673,11 @@ window.__ModuleLoader__.load({
        *
        * **为什么不再让用户去点第二个按钮。** 桌面端里「麦克风成功、摄像头失败」
        * 是常态；兜底路径（宿主采集）既然通，就不该让用户自己发现它。
+       *
+       * 返回**实际接上了什么**：调用方（开始面试）要用它如实汇报结果，
+       * 而不是自己猜「应该接上了」。
+       *
+       * @returns {Promise<{mic: boolean, cam: boolean, host: boolean}>}
        */
       const acquireMedia = async () => {
         setAcquireStage({ text: '正在申请麦克风…' })
@@ -5148,17 +5686,18 @@ window.__ModuleLoader__.load({
         const camOk = (stream?.getVideoTracks?.() ?? []).length > 0
         if (camOk) {
           setAcquireStage({ text: '✓ 麦克风与摄像头已接入' })
-          return
+          return { mic: micOk, cam: true, host: false }
         }
         if (!inDesktopHost()) {
           setAcquireStage({ text: micOk ? '✓ 麦克风已接入；摄像头没拿到（可再试一次）' : '麦克风与摄像头都没接上；键盘输入可用。' })
-          return
+          return { mic: micOk, cam: false, host: false }
         }
         setAcquireStage({ text: `${micOk ? '✓ 麦克风已接入 · ' : ''}摄像头被桌面端挡下，正在尝试宿主采集…` })
         const started = await hostCamera.start()
         setAcquireStage({
           text: `${micOk ? '✓ 麦克风已接入 · ' : ''}${started ? '✓ 摄像头已通过宿主接入' : '摄像头仍未接上（可点「用宿主摄像头」重试）'}`,
         })
+        return { mic: micOk, cam: started === true, host: started === true }
       }
 
       // 手动点「开宿主摄像头」重试成功时，分步文案也要跟着变成成功态。
@@ -5289,6 +5828,24 @@ window.__ModuleLoader__.load({
       }, [status, cancelCountdown])
 
       /**
+       * 重置把状态打回 draft：**设备必须关灯**（AGENTS §10.3）。
+       *
+       * 「没进 done」不等于「设备已经放了」——重置是 Host 端的动作，
+       * 它不知道浏览器这边摄像头还开着。所以这里按「不在面试中」兜底，
+       * 顺手把本地相态与识别也归零。
+       */
+      useEffect(() => {
+        if (status === 'running' || status === 'paused' || status === 'done') return
+        cancelCountdown()
+        if (turnPhaseRef.current !== 'idle') setTurnPhase('idle')
+        ttsRef.current.stop()
+        try { segmentAsr.stop() } catch { /* 没开过 */ }
+        try { webAsr.stop() } catch { /* 没开过 */ }
+        if (media.stream !== undefined) media.stop()
+        if (hostCamera.active) void hostCamera.stop()
+      }, [status, cancelCountdown])
+
+      /**
        * 自动模式下自动开分段识别：判定依赖它，不能让用户开两个开关。
        * 用户手动停过就不偷偷再开（autoStartTriedRef）；出错时如实显示
        * 原因、不无限重试——键盘 + 手动发送照常（§6.3 纪律）。
@@ -5401,12 +5958,25 @@ window.__ModuleLoader__.load({
               : undefined
 
       const reportReady = (session?.report ?? '') !== ''
+      // 报告派活后的真实状态（Host 判定）：waiting 转圈、failed 给原因与重试。
+      const reportTask = session?.agentTasks?.report
+      const reportWaiting = reportTask?.status === 'waiting'
       const durationMs = session?.stats?.durationMs ?? 0
       const tooShortForReport = durationMs > 0 && durationMs < 3 * 60 * 1000
-      const dispatchReport = async () => {
+      const dismissTask = async kind => {
         try {
-          const result = await apiPost('agent/report', { sessionId: session?.session?.id })
+          await apiPost('agent/task', { sessionId, kind, action: 'dismiss' })
+          onChanged?.()
+        } catch (failure) {
+          notify('没清掉', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }
+      const dispatchReport = async () => {
+        if (reportWaiting) return
+        try {
+          const result = await apiPost('agent/report', { sessionId })
           notify('已让助手写报告', result?.message ?? '产出后会自动出现在「报告」页。', 'ok')
+          onChanged?.()
         } catch (failure) {
           notify('派不出去', failure instanceof Error ? failure.message : String(failure), 'error')
         }
@@ -5742,6 +6312,38 @@ window.__ModuleLoader__.load({
       ])
 
       /**
+       * 续接板：这场面试**已经结束**，但还能接着面。
+       *
+       * 「结束」不等于「作废」——很多人是聊到一半临时有事，先把数据落定
+       * 拿去分析；回来时应该能接着上一轮继续，而不是重开一场
+       * （转录、底稿、计时都还在，见 `continueSession`）。
+       */
+      const continueBoard = h('div', { key: 'inner', style: plateInnerStyle }, [
+        h(Meta, { key: 'e', tone: 'jade', style: { display: 'block' } }, '这场面试已经结束'),
+        h('div', {
+          key: 'hdr',
+          style: {
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 12, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%',
+          },
+        }, plateHeader),
+        h(Quiet, { key: 'q' }, '转录、底稿、计时都还在——点「续接面试」从上一问接着问，助手不会重新开场。'),
+        ...plateErrors,
+        h('div', {
+          key: 'act',
+          style: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 2 },
+        }, [
+          h('button', {
+            key: 'go',
+            style: S.btn('primary', preparing || media.busy),
+            onClick: () => { void continueInterview() },
+          }, preparing || media.busy || hostCamera.busy ? '正在准备…' : '续接面试'),
+          hostCameraButton,
+          permissionRetryButton,
+        ]),
+      ])
+
+      /**
        * The stage: video when we have it, a designed "standby" plate when we don't.
        *
        * 没接通时它不能是一块黑框：姓名章 + 两圈呼吸环 + 还在跳的电平 + 计时，
@@ -5805,8 +6407,8 @@ window.__ModuleLoader__.load({
             },
           // 暂停板 / 恢复板优先于通用「未接通」板（§6.3/§6.6）：同一个
           // 舞台位、同一套设计语言，只是主角从「申请设备」换成「继续面试」。
-          }, paused || isResumeState
-            ? [paused ? pauseBoard : resumeBoard]
+          }, paused || isResumeState || isDone
+            ? [paused ? pauseBoard : isDone ? continueBoard : resumeBoard]
             : [
             // 板子随舞台长高，内容整体居中；错误说明和按钮在同一列里——
             // 它们就是「权限被拒」唯一的出口，任何高度下都得点得到。
@@ -5921,9 +6523,21 @@ window.__ModuleLoader__.load({
                 key: 'act',
                 style: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 2 },
               }, [
+                // **主按钮就是「开始面试」**：点它会把摄像头与麦克风一起准备好，
+                // 再置 running（AGENTS §6.15）——不该让用户先点设备、再点开始。
+                h('button', {
+                  key: 'start',
+                  style: S.btn('primary', preparing || media.busy),
+                  title: '开始面试：先接通摄像头与麦克风，再让面试官开场',
+                  onClick: () => { void startInterview() },
+                }, preparing
+                  ? '正在准备…'
+                  : media.busy || hostCamera.busy ? '正在申请…' : '开始面试'),
+                // 只申请设备（不开始）：权限被拒时的自查出口，永远留着。
                 h('button', {
                   key: 'ask',
-                  style: S.btn('primary', media.busy),
+                  style: S.btn(false, media.busy),
+                  title: '只申请设备：用来确认是权限挡着，还是设备坏了',
                   onClick: () => { void acquireMedia() },
                 }, media.busy || hostCamera.busy
                   ? '正在申请…'
@@ -6268,20 +6882,23 @@ window.__ModuleLoader__.load({
           // 状态 chip 跟着话轮相态走：舞台演出来的等待，这里给出名字。
           h(Meta, {
             key: 's',
-            tone: paused ? 'amber' : running ? (turnPhase === 'listening' ? 'jade' : 'amber') : undefined,
+            tone: paused ? 'amber' : isDone ? undefined : running ? (turnPhase === 'listening' ? 'jade' : 'amber') : undefined,
           }, paused
             ? '已暂停'
-            : !running
-              ? '未开始'
-              : turnPhase === 'questioning'
-                ? '正在播报提问'
-                : turnPhase === 'listening'
-                  ? '请作答'
-                  : turnPhase === 'submitting'
-                    ? '即将自动提交'
-                    : turnPhase === 'thinking'
-                      ? '面试官思考中'
-                      : '进行中'),
+            : isDone
+              // 已结束 ≠ 未开始：这一场聊过，只是结束了——答案卡不该把它说成还没开始。
+              ? '已结束'
+              : !running
+                ? '未开始'
+                : turnPhase === 'questioning'
+                  ? '正在播报提问'
+                  : turnPhase === 'listening'
+                    ? '请作答'
+                    : turnPhase === 'submitting'
+                      ? '即将自动提交'
+                      : turnPhase === 'thinking'
+                        ? '面试官思考中'
+                        : '进行中'),
         ]),
         // 反悔窗口（§3.2）：草稿区上沿一条窄倒计时进度条。重新开口自动
         // 取消；点「取消并修改」= 用户意图优先，本会话切手动。
@@ -6348,11 +6965,30 @@ window.__ModuleLoader__.load({
               onClick: () => { void retryDispatch() },
             }, '重新发给助手'),
           ]),
+        // 报告派出去之后：loading 由 Host 的 task 状态驱动（成功即消失，
+        // 失败/超时带原因与下一步），客户端不自己计时——没有终点的转圈是假活。
+        h(AgentTaskRow, {
+          key: 'report-task',
+          task: reportTask,
+          waitingLabel: '助手正在写报告…写好后会自动出现在「报告」页',
+          retryLabel: '再派一次',
+          onRetry: () => { void dispatchReport() },
+          onDismiss: () => { void dismissTask('report') },
+        }),
         h('div', { key: 'a', style: { ...S.row } }, [
           // **手动发送永远在**（§7 纪律：键盘兜底是硬纪律，自动只是叠加）。
+          // 但**不在面试中就不收回答**：暂停 / 已结束 / 还没开始时提交，
+          // 只会写进一条没有下文的转录——那正是要清理的脏片段。
           h('button', {
             key: 's',
-            style: S.btn('primary', answer.trim() === ''),
+            style: S.btn('primary', answer.trim() === '' || !running),
+            title: running
+              ? undefined
+              : paused
+                ? '面试暂停中：先点「继续面试」再作答'
+                : isDone
+                  ? '这场已结束：点「续接面试」接着面，再提交回答'
+                  : '还没开始：点「开始面试」再作答',
             onClick: () => { void submitAnswer(false) },
           }, '提交回答'),
           h('button', { key: 'c', style: S.btn(false, answer.trim() === ''), onClick: copyAnswer }, '复制'),
@@ -6370,16 +7006,31 @@ window.__ModuleLoader__.load({
               ? h('button', { key: 'f', style: S.btn(false, false), onClick: () => { void finishInterview() } }, '结束面试')
               : paused
                 ? h('button', { key: 'rs', style: S.btn('primary', false), onClick: () => { void resumeInterview() } }, '继续面试')
-                : h('button', { key: 'st', style: S.btn('primary', false), onClick: () => { void startInterview() } }, '开始面试'),
+                : isDone
+                  // 已结束：接着面，而不是重开一场（转录/底稿/计时都还在）。
+                  ? h('button', {
+                    key: 'cs',
+                    style: S.btn('primary', preparing),
+                    title: '续接：从上一问接着问，中断的时间不算面试时长',
+                    onClick: () => { void continueInterview() },
+                  }, preparing ? '正在准备…' : '续接面试')
+                  : h('button', {
+                    key: 'st',
+                    style: S.btn('primary', preparing || media.busy),
+                    title: '开始面试：先接通摄像头与麦克风，再让面试官开场',
+                    onClick: () => { void startInterview() },
+                  }, preparing ? '正在准备…' : '开始面试'),
             !running && !paused && !reportReady
               ? h('button', {
                 key: 'report',
-                style: S.btn(tooShortForReport ? false : 'primary', false),
-                title: tooShortForReport
-                  ? '这场太短，报告分析不出什么；真需要可以让助手在对话里写'
-                  : '让助手写事后分析报告',
+                style: S.btn(tooShortForReport ? false : 'primary', reportWaiting),
+                title: reportWaiting
+                  ? '助手正在写，写好后会自动出现在「报告」页'
+                  : tooShortForReport
+                    ? '这场太短，报告分析不出什么；真需要可以让助手在对话里写'
+                    : '让助手写事后分析报告',
                 onClick: () => { void dispatchReport() },
-              }, tooShortForReport ? '太短，仍可生成' : '生成事后报告')
+              }, reportWaiting ? '助手正在写报告…' : tooShortForReport ? '太短，仍可生成' : '生成事后报告')
               : null,
           ]),
         ]),
@@ -6430,16 +7081,39 @@ window.__ModuleLoader__.load({
      * 统计收成一行仪表读数，别让数字和正文抢注意力。
      */
     function ReportView(props) {
-      const { session, notify } = props
+      const { session, notify, onChanged } = props
       const report = session?.report ?? ''
       const durationMs = session?.stats?.durationMs ?? 0
       const tooShortForReport = durationMs > 0 && durationMs < 3 * 60 * 1000
+      const reportTask = session?.agentTasks?.report
+      const reportWaiting = reportTask?.status === 'waiting'
+      const dismissTask = async kind => {
+        try {
+          await apiPost('agent/task', { sessionId: session?.session?.id, kind, action: 'dismiss' })
+          onChanged?.()
+        } catch (failure) {
+          notify('没清掉', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }
       const dispatchReport = async () => {
+        if (reportWaiting) return
         try {
           const result = await apiPost('agent/report', { sessionId: session?.session?.id })
           notify('已让助手写报告', result?.message ?? '产出后会自动出现在这里。', 'ok')
+          onChanged?.()
         } catch (failure) {
           notify('派不出去', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }
+      /** 看完报告还能接着面：续接回面试间（转录、底稿、计时都保留）。 */
+      const continueSession = async () => {
+        try {
+          await apiPost(`sessions/${session?.session?.id}/continue`, {})
+          notify('续接上了', '去「面试中」，助手会从上一问接着问。', 'ok')
+          onChanged?.()
+          props.onGoLive?.()
+        } catch (failure) {
+          notify('没法续接', failure instanceof Error ? failure.message : String(failure), 'error')
         }
       }
 
@@ -6471,15 +7145,39 @@ window.__ModuleLoader__.load({
               h(Meta, { key: 'c' }, report !== '' ? `${report.length} 字` : '待生成'),
             ]),
           ]),
-          report === ''
-            ? null
-            : h('button', {
-              key: 're',
-              style: { ...S.btn(false, false), marginLeft: 'auto' },
-              title: '让助手重新写一份',
-              onClick: () => { void dispatchReport() },
-            }, '重新生成'),
+          h('div', {
+            key: 'acts',
+            style: { marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' },
+          }, [
+            // 报告不是终点：这场面试还能接着面（AGENTS §6.14）。
+            session?.session?.status === 'done'
+              ? h('button', {
+                key: 'cont',
+                style: S.btn(false, false),
+                title: '续接这场面试：转录、底稿、计时都保留，接着上一问继续',
+                onClick: () => { void continueSession() },
+              }, '续接面试')
+              : null,
+            report === ''
+              ? null
+              : h('button', {
+                key: 're',
+                style: S.btn(false, reportWaiting),
+                title: '让助手重新写一份',
+                onClick: () => { void dispatchReport() },
+              }, reportWaiting ? '生成中…' : '重新生成'),
+          ]),
         ]),
+
+        h(AgentTaskRow, {
+          key: 'report-task',
+          task: reportTask,
+          waitingLabel: '助手正在写报告…写好后会自动出现在这里',
+          retryLabel: '再派一次',
+          onRetry: () => { void dispatchReport() },
+          onDismiss: () => { void dismissTask('report') },
+          style: { marginTop: 0, marginBottom: 18 },
+        }),
 
         h('div', {
           key: 'stats',
@@ -6499,9 +7197,9 @@ window.__ModuleLoader__.load({
               title: tooShortForReport ? `这场只有 ${formatClock(durationMs)}` : '还没有报告',
               action: h('button', {
                 key: 'go',
-                style: S.btn('primary', false),
+                style: S.btn('primary', reportWaiting),
                 onClick: () => { void dispatchReport() },
-              }, tooShortForReport ? '仍然生成' : '让助手写报告'),
+              }, reportWaiting ? '助手正在写报告…' : tooShortForReport ? '仍然生成' : '让助手写报告'),
             }),
             tooShortForReport
               ? h(Quiet, { key: 'q', tone: 'warn' }, '太短的一场分析不出什么；真需要就点「仍然生成」。')
@@ -6904,15 +7602,17 @@ function SettingsView(props) {
   // 音色下拉的真源来自 Host（设置快照里的 data.voices = 模型→音色对照表）。
   // 按当前模型精确查；模型不在表里退到服务商级；都没有 → 文本输入（自定义/克隆音色的出路）。
   const voiceTableData = data.voices ?? { models: {}, providers: {} }
-  const lookupVoices = (modelId, providerId) => {
+  const lookupVoices = (modelId, vendorId) => {
     const byModel = voiceTableData.models?.[String(modelId ?? '').trim()]
     if (Array.isArray(byModel) && byModel.length > 0) return byModel
-    const byProvider = voiceTableData.providers?.[String(providerId ?? '').trim()]
+    const byProvider = voiceTableData.providers?.[String(vendorId ?? '').trim()]
     if (Array.isArray(byProvider) && byProvider.length > 0) return byProvider
     return []
   }
+  // 音色表按**厂商**建（mimo/minimax 的音色是厂商级、跨模型通用），
+  // 不是按预设 id——Token Plan 与直连共享同一组音色。
   const currentTtsModel = form.ttsModel !== '' ? form.ttsModel : (effective.ttsModel || ttsPreset?.model || '')
-  const ttsVoiceOptions = lookupVoices(currentTtsModel, form.ttsProvider)
+  const ttsVoiceOptions = lookupVoices(currentTtsModel, ttsPreset?.vendor ?? form.ttsProvider)
   const voiceControl = () => {
     if (ttsVoiceOptions.length === 0) {
       return input('ttsVoice', effective.ttsVoice || ttsPreset?.voice || '留空用默认音色')
@@ -6928,18 +7628,38 @@ function SettingsView(props) {
   }
 
   /**
-   * 服务下拉：选项全部来自预设表。
+   * 服务下拉：选项全部来自预设表，按 Host 给的分组标题分段。
    *
    * **换服务要清掉旧服务的覆盖值。** 上一版把 provider 与 baseUrl/model 分开存：
    * 从 MiMo 切到 MiniMax 时，上一家的端点覆盖还在，于是"选了 A 却打 B 的端点"。
    * 换服务 = 从这一家的默认值重新开始；要自定义就在新服务上再填。
+   *
+   * 分组标题是 `disabled` 的 option——原生 `<select>` 里这就是分隔条，
+   * 不额外造一层自定义下拉（窄面板里自定义下拉更难用）。
    */
   const presetSelect = (key, presets, resetKeys) => {
     const current = String(form[key] ?? '')
     const options = presets.length > 0
-      ? presets.map(preset => ({ id: preset.id, label: preset.label, title: preset.notes }))
-      : [{ id: current === '' ? 'auto' : current, label: current === '' ? '默认' : current, title: '' }]
+      ? presets.map(preset => ({
+        id: preset.id,
+        label: preset.label,
+        title: preset.notes,
+        group: preset.group,
+        groupLabel: preset.groupLabel,
+      }))
+      : [{ id: current === '' ? 'auto' : current, label: current === '' ? '默认' : current, title: '', group: 'control', groupLabel: '' }]
     const hasCurrent = options.some(option => option.id === current)
+    const nodes = []
+    let lastGroup = undefined
+    for (const option of options) {
+      // 分组标题只在 Host 真的给了标题时画；老快照/测试数据没有这个字段就退化成平铺列表。
+      if (typeof option.groupLabel === 'string' && option.groupLabel !== '' && option.group !== lastGroup) {
+        nodes.push(h('option', { key: `__group_${option.group}`, disabled: true }, `── ${option.groupLabel} ──`))
+      }
+      lastGroup = option.group
+      nodes.push(h('option', { key: option.id, value: option.id, title: option.title }, option.label))
+    }
+    if (!hasCurrent) nodes.push(h('option', { key: '__current', value: current }, current))
     return h('select', {
       key: 's',
       style: S.input,
@@ -6954,11 +7674,19 @@ function SettingsView(props) {
         // 换了服务之后，旧的"替换密钥"目标就不对了——直接收起。
         setSecretEdit(undefined)
       },
-    }, [
-      ...options.map(option => h('option', { key: option.id, value: option.id, title: option.title }, option.label)),
-      hasCurrent ? null : h('option', { key: '__current', value: current }, current),
-    ].filter(option => option !== null))
+    }, nodes)
   }
+
+  /** 只读值：预设供应商的端点/模型是固定的，展示但不给改。 */
+  const readonly = (key, value) => h('div', {
+    key,
+    title: value,
+    style: {
+      ...S.input,
+      display: 'flex', alignItems: 'center',
+      color: C.boneDim, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+    },
+  }, value)
 
   const checkbox = (key, label) => h('label', {
     key,
@@ -7139,13 +7867,13 @@ function SettingsView(props) {
     ? undefined
     : asr.mode === 'none'
       ? '识别已关闭；需要时把服务改回「自动」。'
-      : '现在走浏览器识别；要自己的模型就选「服务端 · OpenAI 兼容」，填一个 /audio/transcriptions 端点并配凭据。识别不通时用键盘输入，面试照常进行。'
+      : '现在走浏览器识别；要自己的模型就选一个预设供应商（Qwen / MiMo / MiniMax，Token Plan 与直连二选一）并配好它对应的凭据。识别不通时用键盘输入，面试照常进行。'
 
   const ttsQuiet = tts.mode === 'server'
     ? undefined
     : tts.mode === 'none'
       ? '播报已关闭；问题只以文字显示。'
-      : '现在会用浏览器系统音色；要模型音色就选一个服务并配凭据，也可以用免密钥的百度朗读。'
+      : '现在会用浏览器系统音色；要模型音色就选一个预设供应商并配凭据，也可以用免密钥的百度朗读。'
 
   // 「现在用」只放**认得出是哪条链路**的最短一组词：
   // 服务 → 协议 → 模型。端点已经在下面那一格填着了，再抄一遍是把一行撑成三段。
@@ -7154,7 +7882,7 @@ function SettingsView(props) {
   const asrSummary = asr.mode === 'host'
     ? joinParts(['宿主语音服务', asr.host?.provider?.name])
     : asr.mode === 'server'
-      ? joinParts(['服务端', asr.server?.protocol, asr.server?.model])
+      ? joinParts([asr.server?.label ?? '服务端', asr.server?.protocolLabel ?? asr.server?.protocol, asr.server?.model])
       : asr.mode === 'none'
         ? '已关闭'
         : '浏览器 Web Speech'
@@ -7170,6 +7898,33 @@ function SettingsView(props) {
   const asrNeedsGroupId = (asrPreset?.protocol ?? '') === 'minimax'
   const ttsNeedsGroupId = (ttsPreset?.protocol ?? '') === 'minimax'
   const ttsNeedsStyle = (ttsPreset?.protocol ?? '') === 'chat-audio'
+  // 预设供应商 = 端点/协议/凭据名/模型已经配好的一对，只读；要自定义端点选
+  // 「OpenAI 兼容 · 自定义端点」。
+  const asrLocked = asrPreset?.locked === true
+  const ttsLocked = ttsPreset?.locked === true
+  const ttsModels = Array.isArray(ttsPreset?.models) ? ttsPreset.models : []
+  const ttsModelControl = () => {
+    if (!ttsLocked || ttsModels.length === 0) {
+      return h('input', {
+        key: 'i',
+        style: S.input,
+        value: form.ttsModel,
+        placeholder: effective.ttsModel || ttsPreset?.model || '留空用该服务默认',
+        // 换模型 = 换一组合法音色：把音色重置为默认，避免拿旧模型的音色去撞 411。
+        onChange: event => { const value = event.target.value; setForm(previous => ({ ...previous, ttsModel: value, ttsVoice: '' })) },
+      })
+    }
+    const chosen = ttsModels.some(item => item.id === form.ttsModel) ? form.ttsModel : ''
+    return h('select', {
+      key: 's',
+      style: S.input,
+      value: chosen,
+      onChange: event => { const value = event.target.value; setForm(previous => ({ ...previous, ttsModel: value, ttsVoice: '' })) },
+    }, [
+      h('option', { key: '__def', value: '' }, `默认 · ${ttsPreset?.model ?? ttsModels[0].id}`),
+      ...ttsModels.map(item => h('option', { key: item.id, value: item.id }, item.label || item.id)),
+    ])
+  }
 
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, [
     section('appearance', '外观', [themeRow()]),
@@ -7178,8 +7933,12 @@ function SettingsView(props) {
       nowRow('now', '现在用', asrSummary, asr.reason),
       h('div', { key: 'g', style: grid }, [
         field('asrProvider', '服务', presetSelect('asrProvider', asrPresets, ['asrBaseUrl', 'asrModel', 'asrGroupId', 'asrApiKeyEnv'])),
-        field('asrBaseUrl', '端点', input('asrBaseUrl', effective.asrBaseUrl || asrPreset?.baseUrl || '留空用该服务默认')),
-        field('asrModel', '模型', input('asrModel', effective.asrModel || asrPreset?.model || '留空用该服务默认')),
+        asrLocked
+          ? field('asrFixed', '端点 · 模型', readonly('fixed', `${asrPreset?.baseUrl ?? ''} · ${asrPreset?.model ?? ''}`))
+          : field('asrBaseUrl', '端点', input('asrBaseUrl', effective.asrBaseUrl || asrPreset?.baseUrl || '留空用该服务默认')),
+        asrLocked
+          ? null
+          : field('asrModel', '模型', input('asrModel', effective.asrModel || asrPreset?.model || '留空用该服务默认')),
         field('asrLanguage', '语言', input('asrLanguage', effective.asrLanguage || 'zh')),
         // Group ID 只有 MiniMax 的两套协议用得着。**别的服务上不显示这一格**——
         // 一个永远空着的字段，用户会以为必须填，或者以为坏了。
@@ -7215,15 +7974,10 @@ function SettingsView(props) {
       nowRow('now', '现在用', ttsSummary, tts.reason),
       h('div', { key: 'g', style: grid }, [
         field('ttsProvider', '服务', presetSelect('ttsProvider', ttsPresets, ['ttsBaseUrl', 'ttsModel', 'ttsVoice', 'ttsGroupId', 'ttsApiKeyEnv'])),
-        field('ttsBaseUrl', '端点', input('ttsBaseUrl', effective.ttsBaseUrl || ttsPreset?.baseUrl || '留空用该服务默认')),
-        field('ttsModel', '模型', h('input', {
-          key: 'i',
-          style: S.input,
-          value: form.ttsModel,
-          placeholder: effective.ttsModel || ttsPreset?.model || '留空用该服务默认',
-          // 换模型 = 换一组合法音色：把音色重置为默认，避免拿旧模型的音色去撞 411。
-          onChange: event => { const value = event.target.value; setForm(previous => ({ ...previous, ttsModel: value, ttsVoice: '' })) },
-        })),
+        ttsLocked
+          ? field('ttsFixed', '端点（固定）', readonly('fixed', ttsPreset?.baseUrl ?? ''))
+          : field('ttsBaseUrl', '端点', input('ttsBaseUrl', effective.ttsBaseUrl || ttsPreset?.baseUrl || '留空用该服务默认')),
+        field('ttsModel', '模型', ttsModelControl()),
         field('ttsVoice', '音色', voiceControl()),
         field('ttsFormat', '音频格式', h('select', {
           key: 's',
@@ -7695,6 +8449,9 @@ function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
       const [pendingDelete, setPendingDelete] = useState(undefined)
       // 哪一行的「⋯」菜单是打开的（同一时刻只开一个）。
       const [rowMenu, setRowMenu] = useState(undefined)
+      // 记录清理（批量删场次 + 空场次清理）与重置确认：两个弹层。
+      const [managerOpen, setManagerOpen] = useState(false)
+      const [resetTarget, setResetTarget] = useState(undefined)
       const settingsPoll = usePoll(() => apiGet('settings'), 8000, [])
       const guardQuiet = settingsPoll.data?.settings?.guardQuiet === true
       // 保护总开关：关掉后不再弹确认，但**设备仍然在离开时释放**。
@@ -7887,6 +8644,46 @@ function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
           notify('删不掉', failure instanceof Error ? failure.message : String(failure), 'error')
         }
       }, [notify, refreshAll, selected])
+
+      /**
+       * 续接一场**已结束**的面试（AGENTS §6.14）。
+       *
+       * 与「暂停后继续」不同：这是 done → running，不重开一轮，
+       * 中断的那段时间记进 pausedMs（不算面试时长）。
+       */
+      const continueSession = useCallback(async row => {
+        try {
+          await apiPost(`sessions/${row.id}/continue`, {})
+          setSelected(row.id)
+          setTab('live')
+          notify('续接上了', '助手会带着这场面试的转录与底稿，接着中断处继续问。', 'ok')
+          refreshAll()
+        } catch (failure) {
+          notify('没法续接', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [notify, refreshAll])
+
+      /** 重置一场面试的记录：面试过程清零，材料与底稿保留。 */
+      const resetSession = useCallback(async (row, dropRecordings) => {
+        try {
+          const result = await apiPost(`sessions/${row.id}/reset`, { dropRecordings })
+          const cleared = result?.cleared ?? {}
+          const parts = []
+          if (cleared.turns > 0) parts.push(`${cleared.turns} 条转录`)
+          if (cleared.report === true) parts.push('报告')
+          if (cleared.checklistProbed > 0) parts.push(`${cleared.checklistProbed} 个「问过」标记`)
+          if (cleared.recordings > 0) parts.push(`${cleared.recordings} 个录音录像`)
+          setResetTarget(undefined)
+          notify(
+            '已重置',
+            `${parts.length > 0 ? `清掉 ${parts.join('、')}；` : ''}简历、JD、底稿都还在。`,
+            'ok',
+          )
+          refreshAll()
+        } catch (failure) {
+          notify('没重置成', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [notify, refreshAll])
 
       const createSession = useCallback(async () => {
         try {
@@ -8309,6 +9106,24 @@ function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
                   animation: 'ivRise 160ms var(--iv-ease) backwards',
                 },
               }, [
+                // 续接：只有「已结束」的场次才有这一步。它不重开一轮——
+                // 转录、底稿、计时都接着上一轮走（AGENTS §6.14）。
+                row.status === 'done'
+                  ? h('button', {
+                    key: 'cont',
+                    type: 'button',
+                    title: '接着这场面试继续（转录与底稿都保留）',
+                    style: menuItemStyle(),
+                    onClick: () => { setRowMenu(undefined); void continueSession(row) },
+                  }, '续接面试')
+                  : null,
+                h('button', {
+                  key: 'reset',
+                  type: 'button',
+                  title: '清掉这场面试的记录（转录 / 报告 / 计时），保留简历、JD 与底稿',
+                  style: menuItemStyle(),
+                  onClick: () => { setRowMenu(undefined); setResetTarget(row) },
+                }, '重置记录…'),
                 h('button', {
                   key: 'arch',
                   type: 'button',
@@ -8669,17 +9484,32 @@ function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
             }, [
               h(Meta, { key: 'l', tone: 'faint' }, '面试场次'),
               // 归档只是「收起来」——收起来之后得有个地方把它再翻出来。
-              archivedRows.length > 0
-                ? h(IconBtn, {
-                  key: 'a',
-                  label: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
-                  title: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
+              // 清理是另一件事：勾选一批场次删掉，或一键收拾空场次。
+              rows.length === 0
+                ? null
+                : h('div', {
+                  key: 'acts',
                   style: {
-                    marginLeft: 'auto', flex: '0 0 auto', minWidth: 0, minHeight: 0, padding: '2px 8px',
+                    marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto',
                   },
-                  onClick: () => setShowArchived(value => !value),
-                }, showArchived ? '收起' : `归档 ${archivedRows.length}`)
-                : null,
+                }, [
+                  h(IconBtn, {
+                    key: 'mgr',
+                    label: '记录清理',
+                    title: '记录清理：勾选要删的场次，或一键清理空场次',
+                    style: { minWidth: 0, minHeight: 0, padding: '2px 8px' },
+                    onClick: () => setManagerOpen(true),
+                  }, '清理'),
+                  archivedRows.length > 0
+                    ? h(IconBtn, {
+                      key: 'a',
+                      label: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
+                      title: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
+                      style: { flex: '0 0 auto', minWidth: 0, minHeight: 0, padding: '2px 8px' },
+                      onClick: () => setShowArchived(value => !value),
+                    }, showArchived ? '收起' : `归档 ${archivedRows.length}`)
+                    : null,
+                ]),
             ]),
             // 空状态：一句话 + 一个动作（Empty 自带虚线框，不写说明书）。
             visibleRows.length === 0
@@ -8797,12 +9627,19 @@ function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
                     config,
                     onChanged: refreshAll,
                     notify,
-                    // 清单出来后直接进面试中——不用再让用户自己去点页签。
-                    onGoLive: () => guardRun('进入面试中', () => setTab('live')),
+                    // 清单出来后直接去面试间——不用再让用户自己去点页签。
+                    onGoLive: () => guardRun('去面试', () => setTab('live')),
                   })
                   : tab === 'live'
                     ? h(LiveView, { key: 'live', session, config, onChanged: refreshAll, notify })
-                    : h(ReportView, { key: 'report', session, config, onChanged: refreshAll, notify }),
+                    : h(ReportView, {
+                      key: 'report',
+                      session,
+                      config,
+                      onChanged: refreshAll,
+                      notify,
+                      onGoLive: () => guardRun('续接面试', () => setTab('live')),
+                    }),
             sessionPoll.error !== undefined && !sessionGone
               ? h('div', {key: 'k26',  style: { ...S.hint, color: C.amber, marginTop: 12 } }, `读不到会话状态：${sessionPoll.error}`)
               : null,
@@ -8827,6 +9664,24 @@ function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
             action()
           },
         }),
+        // 记录清理与重置确认都**浮在面板之上**：它们改的是磁盘上的卷宗，
+        // 不是这一页的临时状态——所以必须能在任何页签下打开。
+        managerOpen
+          ? h(SessionsDialog, {
+            key: 'manager',
+            onCancel: () => setManagerOpen(false),
+            onApplied: refreshAll,
+            notify,
+          })
+          : null,
+        resetTarget === undefined
+          ? null
+          : h(ResetDialog, {
+            key: 'reset',
+            row: resetTarget,
+            onCancel: () => setResetTarget(undefined),
+            onConfirm: drop => { void resetSession(resetTarget, drop) },
+          }),
       ])
     }
 

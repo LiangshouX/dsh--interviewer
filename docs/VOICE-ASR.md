@@ -12,17 +12,23 @@
 
 | 来源 | 插件预设/链路 | 协议 | 端点 | 凭据 ref | 模型举例 |
 |---|---|---|---|---|---|
-| 宿主本地 SenseVoice | `host`（默认） | 宿主 `speechToText`（整段转写） | 本机模型，无网络 | 无 | SenseVoiceSmall(INT8) |
-| Qwen3-ASR | （未接，ROADMAP 4.2） | **OpenAI 兼容 `chat/completions`+`input_audio`** 或 DashScope 原生 | `{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` | `qwen3-asr-flash` |
-| Qwen-Audio-ASR | （未接） | DashScope 原生 multimodal-generation / WS duplex | 百炼 | `DASHSCOPE_API_KEY` | `qwen-audio-3.1-asr-flash` |
-| MiniMax | `minimax`/`minimax-cn` | HTTP **multipart** `/v1/speech_to_text` | `https://api.minimax.cn/v1/speech_to_text` | `MINIMAX_API_KEY` | `asr-1.0` |
-| MiMo | （未接） | HTTP `chat/completions`+`input_audio` | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `mimo-v2.5-asr` |
-| OpenAI 兼容网关 | `openai`/`openai-custom` | HTTP multipart `/audio/transcriptions` | 任意兼容网关 | `OPENAI_API_KEY`/`SILICONFLOW_API_KEY` | `whisper-1`/`FunAudioLLM/SenseVoiceSmall` |
+| 宿主本地 SenseVoice | `host`（默认候选） | 宿主 `speechToText`（整段转写） | 本机模型，无网络 | 无 | SenseVoiceSmall(INT8) |
+| Qwen · Token Plan | `qwen-token-plan` | **DashScope 原生 `multimodal-generation`** | `https://token-plan.maas.qianwenaiapi.com` | `QIANWEN_TOKEN_PLAN_API_KEY` | `qwen-audio-3.0-asr-flash` |
+| Qwen · 官方百炼 | `qwen` | 同上 | `https://dashscope.aliyuncs.com` | `DASHSCOPE_API_KEY` | `qwen-audio-3.0-asr-flash` |
+| Qwen3-ASR（未用） | — | OpenAI 兼容 `chat/completions`+`input_audio` | 百炼 compatible-mode | `DASHSCOPE_API_KEY` | `qwen3-asr-flash` |
+| MiniMax · Token Plan | `minimax-token-plan` | HTTP **multipart** `/v1/speech_to_text` | `https://api.minimax.cn` | `M_PLAN_API_KEY` | `asr-1.0` |
+| MiniMax · 按量 | `minimax-cn` | 同上 | `https://api.minimax.cn` | `MINIMAX_API_KEY` | `asr-1.0` |
+| MiMo · Token Plan | `mimo-token-plan` | HTTP `chat/completions`+`input_audio` | `https://token-plan-cn.xiaomimimo.com/v1` | `XIAOMI_TOKEN_PLAN_CN_API_KEY` | `mimo-v2.5-asr` |
+| MiMo · 官方按量 | `mimo` | 同上 | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `mimo-v2.5-asr` |
+| OpenAI 兼容网关 | `openai` / `openai-custom` | HTTP multipart `/audio/transcriptions` | 任意兼容网关 | `OPENAI_API_KEY`/`SILICONFLOW_API_KEY` | `whisper-1`/`FunAudioLLM/SenseVoiceSmall` |
 | Paraformer/SenseVoice/Fun-ASR | （未接） | DashScope 异步 transcription / WS duplex | 百炼（Paraformer 仅北京） | `DASHSCOPE_API_KEY` | `paraformer-realtime-v2` |
 
-**最重要的坑：Qwen ASR 的 OpenAI 兼容走 `chat/completions`+`input_audio`，不是 `/audio/transcriptions`。**
-百炼官方**没有** `/compatible-mode/v1/audio/transcriptions` 端点；第三方 Token Plan 中转实测该路径 404。
-把 Qwen ASR 当标准 OpenAI transcriptions 接会失败——要么走 `chat/completions`，要么走 DashScope 原生。
+**最重要的坑：只有标准网关才走 `/audio/transcriptions`。** 百炼官方**没有**
+`/compatible-mode/v1/audio/transcriptions` 端点；Token Plan 中转实测该路径
+400 `url error`。Qwen 的 ASR 走 **DashScope 原生 `multimodal-generation`**
+（本机实测可用）或 OpenAI 兼容 `chat/completions`+`input_audio`（`qwen3-asr-flash`，
+Token Plan 中转上没有这个模型，404 `model_not_found`）。MiMo 也走
+`chat/completions`+`input_audio`，不是 transcriptions。
 
 ---
 
@@ -117,7 +123,14 @@ body `{model, input:{messages:[{role:user,content:[{type:"input_audio",input_aud
 
 ### 2.7 Qwen ASR 坑
 
-- **不是 `/audio/transcriptions`**（见 §0）。Token Plan 中转 compatible-mode 不开音频路径（404）。
+- **不是 `/audio/transcriptions`**（见 §0）。Token Plan 中转 compatible-mode 不开音频路径（400 `url error`）。
+- **Token Plan 中转实测（2026-11-18）**：`/models` 里有 `qwen-audio-3.0-asr-flash`。
+  `chat/completions` + `qwen3-asr-flash` = 404 `model_not_found`；
+  `chat/completions` + `qwen-audio-3.0-asr-flash` + `input_audio` = 400（空响应体）；
+  **`POST {token-plan}/api/v1/services/aigc/multimodal-generation/generation` +
+  `qwen-audio-3.0-asr-flash` + `input.messages[].content[].audio`（data URI）→ 200**，
+  返回 `output.text`（顶层也有 `sentence` / `text` 冗余字段）。
+  插件 `qwen-token-plan` 预设走的就是这一条。
 - 北京/新加坡 API Key 不通用；WS 鉴权在握手阶段（401/403）。
 - `asr_options`(qwen3 系) 与 `language_hints`(qwen-audio/paraformer/fun-asr 系) 是两套参数别混；language 单值 vs language_hints 多值上限各家不同。
 - 异步漏带 `X-DashScope-Async` 无法提交；新域名 parameters 必填；transcription_url 24h 过期及时落盘；OSS `oss://` 临时 URL 仅 RESTful 支持（48h/100QPS 勿生产）。
@@ -143,7 +156,8 @@ curl 'https://api.minimax.cn/v1/speech_to_text' \
 
 ## 4. MiMo ASR
 
-**模型 `mimo-v2.5-asr`**（唯一；无 `mimo-asr`）。端点 `POST https://api.xiaomimimo.com/v1/chat/completions`（**不是 /audio/transcriptions**）。
+**模型 `mimo-v2.5-asr`**（唯一；无 `mimo-asr`）。官方端点 `POST https://api.xiaomimimo.com/v1/chat/completions`，
+Token Plan 端点 `POST https://token-plan-cn.xiaomimimo.com/v1/chat/completions`（**都不是 /audio/transcriptions**）。
 音频作为 user 消息的 `input_audio` 内容部分；与 MiMo TTS 共用端点但**消息形状完全不同**（ASR user content 是数组）。
 
 ```jsonc
@@ -181,10 +195,14 @@ curl 'https://api.minimax.cn/v1/speech_to_text' \
 | ref | 平台 |
 |---|---|
 | `DASHSCOPE_API_KEY` | 官方百炼（北京/新加坡 key 不通用） |
-| `QIANWEN_TOKEN_PLAN_API_KEY` | 千问 Token Plan 中转（compatible-mode 不开音频路径） |
-| `MINIMAX_API_KEY` | MiniMax（TTS/ASR 共用） |
+| `QIANWEN_TOKEN_PLAN_API_KEY` | 千问 Token Plan 中转（ASR 走原生端点可用；compatible-mode 的 /audio/* 不可用） |
+| `XIAOMI_TOKEN_PLAN_CN_API_KEY` | 小米 MiMo Token Plan（token-plan-cn.xiaomimimo.com） |
+| `M_PLAN_API_KEY` / `MINIMAX_M_PLAN_API_KEY` | MiniMax Token Plan（M Plan，api.minimax.cn） |
+| `MINIMAX_API_KEY` | MiniMax 按量（TTS/ASR 共用） |
 | `MIMO_API_KEY` | MiMo 官方按量（TTS/ASR 共用） |
 | `OPENAI_API_KEY`/`SILICONFLOW_API_KEY` | 标准 OpenAI 兼容 transcriptions 网关 |
 
-错误解析三家不同：**Qwen**=HTTP 状态+响应 code/message（DashScope）或 OpenAI 风格；**MiniMax ASR**=OpenAI 风格 HTTP 状态（别用 base_resp）；**MiMo**=HTTP 状态+内嵌 error（base_resp 待核实）。
+错误解析三家不同：**Qwen**=HTTP 状态+响应 code/message（DashScope）或 OpenAI 风格；
+**MiniMax ASR**=OpenAI 风格 HTTP 状态（别用 base_resp）；
+**MiMo**=HTTP 状态+内嵌 error（`error.message` / `base_resp` 都兜住）。
 插件侧统一「失败带 reason+hint、回落浏览器/键盘不阻塞面试」（VOICE.md）。

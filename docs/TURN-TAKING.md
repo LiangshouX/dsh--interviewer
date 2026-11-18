@@ -279,10 +279,11 @@ durationMs = (endedAt ?? updatedAt ?? 0) - (startedAt ?? createdAt ?? 0) - (paus
 
 不修就会把「暂停两小时」算进面试时长，报告与 `tooShortForReport`(<3min) 判断全歪。
 
-**agentSessionId 迁移策略**：读时 session 无该字段但全局 `settings.agentSessionId`
-有值 → 继承写入 session（一次性迁移，老场次不断链）；此后全局键退役为「最近一次
-create 用过的 workspace 会话」诊断信息（`interview_agent_session` 工具继续能查），
-不再参与派活寻址。
+**agentSessionId 不做任何迁移**：session 里没有这个字段（老场次）或为空串
+（新建场次）时，第一次派活就 create 一个自己的会话。全局 `settings.agentSessionId`
+只是「最近一次 create 用过的会话」的诊断面包屑（`interview_agent_session` 工具
+能查），**不参与派活寻址**——继承它等于让新岗位的 JD 请求落进另一场面试的对话里
+（AGENTS §6.14 的「会话乱飞」）。
 
 ### 6.3 暂停动作清单
 
@@ -451,8 +452,8 @@ P2（强撤销、cancel 进行中 turn、barge-in、auto 默认值翻转）未�
    新开场。双击/重试的防重由 `startSession` 的 running-no-op 保证，不靠 requestId。
 3. **恢复板只在挂载时判定一次**（挂载时 running 且无流 = 中断恢复）：
    本次挂载里用户自己点「开始面试」进入 running 的，仍显示常规申请板。
-4. **agentSessionId 迁移只认老场次**（session.json 里**没有**这个字段才继承全局键）：
-   新建场次从 `createSession` 起就带 `agentSessionId: ''`。若新场次也继承全局
+4. **agentSessionId 没有迁移**（session.json 里没有这个字段或为空串 → 建自己的）：
+   新建场次从 `createSession` 起就带 `agentSessionId: ''`。若场次去继承全局
    面包屑，两场面试又会共用一个助手——§1.3-1 要消灭的串场会复活。
 5. **`clearAgentSession` 置空串而不是删字段**：删字段会让会话重新变成「老场次」，
    把刚死掉的全局面包屑继承回来（重建测试抓到的真 bug）。
