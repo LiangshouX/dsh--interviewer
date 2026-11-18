@@ -20,8 +20,15 @@
     /** Host 的只读资源路由（src/host/avatar.js）。 */
     const AVATAR_ASSET_PATH = '/interviewer/avatar/asset/'
     const AVATAR_RUNTIME_URL = AVATAR_ASSET_PATH + 'vendor/mesh-avatar.js'
-    const AVATAR_AVATAR_URL = AVATAR_ASSET_PATH + 'avatar/interviewer/'
-    const AVATAR_ASSETS_URL = AVATAR_AVATAR_URL + 'built/'
+    /** `assets/avatar/<id>/` —— 包里放几份形象，这里就能取几份。 */
+    const AVATAR_ROOT_URL = AVATAR_ASSET_PATH + 'avatar/'
+    /** 默认那份（设置里没选、或选中的那份读不到时用它兜底）。 */
+    const AVATAR_DEFAULT_ID = 'interviewer'
+
+    /** 一份形象的资源地址。id 来自 Host 的清单，这里只拼路径。 */
+    function avatarBaseUrl(avatarId) {
+      return AVATAR_ROOT_URL + encodeURIComponent(avatarId) + '/'
+    }
 
     /** 运行时只取一次；失败把 promise 清掉，下次进面试间再试。 */
     let avatarRuntimePromise
@@ -68,6 +75,23 @@
       const response = await fetch(url, { cache: 'no-cache' })
       if (!response.ok) throw new Error(`形象资源读不到（HTTP ${response.status}）`)
       return response.json()
+    }
+
+    /**
+     * 读一份形象的绑定与清单。
+     *
+     * 两份 JSON 一起取：少一份就是这份形象没装好，直接抛错让上层回落默认那份。
+     *
+     * @param {string} avatarId
+     * @returns {Promise<{root: string, rig: object, manifest: object}>}
+     */
+    async function loadAvatarFiles(avatarId) {
+      const root = avatarBaseUrl(avatarId)
+      const [rig, manifest] = await Promise.all([
+        fetchAvatarJson(root + 'rig.json'),
+        fetchAvatarJson(root + 'avatar.json'),
+      ])
+      return { root, rig, manifest }
     }
 
     /** 系统是否要求减少动效（AGENTS §10.0：所有动效都要尊重它）。 */
@@ -146,11 +170,12 @@
      *
      * @param {object} props
      * @param {string} props.phase 话轮相态（唯一真源在 LiveView）
+     * @param {string} [props.avatarId] `assets/avatar/<id>/` 的目录名（Host 解析过）
      * @param {boolean} [props.speaking] 播报**音频**正在播（`tts.speaking`）
      * @param {() => number} [props.readLevel] 读当前播报音量 0..1（**非响应式**）
      * @param {boolean} [props.enabled]
      */
-    function useAvatar({ phase, speaking = false, readLevel, enabled = true }) {
+    function useAvatar({ phase, avatarId = AVATAR_DEFAULT_ID, speaking = false, readLevel, enabled = true }) {
       const canvasRef = useRef(null)
       const [state, setState] = useState({ status: 'idle', error: undefined })
       const phaseRef = useRef(phase)
@@ -269,19 +294,25 @@
             const runtime = await loadAvatarRuntime()
             if (disposed) return
             if (runtime === undefined) throw new Error('形象运行时没装上')
-            const [rig, manifest] = await Promise.all([
-              fetchAvatarJson(AVATAR_AVATAR_URL + 'rig.json'),
-              fetchAvatarJson(AVATAR_AVATAR_URL + 'avatar.json'),
-            ])
+            // **选中的那份读不到就回落默认那份**（不是回落到「没有脸」）：
+            // 包升级把某份形象删掉、或手改了设置里的 id，都不该让舞台空掉。
+            const wanted = typeof avatarId === 'string' && avatarId !== '' ? avatarId : AVATAR_DEFAULT_ID
+            let loaded
+            try {
+              loaded = await loadAvatarFiles(wanted)
+            } catch (error) {
+              if (wanted === AVATAR_DEFAULT_ID) throw error
+              loaded = await loadAvatarFiles(AVATAR_DEFAULT_ID)
+            }
             if (disposed) return
             avatar = await runtime.createMeshAvatar(canvas, {
-              rig,
-              assetsBase: AVATAR_ASSETS_URL,
+              rig: loaded.rig,
+              assetsBase: loaded.root + 'built/',
               // manual：本模块自己推进时间（不再有内置 idle/眨眼/表情叠层）。
               // 代价是眨眼与视线必须自己算 —— avatarPose 就是干这个的。
               manual: true,
-              padTop: rig?.view?.padTop,
-              padSide: rig?.view?.padSide,
+              padTop: loaded.rig?.view?.padTop,
+              padSide: loaded.rig?.view?.padSide,
             })
             if (disposed) {
               try { avatar.destroy() } catch { /* 已经没了 */ }
@@ -291,7 +322,7 @@
             // 内置的自动表演全关：表演层只有一处（avatarPose）。
             avatar.setAutoIdle(false)
             avatar.setAutoMotion(false)
-            if (manifest?.lipSync !== undefined) avatar.setLipSync(manifest.lipSync)
+            if (loaded.manifest?.lipSync !== undefined) avatar.setLipSync(loaded.manifest.lipSync)
             setState({ status: 'ready', error: undefined })
             if (typeof requestAnimationFrame === 'function') frameHandle = requestAnimationFrame(tick)
             else tick(performance.now())
@@ -308,7 +339,7 @@
           disposed = true
           stop()
         }
-      }, [enabled])
+      }, [enabled, avatarId])
 
       return { canvasRef, state }
     }
@@ -322,12 +353,14 @@
      *
      * @param {object} props
      * @param {string} props.phase
+     * @param {string} [props.avatarId]
      * @param {boolean} props.speaking
      * @param {() => number} props.readLevel
      */
     function AvatarPiP(props) {
       const { canvasRef, state } = useAvatar({
         phase: props.phase,
+        avatarId: props.avatarId,
         speaking: props.speaking,
         readLevel: props.readLevel,
       })

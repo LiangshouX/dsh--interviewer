@@ -12,13 +12,19 @@
  * `startsWith(base + sep)` 复核一次——两道闸门，照 RuiC-2D `server.mjs:54`
  * 的做法。
  *
- * **它不含业务。** 这里没有「当前用哪个形象」的判断：形象目录是固定的
- * `assets/avatar/interviewer/`，开关在设置项 `interviewerAvatar` 里，
- * 由客户端决定挂不挂——Host 只管把字节送出去。
+ * **它不含业务。** 「用哪一份形象」由设置项 `interviewerStyle` 决定，
+ * 只有**这个目录里真的有一份完整形象**的 id 才算数：`assets/avatar/<id>/`
+ * 必须同时有 `avatar.json`、`rig.json`、`built/layers.json`、`built/base.png`。
+ * 少任何一样都只是「没装这份形象」，不是错误——面板的下拉里不出现它，
+ * 设置里写了个不存在的 id 就回落到默认那份。
+ *
+ * **加一份新形象 = 放一个目录。** 不需要改代码、不需要改配置：
+ * `assets/avatar/<id>/` 一出现，它就自动出现在面板的下拉里
+ * （见 `dev/make-avatar.mjs`，作者工具只在这一步用）。
  */
-import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import { extname, resolve, sep } from 'node:path'
+import { createReadStream, existsSync } from 'node:fs'
+import { readdir, readFile, stat } from 'node:fs/promises'
+import { extname, join, resolve, sep } from 'node:path'
 import { ASSET_DIR } from './paths.js'
 
 /**
@@ -31,6 +37,89 @@ export const AVATAR_ASSET_PATH = '/interviewer/avatar/asset/'
 
 /** 允许对外的两个目录（白名单，不是黑名单）。 */
 const ALLOWED_ROOTS = ['avatar', 'vendor']
+
+/** 形象根目录：每个子目录 = 一份可选形象。 */
+export const AVATAR_DIR = join(ASSET_DIR, 'avatar')
+
+/** 默认形象（包里一定带着的那一份）。设置里没选、或选了一个不存在的 id 时用它。 */
+export const DEFAULT_AVATAR_ID = 'interviewer'
+
+/** 形象 id 的形状：它就是目录名，也是 URL 的一段。 */
+const AVATAR_ID_RE = /^[A-Za-z0-9_-]{1,40}$/
+
+/** 一份形象必须同时有这四样，缺一样就当它没装。 */
+const REQUIRED_FILES = [
+  ['avatar.json'],
+  ['rig.json'],
+  ['built', 'layers.json'],
+  ['built', 'base.png'],
+]
+
+/**
+ * 读一份形象的清单（`avatar.json`）；坏/缺失时返回 undefined。
+ *
+ * @param {string} dir
+ * @returns {Promise<object|undefined>}
+ */
+async function readManifest(dir) {
+  try {
+    const value = JSON.parse(await readFile(join(dir, 'avatar.json'), 'utf8'))
+    return value !== null && typeof value === 'object' ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 包里有哪些形象可用。
+ *
+ * **目录就是清单。** 不做注册表、不写代码里的数组：`assets/avatar/<id>/`
+ * 里凑齐四样文件就是一份可用形象。这既让「加一份形象」变成放目录，
+ * 也让「拷坏一份」自动从下拉里消失，而不是让用户选到一个 404。
+ *
+ * @returns {Promise<Array<{id: string, name: string, default: boolean}>>}
+ */
+export async function listAvatars() {
+  let entries
+  try {
+    entries = await readdir(AVATAR_DIR, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const avatars = []
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !AVATAR_ID_RE.test(entry.name)) continue
+    const dir = join(AVATAR_DIR, entry.name)
+    if (!REQUIRED_FILES.every(parts => existsSync(join(dir, ...parts)))) continue
+    const manifest = await readManifest(dir)
+    if (manifest === undefined) continue
+    const name = typeof manifest.name === 'string' && manifest.name.trim() !== ''
+      ? manifest.name.trim()
+      : entry.name
+    avatars.push({ id: entry.name, name, default: entry.name === DEFAULT_AVATAR_ID })
+  }
+  // 默认那份永远排第一：下拉的默认项不应该随目录名字母序漂移。
+  avatars.sort((left, right) => {
+    if (left.default !== right.default) return left.default ? -1 : 1
+    return left.id.localeCompare(right.id)
+  })
+  return avatars
+}
+
+/**
+ * 把「设置里写的 id」解析成**真实存在**的那一份。
+ *
+ * @param {string} preferred 设置项 `interviewerStyle` 的值（可能是空/旧 id）
+ * @returns {Promise<{avatars: Array<object>, selected: string}>}
+ */
+export async function resolveAvatar(preferred) {
+  const avatars = await listAvatars()
+  const wanted = typeof preferred === 'string' ? preferred.trim() : ''
+  const ids = avatars.map(item => item.id)
+  if (wanted !== '' && ids.includes(wanted)) return { avatars, selected: wanted }
+  const fallback = avatars.find(item => item.default) ?? avatars[0]
+  return { avatars, selected: fallback === undefined ? '' : fallback.id }
+}
 
 /** 只发这几种字节。认不出的扩展名不发。 */
 const MIME = {
@@ -76,12 +165,24 @@ function refuse(res, status, text) {
 /**
  * 建一个形象资源服务。
  *
- * 只有 `serveAsset` 一个方法：路由层拿到路径，这里负责校验、响应头与字节。
+ * 两件事：发字节（`serveAsset`），以及回答「包里有哪些形象、现在该用哪一份」
+ * （`list` / `resolve`）。判断只有这里一处——面板、设置页、`/config` 都读它，
+ * 不许各自猜一个形象 id。
  */
 export function createAvatarService() {
   return {
     /** 这条路由的根目录（测试与诊断用，不对外）。 */
     assetDir: ASSET_DIR,
+
+    /** 包里有哪些形象（按目录发现，默认那份排第一）。 */
+    list() {
+      return listAvatars()
+    },
+
+    /** 把设置里写的 id 解析成真实存在的那一份（不存在就回落默认）。 */
+    resolve(preferred) {
+      return resolveAvatar(preferred)
+    },
 
     /**
      * 发一个资源。方法已由路由层检查过（只允许 GET）。

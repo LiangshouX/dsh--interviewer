@@ -642,11 +642,14 @@ ffmpeg -version          # 能出版本号就说明在 PATH 里
 ```
 GET /interviewer/avatar/asset/vendor/mesh-avatar.js                      → 渲染运行时（MIT，187KB）
 GET /interviewer/avatar/asset/vendor/LICENSE-mesh-avatar.txt              → 上游许可
-GET /interviewer/avatar/asset/avatar/interviewer/rig.json                 → 绑定（眼部曲线、嘴、网格）
-GET /interviewer/avatar/asset/avatar/interviewer/avatar.json              → 清单（含 lipSync 口型参数）
-GET /interviewer/avatar/asset/avatar/interviewer/built/*.png|layers.json  → 图层与底图
+GET /interviewer/avatar/asset/avatar/<id>/rig.json                        → 绑定（眼部曲线、嘴、网格）
+GET /interviewer/avatar/asset/avatar/<id>/avatar.json                     → 清单（含 lipSync 口型参数）
+GET /interviewer/avatar/asset/avatar/<id>/built/*.png|layers.json         → 图层与底图
 ```
 
+- **`<id>` 就是包内 `assets/avatar/<id>/` 的目录名。** 默认那份是 `interviewer`；
+  同层再放一个凑齐 `avatar.json` / `rig.json` / `built/layers.json` /
+  `built/base.png` 的目录，就多一份可选形象——**目录即清单**，Host 不做注册表。
 - **从包内读**（`PACKAGE_DIR/assets`），不进用户的数据根：形象是程序资源，
   随版本升级，不是用户材料。
 - **白名单两个目录**：`avatar/` 与 `vendor/`。包里其它东西（源码、测试、docs）
@@ -657,8 +660,16 @@ GET /interviewer/avatar/asset/avatar/interviewer/built/*.png|layers.json  → �
 - 只允许 `GET`（其余 405）；信任围栏与其它 API 同一条（loopback + 非同站 + 同源）。
 - **拿不到也只是没有那张脸。** 404 / 脚本报错 / 没有 WebGL2 时，客户端在
   同一位置显示一块「形象不可用 · 面试照常进行」的小牌，面试本身不受影响。
-- 开关在设置项 `interviewerAvatar`（`on` / `off`，默认 `on`），
-  经 `GET /interviewer/api/config` 下发给面板。
+- 面板拿到的是**解析过**的两项（`GET /interviewer/api/config`）：
+
+  | 字段 | 语义 |
+  |---|---|
+  | `interviewerAvatar` | `on` / `off`：挂不挂（设置项同名） |
+  | `interviewerStyle` | 真正生效的形象 id；设置里写了个不存在的 id 时这里是默认那份 |
+  | `interviewerAvatars` | `[{ id, name, default }]`：包里可选的清单，默认那份排第一 |
+
+- 设置项 `interviewerStyle` 的值白名单**就是真实目录**：存一个不存在的 id 会被
+  `updateSettings` 拒绝并说明（`invalid[].reason`），不会「存了但不生效」。
 
 ---
 

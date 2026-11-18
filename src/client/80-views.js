@@ -3307,6 +3307,8 @@
           ? h(AvatarPiP, {
             key: 'avatar',
             phase: turnPhase,
+            // 挂哪一份形象：Host 解析过的 id（设置里选的那一份，不存在则默认）。
+            avatarId: config?.interviewerStyle,
             // 嘴只跟**音频**走：这是 `useSpeech` 的真实播放状态（浏览器音色时
             // 也是 true，但那时音量恒为 0 → 嘴不动，诚实降级）。
             speaking: tts.speaking === true,

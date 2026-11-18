@@ -180,6 +180,10 @@ export const SETTING_SPECS = {
   //   on  预置形象挂在面试中舞台上（默认）
   //   off 不挂——有人不喜欢屏幕里有张脸，也方便出问题时一键关掉
   interviewerAvatar: { kind: 'enum', values: ['on', 'off'] },
+  // 用哪一份形象：值就是 `assets/avatar/<id>/` 的目录名，留空 = 默认那份。
+  // **不做静态枚举**：形象是往包里放目录加的，枚举写死就要为每一张脸改代码。
+  // 合法性在 `updateSettings` 里对着真实目录校验（不存在的 id 会被拒绝并说明）。
+  interviewerStyle: { kind: 'string' },
 }
 
 export const SETTING_KEYS = Object.keys(SETTING_SPECS)
@@ -376,6 +380,7 @@ export const BUNDLE_DEFAULTS = {
   answerMode: 'manual',
   turnEndSilenceMs: 2000,
   interviewerAvatar: 'on',
+  interviewerStyle: '',
   ffmpegPath: '',
   chromiumPath: '',
 }
@@ -463,6 +468,9 @@ export function resolveConfig(raw) {
     turnEndSilenceMs: number(config.turnEndSilenceMs, 800, 6000, 2000),
     // 虚拟面试官：默认开（装上就有，零配置）；关掉 = 舞台上不挂形象。
     interviewerAvatar: oneOf(config.interviewerAvatar, ['on', 'off'], 'on'),
+    // 用哪一份形象。留空 = 包里默认的那一份；写了个不存在的 id 由
+    // `avatarOptions()` 回落默认（配置文件写死一个已被删掉的 id 也不至于没有形象）。
+    interviewerStyle: text(config.interviewerStyle) ?? '',
     // ffmpeg 的位置。留空 = 自动找（DSH_FFMPEG_PATH → PATH → 常见安装位置）。
     //
     // **为什么要有这个。** 摄像头是 Host 侧用 ffmpeg 采的（桌面端的 Electron

@@ -2506,6 +2506,8 @@ export class InterviewService {
       settings,
       effective: publicEffective,
       explicit: [...this.explicitKeys],
+      // 面试官形象：可用清单 + 生效的那一份（设置页下拉的真源）。
+      avatar: await this.avatarOptions(),
       dataRoot: location,
       sessionsDir: await this.sessionsDir(),
       profilesDir: await this.profilesDir(),
@@ -2618,6 +2620,15 @@ export class InterviewService {
         invalid.push({ key, reason: normalized.reason })
         continue
       }
+      // 形象 id 的**白名单是真实目录**：不存在的 id 存了也只会回落默认，
+      // 所以直接拒绝并说清——「存了不生效」比拒绝更糟（AGENTS §7）。
+      if (key === 'interviewerStyle' && normalized.value !== '') {
+        const avatars = await this.avatar.list()
+        if (!avatars.some(item => item.id === normalized.value)) {
+          invalid.push({ key, reason: `没有这个形象：${normalized.value}` })
+          continue
+        }
+      }
       applied[key] = normalized.value
     }
     const file = await writeSettings(applied)
@@ -2649,6 +2660,24 @@ export class InterviewService {
   /** 语音模块的旧入口；语义等同 effectiveConfig。 */
   async voiceConfig() {
     return this.effectiveConfig()
+  }
+
+  // ── 虚拟面试官 ─────────────────────────────────────────────────────────────
+
+  /**
+   * 可用的面试官形象，以及这一次真正生效的那一份。
+   *
+   * **判定只有一处。** 面板下拉、`/config`、设置校验都读它：
+   * 包里有哪些形象由目录决定（`assets/avatar/<id>/` 凑齐四样文件才算），
+   * 设置里写的 id 不存在就回落默认——不回猜、不硬编码列表。
+   *
+   * 目录扫描是几个 stat/read，且只在面板取配置时发生，不进轮询热路径。
+   *
+   * @returns {Promise<{avatars: Array<{id: string, name: string, default: boolean}>, selected: string}>}
+   */
+  async avatarOptions() {
+    const effective = await this.effectiveConfig()
+    return this.avatar.resolve(effective.interviewerStyle)
   }
 
   // ── voice ────────────────────────────────────────────────────────────────

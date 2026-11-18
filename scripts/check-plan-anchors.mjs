@@ -96,11 +96,11 @@ const ANCHORS = [
 // | `src/client/60-voice.js` | 162 | 非响应式音量通道 | `const readLevel = useCallback` |
 // | `src/client/60-voice.js` | 530 | ASR 帧回调 | `processor.onaudioprocess` |
 // | `src/client/60-voice.js` | 534 | 现成 RMS 算法 | `Math.sqrt(sum / input.length)` |
-// | `src/client/61-avatar.js` | 34 | 运行时按需加载 | `function loadAvatarRuntime` |
-// | `src/client/61-avatar.js` | 152 | 形象 hook | `function useAvatar({` |
-// | `src/client/61-avatar.js` | 228 | 外部驱动口型 | `avatar.setVoiceLevel(` |
-// | `src/client/61-avatar.js` | 102 | 相态 → 姿态映射 | `function avatarPose` |
-// | `src/client/61-avatar.js` | 77 | 减少动效降级 | `prefers-reduced-motion` |
+// | `src/client/61-avatar.js` | 41 | 运行时按需加载 | `function loadAvatarRuntime` |
+// | `src/client/61-avatar.js` | 178 | 形象 hook | `function useAvatar({` |
+// | `src/client/61-avatar.js` | 264 | 外部驱动口型 | `avatar.setVoiceLevel(` |
+// | `src/client/61-avatar.js` | 126 | 相态 → 姿态映射 | `function avatarPose` |
+// | `src/client/61-avatar.js` | 101 | 减少动效降级 | `prefers-reduced-motion` |
 // | `src/client/80-views.js` | 1892 | 面试中视图 | `function LiveView(props)` |
 // | `src/client/80-views.js` | 1906 | 播报 hook | `const tts = useSpeech(` |
 // | `src/client/80-views.js` | 1907 | 候选人画面 ref | `const videoRef = useRef(null)` |
@@ -127,10 +127,10 @@ const ANCHORS = [
 // | `src/host/paths.js` | 50 | 包内只读素材目录 | `export const ASSET_DIR` |
 // | `src/host/paths.js` | 53 | 路由前缀 | `export const API_PREFIX` |
 // | `src/host/paths.js` | 136 | 设置白名单 | `export const SETTING_SPECS` |
-// | `src/host/paths.js` | 351 | 发版默认值 | `export const BUNDLE_DEFAULTS` |
-// | `src/host/paths.js` | 348 | BUNDLE_DEFAULTS 一致性注释 | `必须与 cordis.patch.yml` |
-// | `src/host/paths.js` | 403 | 配置归一 | `export function resolveConfig` |
-// | `src/host/avatar.js` | 81 | 形象资源服务 | `export function createAvatarService` |
+// | `src/host/paths.js` | 355 | 发版默认值 | `export const BUNDLE_DEFAULTS` |
+// | `src/host/paths.js` | 352 | BUNDLE_DEFAULTS 一致性注释 | `必须与 cordis.patch.yml` |
+// | `src/host/paths.js` | 408 | 配置归一 | `export function resolveConfig` |
+// | `src/host/avatar.js` | 172 | 形象资源服务 | `export function createAvatarService` |
 // ANCHORS:END
 
 /** 把文件读成行数组。 */

@@ -202,6 +202,9 @@ async function readResource(service, segments, query) {
     // **有效值，不是配置文件里的值。** 面板里改过就用面板的，
     // 否则"设置页能改、界面照旧"这种割裂会一直存在。
     const effective = await service.effectiveConfig()
+    // 形象：清单来自包内目录，`interviewerStyle` 是**解析过**的那个 id
+    // （设置里写了个不存在的 id 时这里给默认，面板不用自己兜底）。
+    const avatar = await service.avatarOptions()
     return {
       asrProvider: effective.asrProvider,
       ttsProvider: effective.ttsProvider,
@@ -215,8 +218,10 @@ async function readResource(service, segments, query) {
       // 面板 Live 页的快捷切换读写同一份 settings。
       answerMode: effective.answerMode ?? 'manual',
       turnEndSilenceMs: effective.turnEndSilenceMs ?? 2000,
-      // 虚拟面试官：'on' | 'off'。面板据此决定舞台上挂不挂形象。
+      // 虚拟面试官：'on' | 'off' 决定挂不挂；style 决定挂哪一份。
       interviewerAvatar: effective.interviewerAvatar ?? 'on',
+      interviewerStyle: avatar.selected,
+      interviewerAvatars: avatar.avatars,
       // 工作区根：界面要能回答「数据存到哪儿了、为什么是这个目录」。
       workspaceRoot: await service.location(),
       jdFetchTimeoutMs: effective.jdFetchTimeoutMs,

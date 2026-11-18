@@ -2816,8 +2816,15 @@ window.__ModuleLoader__.load({
     /** Host 的只读资源路由（src/host/avatar.js）。 */
     const AVATAR_ASSET_PATH = '/interviewer/avatar/asset/'
     const AVATAR_RUNTIME_URL = AVATAR_ASSET_PATH + 'vendor/mesh-avatar.js'
-    const AVATAR_AVATAR_URL = AVATAR_ASSET_PATH + 'avatar/interviewer/'
-    const AVATAR_ASSETS_URL = AVATAR_AVATAR_URL + 'built/'
+    /** `assets/avatar/<id>/` —— 包里放几份形象，这里就能取几份。 */
+    const AVATAR_ROOT_URL = AVATAR_ASSET_PATH + 'avatar/'
+    /** 默认那份（设置里没选、或选中的那份读不到时用它兜底）。 */
+    const AVATAR_DEFAULT_ID = 'interviewer'
+
+    /** 一份形象的资源地址。id 来自 Host 的清单，这里只拼路径。 */
+    function avatarBaseUrl(avatarId) {
+      return AVATAR_ROOT_URL + encodeURIComponent(avatarId) + '/'
+    }
 
     /** 运行时只取一次；失败把 promise 清掉，下次进面试间再试。 */
     let avatarRuntimePromise
@@ -2864,6 +2871,23 @@ window.__ModuleLoader__.load({
       const response = await fetch(url, { cache: 'no-cache' })
       if (!response.ok) throw new Error(`形象资源读不到（HTTP ${response.status}）`)
       return response.json()
+    }
+
+    /**
+     * 读一份形象的绑定与清单。
+     *
+     * 两份 JSON 一起取：少一份就是这份形象没装好，直接抛错让上层回落默认那份。
+     *
+     * @param {string} avatarId
+     * @returns {Promise<{root: string, rig: object, manifest: object}>}
+     */
+    async function loadAvatarFiles(avatarId) {
+      const root = avatarBaseUrl(avatarId)
+      const [rig, manifest] = await Promise.all([
+        fetchAvatarJson(root + 'rig.json'),
+        fetchAvatarJson(root + 'avatar.json'),
+      ])
+      return { root, rig, manifest }
     }
 
     /** 系统是否要求减少动效（AGENTS §10.0：所有动效都要尊重它）。 */
@@ -2942,11 +2966,12 @@ window.__ModuleLoader__.load({
      *
      * @param {object} props
      * @param {string} props.phase 话轮相态（唯一真源在 LiveView）
+     * @param {string} [props.avatarId] `assets/avatar/<id>/` 的目录名（Host 解析过）
      * @param {boolean} [props.speaking] 播报**音频**正在播（`tts.speaking`）
      * @param {() => number} [props.readLevel] 读当前播报音量 0..1（**非响应式**）
      * @param {boolean} [props.enabled]
      */
-    function useAvatar({ phase, speaking = false, readLevel, enabled = true }) {
+    function useAvatar({ phase, avatarId = AVATAR_DEFAULT_ID, speaking = false, readLevel, enabled = true }) {
       const canvasRef = useRef(null)
       const [state, setState] = useState({ status: 'idle', error: undefined })
       const phaseRef = useRef(phase)
@@ -3065,19 +3090,25 @@ window.__ModuleLoader__.load({
             const runtime = await loadAvatarRuntime()
             if (disposed) return
             if (runtime === undefined) throw new Error('形象运行时没装上')
-            const [rig, manifest] = await Promise.all([
-              fetchAvatarJson(AVATAR_AVATAR_URL + 'rig.json'),
-              fetchAvatarJson(AVATAR_AVATAR_URL + 'avatar.json'),
-            ])
+            // **选中的那份读不到就回落默认那份**（不是回落到「没有脸」）：
+            // 包升级把某份形象删掉、或手改了设置里的 id，都不该让舞台空掉。
+            const wanted = typeof avatarId === 'string' && avatarId !== '' ? avatarId : AVATAR_DEFAULT_ID
+            let loaded
+            try {
+              loaded = await loadAvatarFiles(wanted)
+            } catch (error) {
+              if (wanted === AVATAR_DEFAULT_ID) throw error
+              loaded = await loadAvatarFiles(AVATAR_DEFAULT_ID)
+            }
             if (disposed) return
             avatar = await runtime.createMeshAvatar(canvas, {
-              rig,
-              assetsBase: AVATAR_ASSETS_URL,
+              rig: loaded.rig,
+              assetsBase: loaded.root + 'built/',
               // manual：本模块自己推进时间（不再有内置 idle/眨眼/表情叠层）。
               // 代价是眨眼与视线必须自己算 —— avatarPose 就是干这个的。
               manual: true,
-              padTop: rig?.view?.padTop,
-              padSide: rig?.view?.padSide,
+              padTop: loaded.rig?.view?.padTop,
+              padSide: loaded.rig?.view?.padSide,
             })
             if (disposed) {
               try { avatar.destroy() } catch { /* 已经没了 */ }
@@ -3087,7 +3118,7 @@ window.__ModuleLoader__.load({
             // 内置的自动表演全关：表演层只有一处（avatarPose）。
             avatar.setAutoIdle(false)
             avatar.setAutoMotion(false)
-            if (manifest?.lipSync !== undefined) avatar.setLipSync(manifest.lipSync)
+            if (loaded.manifest?.lipSync !== undefined) avatar.setLipSync(loaded.manifest.lipSync)
             setState({ status: 'ready', error: undefined })
             if (typeof requestAnimationFrame === 'function') frameHandle = requestAnimationFrame(tick)
             else tick(performance.now())
@@ -3104,7 +3135,7 @@ window.__ModuleLoader__.load({
           disposed = true
           stop()
         }
-      }, [enabled])
+      }, [enabled, avatarId])
 
       return { canvasRef, state }
     }
@@ -3118,12 +3149,14 @@ window.__ModuleLoader__.load({
      *
      * @param {object} props
      * @param {string} props.phase
+     * @param {string} [props.avatarId]
      * @param {boolean} props.speaking
      * @param {() => number} props.readLevel
      */
     function AvatarPiP(props) {
       const { canvasRef, state } = useAvatar({
         phase: props.phase,
+        avatarId: props.avatarId,
         speaking: props.speaking,
         readLevel: props.readLevel,
       })
@@ -7262,6 +7295,8 @@ window.__ModuleLoader__.load({
           ? h(AvatarPiP, {
             key: 'avatar',
             phase: turnPhase,
+            // 挂哪一份形象：Host 解析过的 id（设置里选的那一份，不存在则默认）。
+            avatarId: config?.interviewerStyle,
             // 嘴只跟**音频**走：这是 `useSpeech` 的真实播放状态（浏览器音色时
             // 也是 true，但那时音量恒为 0 → 嘴不动，诚实降级）。
             speaking: tts.speaking === true,
@@ -8191,6 +8226,8 @@ function SettingsView(props) {
       turnEndSilenceMs: settings.turnEndSilenceMs === undefined ? '' : String(settings.turnEndSilenceMs),
       // 虚拟面试官：有效值优先（配置文件写 off 时，面板不该显示成开）。
       interviewerAvatar: (data.effective?.interviewerAvatar ?? settings.interviewerAvatar) !== 'off',
+      // 用哪一份形象：Host 解析过的那一个（未知/空都已经是默认那份）。
+      interviewerStyle: data.avatar?.selected ?? '',
     })
   }, [data, form])
 
@@ -8660,6 +8697,14 @@ function SettingsView(props) {
 
   const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }
 
+  /**
+   * 可用的面试官形象（来自包内 `assets/avatar/<id>/`）。
+   *
+   * **面板不硬编码形象列表**：Host 扫目录给清单，这里只渲染。
+   * 只有一份时不出下拉（见形象区注释）。
+   */
+  const avatarOptions = Array.isArray(data?.avatar?.avatars) ? data.avatar.avatars : []
+
   const actions = children => h('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' } }, children)
 
   /**
@@ -9008,14 +9053,35 @@ function SettingsView(props) {
     //
     // **为什么值得一个开关。** 有人就是不喜欢屏幕里有张脸；出问题时这也
     // 是最快的止血开关（关掉 = 舞台上不挂，其他一律不变）。
+    //
+    // **形象下拉只在真有多份时才出现**：包里只有一份形象时摆一个
+    // 单选项下拉是纯噪声（AGENTS §10.0.1）——加一份形象（放目录）它就自己出来。
     section('avatar', '面试官形象', [
       checkbox('interviewerAvatar', '在舞台上显示预置面试官（会跟着提问开口、听你说话时看着你）'),
+      avatarOptions.length > 1
+        ? h('div', { key: 'style', style: grid }, [
+          field('interviewerStyle', '形象', h('select', {
+            key: 's',
+            style: S.input,
+            value: form.interviewerStyle === undefined || form.interviewerStyle === ''
+              ? (data.avatar?.selected ?? avatarOptions[0].id)
+              : form.interviewerStyle,
+            onChange: event => set('interviewerStyle', event.target.value),
+          }, avatarOptions.map(option => h('option', { key: option.id, value: option.id }, option.name)))),
+        ])
+        : null,
       actions([
         h('button', {
           key: 'save',
           style: S.btn('primary', busy === 'avatar'),
           onClick: () => save(
-            { interviewerAvatar: form.interviewerAvatar === true ? 'on' : 'off' },
+            {
+              interviewerAvatar: form.interviewerAvatar === true ? 'on' : 'off',
+              // 只有真出现过下拉才写这个键：否则会用空值覆盖掉已存的形象选择。
+              ...(avatarOptions.length > 1 && form.interviewerStyle !== undefined
+                ? { interviewerStyle: form.interviewerStyle }
+                : {}),
+            },
             'avatar',
           ),
         }, busy === 'avatar' ? '保存中…' : '保存形象设置'),

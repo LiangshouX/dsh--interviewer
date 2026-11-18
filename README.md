@@ -98,7 +98,8 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
   TTS 音频动**（WebAudio 包络驱动，不是猜的），听你说话时视线跟着你的指针，
   思考时侧头、平时呼吸与眨眼。**全部素材随包分发**：零下载、零联网、不用 WebGL2
   以外的任何东西；加载失败只显示一块「形象不可用 · 面试照常进行」的小牌，
-  面试本身不受影响。设置页「面试官形象」可一键关掉。
+  面试本身不受影响。设置页「面试官形象」可一键关掉；包里放第二份形象
+  （`assets/avatar/<id>/`）时，那里会多出一个「形象」下拉让你挑。
   外放会串音，**建议戴耳机**（麦克风已开回声消除，播放期间该段也不送转写）。
 - 录像/录音可关（设置页隐私开关）；面试一开始就自动录，文件直接写进本场卷宗目录。
 
@@ -120,7 +121,7 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 | 摄像头 | 采集后端（auto / 仅 ffmpeg / Chromium 优先）、ffmpeg 路径、Chrome/Edge 路径 |
 | 隐私 | 允许录像、允许录音 |
 | 回答节奏 | 模式（手动 / 自动）、话轮结束静音阈值（800–6000 ms）；「面试中」页有两态快捷切换 |
-| 面试官形象 | 舞台上挂不挂预置面试官（默认挂）；关掉后其余一律不变 |
+| 面试官形象 | 舞台上挂不挂预置面试官（默认挂）；关掉后其余一律不变。多份形象时多一个「形象」下拉 |
 | 面试间保护 | 离开确认总开关、恢复「以后不再提醒」 |
 | 环境（只读） | 数据根与理由、面试/档案目录、设置文件、宿主工作区、DSH 工作区登记状态、宿主模型目录与体积、空场次清理 |
 
@@ -207,6 +208,8 @@ node scripts/check-plan-anchors.mjs  # 复核代码锚点（方案里引用的 f
 - **未来计划**：[ROADMAP.md](ROADMAP.md)（音色克隆 / 音色设计 / 实时语音 / 配置注入等未实现与待优化项）。
 - **虚拟面试官素材**（自制原画 + 绑定 + 出处与复现步骤）：[`assets/avatar/interviewer/NOTICE.txt`](assets/avatar/interviewer/NOTICE.txt)。
   运行时是 mesh-avatar（MIT，`assets/vendor/`）；作者工具链用 RuiC-2D（MIT），**运行时不依赖它**。
+  另做一份形象：`node dev/make-avatar.mjs <图.png> <id> --left x,y --right x,y --mouth x,y`
+  （需要本地有 RuiC-2D 与 Python；产物进 `assets/avatar/<id>/`，设置页下拉自动多一项）。
 
 ## 已知边界
 
