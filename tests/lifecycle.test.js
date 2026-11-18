@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { InterviewService } from '../src/host/service.js'
@@ -70,6 +70,8 @@ function makeService(root, controller) {
 async function seedInterview(service, session) {
   await service.setResume(session.id, '简历正文：八年后端。')
   await service.setJd(session.id, { text: '岗位职责：做后端。', url: 'https://jobs.example.com/1' })
+  // 准备阶段真的派过一次活（于是 prepare 角色也有一个助手会话）。
+  await service.requestAgentChecklist(session.id)
   await service.saveChecklist(session.id, [
     { topic: '分布式事务', why: 'JD 要求', level: 'core' },
     { topic: '线上故障排查', why: '简历经历', level: 'deep' },
@@ -97,7 +99,7 @@ async function seedInterview(service, session) {
 
 // ── 重置 ────────────────────────────────────────────────────────────────────
 
-test('重置：清掉转录/报告/计时/问过标记，材料与底稿本身留着', async () => {
+test('重置（彻底）：清掉转录/报告/计时/录音/问过标记，材料与底稿本身留着', async () => {
   await withEnv(async ({ root }) => {
     const { controller, log } = makeController()
     const service = makeService(root, controller)
@@ -106,11 +108,13 @@ test('重置：清掉转录/报告/计时/问过标记，材料与底稿本身�
 
     const result = await service.resetSession(session.id)
     assert.equal(result.ok, true)
+    assert.equal(result.mode, 'purge')
     assert.equal(result.cleared.turns, 4, '4 条转录（含 system 行）都清掉')
     assert.equal(result.cleared.interviewTurns, 2)
     assert.equal(result.cleared.report, true)
     assert.equal(result.cleared.checklistProbed, 1)
-    assert.equal(result.cleared.hostSessionDetached, true, '助手会话必须解绑')
+    assert.equal(result.cleared.recordings, 1, '彻底模式连录音一起删')
+    assert.equal(result.cleared.hostSessionsDetached, 2, '两个角色的助手会话都要解绑')
 
     const after = await service.getState(session.id)
     assert.equal(after.session.status, 'draft', '回到「还没开始」')
@@ -123,8 +127,9 @@ test('重置：清掉转录/报告/计时/问过标记，材料与底稿本身�
     assert.equal(after.checklist.adjustments.length, 0, '调整记录清掉')
     assert.equal(after.documents.jdChars > 0, true, 'JD 留着')
     assert.equal(after.documents.resumeChars > 0, true, '简历留着')
-    assert.equal(after.recordings.length, 1, '录音默认保留（文件不可恢复）')
-    assert.equal(after.session.agentSessionId, '', '解绑后不再指向旧对话')
+    assert.equal(after.recordings.length, 0, '彻底模式不留录音')
+    assert.equal(after.session.agents.prepare.sessionId, '', '准备会话解绑')
+    assert.equal(after.session.agents.live.sessionId, '', '面试会话解绑')
 
     // 再开始一场时用的是**新的**助手会话，不会接着旧对话里那轮上下文说。
     const before = log.creates.length
@@ -135,18 +140,41 @@ test('重置：清掉转录/报告/计时/问过标记，材料与底稿本身�
   })
 })
 
-test('重置：dropRecordings=true 才删录音录像；两项都如实报数', async () => {
+test('重置（留副本）：转录/报告/录像搬进 archive，工作区里留一份可查的副本', async () => {
   await withEnv(async ({ root }) => {
     const { controller } = makeController()
     const service = makeService(root, controller)
-    const created = await service.createSession({ title: '录过像' })
+    const created = await service.createSession({ title: '留副本场' })
     const session = await seedInterview(service, created)
 
-    const result = await service.resetSession(session.id, { dropRecordings: true })
-    assert.equal(result.cleared.recordings, 1)
-    assert.equal(result.kept.recordings, 0)
+    const result = await service.resetSession(session.id, { mode: 'archive' })
+    assert.equal(result.mode, 'archive')
+    assert.equal(typeof result.archivedTo, 'string')
+    assert.match(result.archivedTo, /[\\/]archive[\\/]/)
+    assert.equal(result.archive.turns, 4)
+    assert.equal(result.archive.recordings.length, 1)
+
+    // 副本里有这三样：转录、报告、录像；还有一份 archive.json 说明这是谁。
+    const files = await readdir(result.archivedTo)
+    assert.ok(files.includes('transcript.jsonl'))
+    assert.ok(files.includes('report.md'))
+    assert.ok(files.includes('archive.json'))
+    assert.ok(files.includes('recordings'))
+    const info = JSON.parse(await readFile(join(result.archivedTo, 'archive.json'), 'utf8'))
+    assert.equal(info.title, '留副本场')
+
+    // 这一场本身是干净的：转录 / 报告 / 录音都不在了。
     const after = await service.getState(session.id)
+    assert.equal(after.transcript.length, 0)
+    assert.equal(after.report, '')
     assert.equal(after.recordings.length, 0)
+    assert.equal(after.stats.checklistTotal, 2, '底稿留着')
+
+    // 归档列表能查到它（记录清理弹层里给用户看）。
+    const archives = await service.listArchives()
+    assert.equal(archives.length, 1)
+    assert.equal(archives[0].title, '留副本场')
+    assert.equal(archives[0].recordings.length, 1)
   })
 })
 
@@ -268,42 +296,57 @@ test('底稿三档：deep / bonus 不许被静默压成 core（按值判断，�
   })
 })
 
-// ── 助手会话：严格寻址 + 可溯源 ─────────────────────────────────────────────
+// ── 助手会话：两个角色、严格寻址、可溯源 ───────────────────────────────────
 
-test('同一个岗位：拉 JD 与出底稿用**同一个**助手会话', async () => {
+test('准备与面试是两个对话：JD / 底稿 → prepare，开场 / 报告 → live', async () => {
   await withEnv(async ({ root }) => {
     const { controller, log } = makeController()
     const service = makeService(root, controller)
-    const session = await service.createSession({ title: '同一岗位' })
+    const session = await service.createSession({ title: '分角色' })
 
     await service.requestAgentJd(session.id, 'https://jobs.example.com/1')
     await service.requestAgentChecklist(session.id)
+    await service.requestAgentStart(session.id)
     await service.requestAgentReport(session.id)
 
-    assert.equal(log.creates.length, 1, '三件事只该开一个助手会话')
-    const ids = new Set(log.prompts.map(item => item.sessionId))
-    assert.equal(ids.size, 1, 'JD / 底稿 / 报告必须发到同一个对话')
-    assert.equal((await service.getState(session.id)).session.agentSessionId, 'host-session-1')
+    assert.equal(log.creates.length, 2, '两个角色各一个对话，不是四个')
+    const bySession = new Map()
+    for (const prompt of log.prompts) {
+      if (!bySession.has(prompt.sessionId)) bySession.set(prompt.sessionId, [])
+      bySession.get(prompt.sessionId).push(prompt.content[0].text)
+    }
+    const prepareText = bySession.get('host-session-1').join('\n')
+    const liveText = bySession.get('host-session-2').join('\n')
+    assert.match(prepareText, /interview_save_jd/, '抓 JD 在准备对话里')
+    assert.match(prepareText, /interview_save_checklist/, '出底稿也在准备对话里')
+    assert.match(liveText, /interview_record_turn/, '开场在面试对话里')
+    assert.match(liveText, /interview_finish/, '写报告也在面试对话里')
+
+    const state = await service.getState(session.id)
+    assert.equal(state.session.agents.prepare.sessionId, 'host-session-1')
+    assert.equal(state.session.agents.live.sessionId, 'host-session-2')
   })
 })
 
-test('账本可溯源：谁开的、发过什么、重建过几次，都在 getState 里', async () => {
+test('账本可溯源：每个角色各自的派活与重建都记在自己名下', async () => {
   await withEnv(async ({ root }) => {
     const { controller } = makeController()
     const service = makeService(root, controller)
     const session = await service.createSession({ title: '溯源' })
 
     await service.requestAgentChecklist(session.id)
+    await service.requestAgentStart(session.id)
     const state = await service.getState(session.id)
-    assert.equal(state.session.agent.sessionId, 'host-session-1')
-    assert.ok(state.session.agent.createdAt > 0, '有「什么时候开的」')
-    assert.equal(state.session.agent.rebuilds, 0)
-    assert.deepEqual(state.session.agent.dispatches.map(item => item.kind), ['checklist'])
-    assert.equal(state.session.agent.dispatches[0].explicit, false)
+    assert.equal(state.session.agents.prepare.sessionId, 'host-session-1')
+    assert.ok(state.session.agents.prepare.createdAt > 0, '有「什么时候开的」')
+    assert.deepEqual(state.session.agents.prepare.dispatches.map(item => item.kind), ['checklist'])
+    assert.equal(state.session.agents.live.sessionId, 'host-session-2')
+    assert.deepEqual(state.session.agents.live.dispatches.map(item => item.kind), ['start'])
+    assert.equal(state.session.agents.prepare.rebuilds, 0)
   })
 })
 
-test('派活前先问宿主：会话已经被删 → 先重建再发（不让用户先看到一次失败）', async () => {
+test('派活前先问宿主：这个角色的会话已经被删 → 先重建再发', async () => {
   await withEnv(async ({ root }) => {
     const notFound = Object.assign(new Error('session/not-found'), { code: 'session/not-found' })
     // 第一次 create 成功，之后宿主一直说「这个会话不存在」。
@@ -311,15 +354,15 @@ test('派活前先问宿主：会话已经被删 → 先重建再发（不让用
     const service = makeService(root, controller)
     const session = await service.createSession({ title: '会话被删' })
 
-    // 先手工塞一个已死的会话 id（模拟「上次用过的那个被删了」）。
-    await service.updateSession(session.id, { agentSessionId: 'dead-session' })
+    // 先手工塞一个已死的**准备**会话（模拟「上次用过的那个被删了」）。
+    await service.updateSession(session.id, { agentSessions: { prepare: 'dead-session', live: '' } })
     await service.requestAgentChecklist(session.id)
 
     assert.equal(log.creates.length, 1, '探到已死就直接重建')
     assert.equal(log.prompts[0].sessionId, 'host-session-1', '这次不用先撞一次失败')
     const state = await service.getState(session.id)
-    assert.equal(state.session.agentSessionId, 'host-session-1')
-    assert.equal(state.session.agent.rebuilds, 1, '重建要记账')
+    assert.equal(state.session.agents.prepare.sessionId, 'host-session-1')
+    assert.equal(state.session.agents.prepare.rebuilds, 1, '重建要记账')
   })
 })
 
@@ -335,7 +378,9 @@ test('点名指定对话时绝不偷换会话：目标不在就如实报错', as
       /not-found/,
     )
     assert.equal(log.creates.length, 0, '用户点名了对话，不许偷偷建另一个')
-    assert.equal((await service.getSession(session.id)).agentSessionId, '')
+    const state = await service.getState(session.id)
+    assert.equal(state.session.agents.prepare.sessionId, '')
+    assert.equal(state.session.agents.live.sessionId, '')
   })
 })
 
@@ -344,7 +389,7 @@ test('老宿主没有 state()：读不到就当还在用，不自作主张重建
     const { controller, log } = makeController({ state: false })
     const service = makeService(root, controller)
     const session = await service.createSession({ title: '老宿主' })
-    await service.updateSession(session.id, { agentSessionId: 'stored-session' })
+    await service.updateSession(session.id, { agentSessions: { prepare: 'stored-session', live: '' } })
 
     await service.requestAgentChecklist(session.id)
     assert.equal(log.creates.length, 0)
@@ -352,19 +397,99 @@ test('老宿主没有 state()：读不到就当还在用，不自作主张重建
   })
 })
 
-test('重置会把助手会话解绑，账本里留一条 detach（谁、为什么）', async () => {
+test('老场次只有一个会话：开过面试的认给 live，没开始的认给 prepare', async () => {
+  await withEnv(async ({ root }) => {
+    const started = makeController()
+    const serviceA = makeService(root, started.controller)
+    const played = await serviceA.createSession({ title: '老场次·开过' })
+    // 老数据：只有 agentSessionId，没有 agentSessions。
+    const rawPath = join(played.dir, 'session.json')
+    const raw = JSON.parse(await readFile(rawPath, 'utf8'))
+    delete raw.agentSessions
+    raw.agentSessionId = 'legacy-live'
+    raw.startedAt = Date.now() - 600000
+    await writeFile(rawPath, JSON.stringify(raw, undefined, 2))
+    await serviceA.requestAgentReport(played.id)
+    assert.equal(started.log.prompts[0].sessionId, 'legacy-live', '开过面试的 → live')
+    assert.equal(started.log.creates.length, 0, '迁移不新建')
+
+    const prep = makeController()
+    const serviceB = makeService(root, prep.controller)
+    const draft = await serviceB.createSession({ title: '老场次·没开' })
+    const draftPath = join(draft.dir, 'session.json')
+    const draftRaw = JSON.parse(await readFile(draftPath, 'utf8'))
+    delete draftRaw.agentSessions
+    draftRaw.agentSessionId = 'legacy-prepare'
+    await writeFile(draftPath, JSON.stringify(draftRaw, undefined, 2))
+    await serviceB.requestAgentChecklist(draft.id)
+    assert.equal(prep.log.prompts[0].sessionId, 'legacy-prepare', '没开始的 → prepare')
+  })
+})
+
+test('重置会把两个角色的会话都解绑，账本里各留一条 detach', async () => {
   await withEnv(async ({ root }) => {
     const { controller } = makeController()
     const service = makeService(root, controller)
     const session = await service.createSession({ title: '重置解绑' })
     await service.requestAgentChecklist(session.id)
+    await service.requestAgentStart(session.id)
 
     await service.resetSession(session.id)
     const state = await service.getState(session.id)
-    assert.equal(state.session.agent.sessionId, '')
+    assert.equal(state.session.agents.prepare.sessionId, '')
+    assert.equal(state.session.agents.live.sessionId, '')
     const raw = JSON.parse(await readFile(join(session.dir, 'session.json'), 'utf8'))
-    const detach = raw.agentLog.find(entry => entry.event === 'detach')
-    assert.equal(detach.hostSessionId, 'host-session-1')
-    assert.equal(detach.reason, 'reset')
+    const detach = raw.agentLog.filter(entry => entry.event === 'detach')
+    assert.equal(detach.length, 2)
+    assert.deepEqual(detach.map(entry => entry.role).sort(), ['live', 'prepare'])
+    assert.ok(detach.every(entry => entry.reason === 'reset'))
+  })
+})
+
+// ── 连续录制（面试全程，分块落盘）─────────────────────────────────────────
+
+test('连续录制：分块追加到同一个文件，收尾回大小', async () => {
+  await withEnv(async ({ root }) => {
+    const { controller } = makeController()
+    const service = makeService(root, controller)
+    const session = await service.createSession({ title: '录像' })
+
+    const begun = await service.beginRecording(session.id, { kind: 'video', tag: 'interview' })
+    assert.match(begun.name, /^video-interview-.*\.webm$/)
+    const chunk = Buffer.from('0123456789')
+    const first = await service.appendRecording(session.id, {
+      name: begun.name,
+      dataBase64: chunk.toString('base64'),
+    })
+    assert.equal(first.bytes, 10)
+    await service.appendRecording(session.id, {
+      name: begun.name,
+      dataBase64: Buffer.from('abcdefghij').toString('base64'),
+    })
+    const finished = await service.finishRecording(session.id, { name: begun.name })
+    assert.equal(finished.ok, true)
+    assert.equal(finished.bytes, 20, '两块要拼在同一个文件里')
+
+    const state = await service.getState(session.id)
+    assert.equal(state.recordings.length, 1)
+    assert.equal(state.recordings[0].bytes, 20)
+    assert.equal(state.recordings[0].kind, 'video')
+  })
+})
+
+test('连续录制：不在 recordings/ 里的名字一律拒绝（不许穿越目录）', async () => {
+  await withEnv(async ({ root }) => {
+    const { controller } = makeController()
+    const service = makeService(root, controller)
+    const session = await service.createSession({ title: '录像越权' })
+
+    await assert.rejects(
+      () => service.appendRecording(session.id, { name: '../session.json', dataBase64: 'x' }),
+      /非法的录像文件名/,
+    )
+    await assert.rejects(
+      () => service.appendRecording(session.id, { name: 'not-started.webm', dataBase64: 'x' }),
+      /还没开始/,
+    )
   })
 })

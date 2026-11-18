@@ -40,6 +40,7 @@
 | `sessions/<id>/documents` | `{resume, jd, jdMeta}` | **归档正文**。单独取，不跟轮询走——简历动辄几十 KB，1.5 秒一次地传是纯浪费，而且它只有「准备」页用得上 |
 | `sessions/records` | `{sessions: CleanupRow[]}` | **记录清理弹层专用**：每场的记录体量。要读转录行数、录音个数与目录大小，所以**只在打开弹层时取**，不许进 6 秒轮询（AGENTS §11） |
 | `sessions/empty` | `{candidates: [{id, title, createdAt}]}` | 空场次候选（没有任何内容的场次，误触新建的典型产物） |
+| `sessions/archives` | `{archives: ArchiveRow[]}` | 「留副本再重置」留下的副本（`archive.json` 里的元信息 + 目录位置）。只读；删除请在文件管理器里做 |
 | `resumes` | `{resumes: ResumeSummary[]}` | **简历库**列表，只含元信息（不带正文），最新在前 |
 | `resumes/<id>` | `{resume: ResumeFull}` | 简历库里某一份的正文 |
 | `host-sessions` | `{sessions: HostSession[]}` | 宿主自己的对话列表（`{id, title, updatedAt}`），用来把「让助手去抓」的请求派过去 |
@@ -102,7 +103,7 @@
 
 ```jsonc
 {
-  "session": { "id", "title", "role", "status", "createdAt", "startedAt", "endedAt", "updatedAt", "position", "company", "resumeId", "pausedAt", "pausedMs", "agentSessionId", "agent", "dir" },
+  "session": { "id", "title", "role", "status", "createdAt", "startedAt", "endedAt", "updatedAt", "position", "company", "resumeId", "pausedAt", "pausedMs", "agents", "agentSessionId", "dir" },
   "checklist": { "version": 2, "items": ChecklistItem[], "adjustments": Adjustment[] },
   "transcript": TranscriptRow[],
   "documents": { "resumeChars", "jdChars", "jdUrl", "jdSections", "jdWarnings" },
@@ -114,20 +115,24 @@
 }
 ```
 
-`agent` 是**助手会话的可溯源摘要**（面板准备页那枚「助手会话 · 尾号」芯片读它）：
+`agents` 是**两个角色**的助手会话摘要（AGENTS §6.14.1）：
+`prepare` = 抓 JD / 出底稿的对话，`live` = 开场 / 追问 / 续接 / 写报告的对话。
+两项形状相同：
 
 ```jsonc
 {
-  "sessionId": "sess_7f3a91c2",   // 当前这一场用的宿主对话（空 = 还没有）
+  "role": "live",
+  "sessionId": "sess_7f3a91c2",   // 当前这一场的对话（空 = 还没有）
   "createdAt": 1763485200000,     // 什么时候开的（0 = 账本里没有 / 老场次）
   "workspaceId": "ws-20261116-b7d2",
   "rebuilds": 0,                  // 中途换过几次（重建 / 解绑）
-  "dispatches": [{ "at": 1763485200000, "kind": "checklist", "requestId": "checklist-iv-…", "explicit": false }],
+  "dispatches": [{ "at": 1763485200000, "kind": "report", "requestId": "report-iv-…", "explicit": false }],
   "lastDispatchAt": 1763485200000
 }
 ```
 
-`agentSessionId` 与 `agent.sessionId` 是同一个值；前者是存量字段（老客户端/工具还在读）。
+`agentSessionId` 是**老字段**，= `agents.live.sessionId` 的镜像，给还没升级的读法
+留一条路；**寻址一律读 `agents`**。
 
 `agentTasks` 是「已经派给助手、还没拿到产物」的任务（抓 JD / 出底稿 / 写报告），
 **loading 的唯一真源**，见 §2.1.4。`AgentTask`：
@@ -247,9 +252,13 @@ POST 时的上报形状：
 | `sessions/<id>/turn` | `{role, text, meta?}` | 追加一轮转录。**联动**：`role:candidate` 且 `meta.source:"panel"` 且会话 running 时，异步派活「候选人已回答，请继续」（回答原文内联进 prompt；§5.1）。助手自己经 `interview_record_turn` 记的行**不触发**（避免自己给自己派活成环） |
 | `sessions/<id>/recording` | `{kind, filename?, mimeType?, dataBase64}` | 保存录像/录音 |
 | `sessions/<id>/report` | `{markdown}` | 写分析报告并置 `done` |
+| `sessions/<id>/recording` | `{kind, filename?, mimeType?, dataBase64}` | 保存**一整段**录像/录音（「录一段」/片段）。整段 base64 上传，受 8 MB body 上限约束 |
+| `sessions/<id>/recording/start` | `{kind?: 'audio'\|'video', tag?}` | **开始一段连续录制**：在 `recordings/` 建空文件，返回 `{name}`。面试全程用它，不要用整段上传 |
+| `sessions/<id>/recording/chunk` | `{name, dataBase64}` | 追加一块（客户端每 5 秒一次）。**文件名必须是这一场已创建的那个**（白名单 + `resolveWithin` 双保险）；空块直接忽略 |
+| `sessions/<id>/recording/finish` | `{name}` | 收尾：返回 `{ok, name, bytes, kind, empty}`。崩了没收到 finish 也不丢已上传的块 |
 | `sessions/<id>/archive` | `{archived: true \| false}` | **归档 / 取回**。只是收起来，内容、报告、底稿都还在；取消归档时 `archivedAt` 一并抹掉 |
 | `sessions/<id>/continue` | `{}` | **续接**（仅 `done`）：`done → running`，**不重开一轮**——转录、底稿、计时都沿用；中断的时长记进 `pausedMs`（不算面试时长），system 行留痕，并**异步派活**让助手从上一问接着问（不会重新开场）。暂停中的「继续」走 `unpause`，二者不混 |
-| `sessions/<id>/reset` | `{dropRecordings?: false}` | **重置记录**：清转录、报告、计时与暂停账本、「等助手」任务、清单上的「问过」标记与调整记录，**并把助手会话解绑**（旧对话仍在 DSH 里）；**保留**简历 / JD / 考点清单本身与元信息。录音录像默认保留，`dropRecordings:true` 才删。返回 `cleared`（清了多少）与 `kept`（留了什么）——界面照抄，不自己编 |
+| `sessions/<id>/reset` | `{mode?: 'purge' \| 'archive'}` | **重置**：清转录、报告、计时与暂停账本、「等助手」任务、清单上的「问过」标记与调整记录，并**解绑两个角色的助手会话**；**保留**简历 / JD / 考点清单本身与元信息。`purge`（默认）= 转录 / 报告 / 录音录像直接删；`archive` = 先把它们**搬进** `<工作区>/archive/<会话>/<时间>/` 留副本再重置。返回 `cleared` / `kept` /（archive 时）`archivedTo`——界面照抄，不自己编 |
 | `sessions/delete-batch` | `{ids: ["iv-…", …]}` | **记录清理**：勾选哪几场删哪几场。**逐场返回** `{deleted, refused}`；进行中的场次会被拒（先结束再删），绝不整批失败 |
 
 `sessions/reset` 的返回形状（面板通知文案直接取自这里）：
@@ -307,26 +316,32 @@ POST /interviewer/api/agent/report     { "sessionId": "iv-…", "hostSessionId"?
 POST /interviewer/api/agent/start      { "sessionId": "iv-…" }   # 手动重发开场（正常由 sessions/<id>/start 自动联动）
 POST /interviewer/api/agent/continue   { "sessionId": "iv-…" }   # 手动重发「请继续」（自动取转录最后一条 candidate）
 POST /interviewer/api/agent/resume     { "sessionId": "iv-…", "pausedMinutes"? }
-POST /interviewer/api/agent/session    { "sessionId"? }          # 读（必要时建）助手会话；带 sessionId = 那一场专属的
+POST /interviewer/api/agent/session    { "sessionId": "iv-…" }      # 只读：两个角色各用哪个会话
 ```
+
+`agent/session` **不创建会话**（无副作用）：返回
+`{sessionId, workspace, prepare: SessionSummary, live: SessionSummary}`
+（两个 Summary 见 §1.2 的 `agents` 形状）。诊断「准备和面试分别在哪个对话」
+就用它。
 
 派活一律走 `sessionController.prompt` + `mode:'queue'` + **幂等 requestId**
 （`start-<id>-<startedAt>` / `continue-<id>-<turnTs>` / `resume-<id>-<pausedAt>` /
 `silence-<id>-<ts>` / `jd-<id>-<ts>` / `checklist-<id>-<ts>` / `report-<id>-<ts>`）：
 客户端重试、轮询竞态都不会重复派活。
 
-**寻址只有两条，且都要留痕（AGENTS §6.14）：**
+**寻址只有两条，且都要留痕（AGENTS §6.14.1）：**
 
-1. **默认**：这一场面试专属的助手会话（`session.json.agentSessionId`）。
-   拉 JD、出底稿、开场、继续、写报告**共用同一个对话**——同一场面试的上下文
-   不被打散。冷会话被 prompt 唤醒时历史完整重建，DSH 重启也不丢上下文
-   （`docs/TURN-TAKING.md` §5.2/§6.5）。
+1. **默认**：按派活类型选**该角色**的助手会话（`session.json.agentSessions`）：
+   `jd` / `checklist` → `prepare`（抓 JD / 出底稿的对话）；
+   `start` / `continue` / `resume` / `continue-session` / `silence` / `report` → `live`
+   （开场 / 追问 / 续接 / 写报告的对话）。两个角色各自独立，互不复用。
 2. **显式**：调用方点名 `hostSessionId`，账本里记 `explicit: true`。
 
 **账本**：每次派活在 `session.json.agentLog` 追加一条
-`{at, event, hostSessionId, kind, requestId, explicit}`（上限 40 条），
-会话新建 / 重建 / 解绑各记 `open` / `clear` / `detach`。`GET sessions/<id>`
-把它压成 `session.agent`（见 §1.2）——「这场面试的助手在哪」不用去 DSH 会话列表里猜。
+`{at, event, role, hostSessionId, kind, requestId, explicit}`（上限 40 条），
+会话新建 / 迁移 / 重建 / 解绑各记 `open` / `migrate` / `clear` / `detach`。
+`GET sessions/<id>` 把它压成 `session.agents`（见 §1.2）——「准备和面试分别在哪个
+对话里」不用去 DSH 会话列表里猜。
 
 **没有记录就新建，绝不继承全局键。** `settings.agentSessionId` 是「最近一次
 create」的面包屑，属于**另一场**面试；老代码让没有 `agentSessionId` 的场次继承它，

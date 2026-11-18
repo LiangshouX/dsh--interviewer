@@ -229,6 +229,8 @@ async function readResource(service, segments, query) {
     // 「记录清理」弹层：每场的记录体量（转录轮数 / 录音 / 占用）。
     // **只在打开弹层时取**——它要读每场的文件，不能进 6 秒轮询。
     if (rest[0] === 'records') return { sessions: await service.listSessionsForCleanup() }
+    // 「留副本再重置」留下的归档（只读元信息）。
+    if (rest[0] === 'archives') return { archives: await service.listArchives() }
     // **归档正文单独取。** 简历/动辄几十 KB，跟着 1.5 秒一次的轮询传
     // 是纯浪费——而且它在「准备」页才有用，面试页根本不需要。
     if (rest[1] === 'documents') {
@@ -360,8 +362,7 @@ async function runAction(service, segments, body) {
       // 「记录清理」：勾选哪几场就删哪几场。逐场返回结果（进行中的会被拒）。
       if (rest[0] === 'delete-batch') {
         return await service.deleteSessions(body.ids)
-      }
-      const sessionId = rest[0]
+      }      const sessionId = rest[0]
       const action = rest[1]
       switch (action) {
         case undefined:
@@ -379,6 +380,14 @@ async function runAction(service, segments, body) {
           // 不阻塞这条响应）——见 service.appendTurn 与 TURN-TAKING §5.1。
           return { turn: await service.appendTurn(sessionId, body) }
         case 'recording':
+          // 一次性上传（「录一段」/保存片段）与**连续录制**共用这个前缀：
+          //   recording            → 整块 base64 落一个文件（老路）
+          //   recording/start      → 建空文件，拿回文件名
+          //   recording/chunk      → 追加一块（面试全程每 5 秒一次）
+          //   recording/finish     → 收尾，回大小
+          if (rest[2] === 'start') return await service.beginRecording(sessionId, body)
+          if (rest[2] === 'chunk') return await service.appendRecording(sessionId, body)
+          if (rest[2] === 'finish') return await service.finishRecording(sessionId, body)
           return await service.saveRecording(sessionId, body)
         case 'report':
           return await service.saveReport(sessionId, body.markdown)
@@ -390,9 +399,12 @@ async function runAction(service, segments, body) {
         case 'finish':
           return { session: await service.finishSession(sessionId) }
         // 重置：清掉面试过程的记录（转录 / 报告 / 计时 / 「问过」标记），
-        // 留下材料与底稿；录音录像默认保留，`dropRecordings: true` 才删。
+        // 留下材料与底稿。两种模式：
+        //   { mode: 'purge' }   直接删
+        //   { mode: 'archive' } 先把转录 / 报告 / 录音录像搬到
+        //                       <工作区>/archive/<会话>/<时间>/，再重置
         case 'reset':
-          return await service.resetSession(sessionId, { dropRecordings: body.dropRecordings === true })
+          return await service.resetSession(sessionId, { mode: body.mode })
         // 续接：已结束的面试接着面（不重开一轮，中断时间记进 pausedMs）。
         case 'continue':
           return { session: await service.continueSession(sessionId) }
@@ -471,9 +483,12 @@ async function runAction(service, segments, body) {
         })
       }
       if (rest[0] === 'session') {
-        return await service.ensureAgentSession(
-          typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : undefined,
-        )
+        // 只读：这一场两个角色各用哪个助手会话（不创建、无副作用）。
+        const sessionId = typeof body.sessionId === 'string' && body.sessionId !== ''
+          ? body.sessionId
+          : ''
+        if (sessionId === '') throw new Error('要指定是哪一场面试。')
+        return await service.agentSessionsSnapshot(sessionId)
       }
       throw new Error(`未知的助手操作：${rest.join('/')}`)
     }

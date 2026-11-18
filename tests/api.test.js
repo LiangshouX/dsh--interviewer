@@ -368,9 +368,10 @@ test('话轮路由：config 带 answerMode；start 派开场；pause/unpause/sil
     assert.equal(retry.status, 200)
     assert.equal(retry.body.data.retried, false)
 
-    // agent/session 带 sessionId：返回这一场专属的助手会话。
+    // agent/session 带 sessionId：返回这一场的两个角色会话（只读，不创建）。
     const agentSession = await call('POST', '/interviewer/api/agent/session', { sessionId: id })
-    assert.equal(agentSession.body.data.sessionId, 'host-turn-1')
+    assert.equal(agentSession.body.data.sessionId, id)
+    assert.equal(agentSession.body.data.live.sessionId, 'host-turn-1')
 
     const finished = await call('POST', `/interviewer/api/sessions/${id}/finish`, {})
     assert.equal(finished.body.data.session.status, 'done')

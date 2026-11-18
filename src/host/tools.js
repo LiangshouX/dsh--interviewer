@@ -106,13 +106,11 @@ export function registerTools(ctx, service) {
     ),
     tool(
       'interview_agent_session',
-      '读（必要时建）面试工作区里的助手会话：返回会话 id 与它所属的工作区路径。给 sessionId 时返回**那一场面试专属**的助手会话（派活寻址用的就是它）；省略时返回全局诊断键。',
+      '读这一场面试的两个助手会话（**只读**）：prepare = 抓 JD / 出底稿用的对话，live = 开场 / 追问 / 续接 / 写报告用的对话。返回会话 id、工作区、以及最近的派活与重建记录。',
       {
         sessionId: sessionProperty,
       },
-      async args => service.ensureAgentSession(
-        typeof args.sessionId === 'string' && args.sessionId.trim() !== '' ? args.sessionId.trim() : undefined,
-      ),
+      async args => service.agentSessionsSnapshot(await resolveSession(service, args.sessionId)),
     ),
     tool(
       'interview_request_agent',
@@ -186,15 +184,23 @@ export function registerTools(ctx, service) {
     ),
     tool(
       'interview_reset_session',
-      '重置一场面试的记录：清掉转录、报告、计时与暂停账本、清单上的「问过」标记与调整记录、等助手的任务记录，并把助手会话解绑（旧对话仍留在 DSH 里）；**保留简历、JD、考点清单本身与元信息**。用于清理误触开始面试留下的脏片段。录音录像默认保留，dropRecordings=true 才删。',
+      '重置一场面试的记录与状态：清掉转录、报告、计时与暂停账本、清单上的「问过」标记与调整记录、等助手的任务记录，并把两个角色的助手会话都解绑；**保留简历、JD、考点清单本身与元信息**。两种模式：purge = 转录/报告/录音录像直接删；archive = 先把它们搬到 <工作区>/archive/<会话>/<时间>/ 留一份副本再重置。用于清理误触开始面试留下的脏片段，或面过一轮想从头再来。',
       {
         sessionId: sessionProperty,
-        dropRecordings: { type: 'boolean', description: '连录音录像一起删（默认 false：文件不可恢复，先留着）。' },
+        mode: { type: 'string', description: 'purge（默认，彻底删）或 archive（留副本再重置）' },
       },
       async args => {
         const sessionId = await resolveSession(service, args.sessionId)
-        const result = await service.resetSession(sessionId, { dropRecordings: args.dropRecordings === true })
-        return { sessionId, cleared: result.cleared, kept: result.kept, status: result.session.status }
+        const mode = args.mode === 'archive' ? 'archive' : 'purge'
+        const result = await service.resetSession(sessionId, { mode })
+        return {
+          sessionId,
+          mode: result.mode,
+          cleared: result.cleared,
+          kept: result.kept,
+          ...(result.archivedTo === undefined ? {} : { archivedTo: result.archivedTo }),
+          status: result.session.status,
+        }
       },
     ),
     tool(

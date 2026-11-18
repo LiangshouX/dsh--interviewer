@@ -23,7 +23,7 @@
  * 失效。这样界面、agent 工具、报告三边永远看到同一份事实。
  */
 import { join, resolve } from 'node:path'
-import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, rm, stat, writeFile, appendFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { describeWorkspaceRoot, ensureDataRoot, defaultWorkspaceRoot, readSettings, writeSettings, settingsPath, SETTING_KEYS, normalizeSetting, resolveConfig, isBundleDefault } from './paths.js'
 import {
@@ -178,6 +178,38 @@ const AGENT_TASK_KINDS = ['jd', 'checklist', 'report']
  * 跟着每次轮询变大。
  */
 const AGENT_LOG_MAX = 40
+
+/**
+ * 助手会话的两种角色（AGENTS §6.14）。
+ *
+ * **一件事一个对话。** 准备阶段（抓 JD / 出底稿）是「调研」，面试阶段
+ * （开场 / 追问 / 长沉默 / 续接 / 写报告）是「当面」。合在一个对话里，
+ * 助手在面试中会被自己刚写的底稿淹掉，用户翻记录也分不清哪段是准备、
+ * 哪段是面试。
+ *
+ *  - `prepare`：抓 JD、出底稿（同一个岗位的调研是同一段对话）；
+ *  - `live`：开始 / 继续 / 续接 / 长沉默 / 写报告（报告是这场面试的产物）。
+ */
+const AGENT_ROLES = ['prepare', 'live']
+
+/** 派活类型 → 该发到哪个角色的会话。 */
+const AGENT_ROLE_BY_KIND = {
+  jd: 'prepare',
+  checklist: 'prepare',
+  start: 'live',
+  continue: 'live',
+  resume: 'live',
+  'continue-session': 'live',
+  silence: 'live',
+  report: 'live',
+}
+
+/** 等助手返回的任务 → 它落在哪个角色的会话里（状态判定用）。 */
+const AGENT_TASK_ROLE = {
+  jd: 'prepare',
+  checklist: 'prepare',
+  report: 'live',
+}
 
 /**
  * One interview session, with every operation the callers need.
@@ -606,9 +638,10 @@ export class InterviewService {
       jdUrl: typeof input.jdUrl === 'string' ? input.jdUrl : '',
       profileId: typeof input.profileId === 'string' ? input.profileId : '',
       // 这一场专属的宿主助手会话（派活寻址用，AGENTS §6.14）。
-      // 新建即带空串字段：**空串 = 「明确还没有」**，于是第一次派活会
-      // create 一个（老场次连字段都没有，同样走 create——**谁也不继承
-      // 全局 `settings.agentSessionId`**，那是另一场面试的面包屑）。
+      // **两个角色两个对话**：prepare = 抓 JD / 出底稿；live = 开场 / 追问 / 报告。
+      // 空串 = 「明确还没有」，第一次派活会各建一个（谁也不继承全局
+      // `settings.agentSessionId`，那是另一场面试的面包屑）。
+      agentSessions: { prepare: '', live: '' },
       agentSessionId: '',
     }
     await writeJsonAtomic(join(dir, 'session.json'), meta)
@@ -662,7 +695,7 @@ export class InterviewService {
       'title', 'role', 'status', 'jdUrl', 'startedAt', 'endedAt', 'notes',
       'position', 'company', 'archived', 'archivedAt', 'resumeId',
       // 暂停/继续（docs/TURN-TAKING.md §6.2）与 per-session 助手会话。
-      'pausedAt', 'pausedMs', 'agentSessionId',
+      'pausedAt', 'pausedMs', 'agentSessionId', 'agentSessions',
     ]
     for (const key of allowed) {
       if (patch[key] !== undefined) meta[key] = patch[key]
@@ -815,37 +848,42 @@ export class InterviewService {
   // ── 重置 / 续接 / 批量清理（把「一场面试」当成可整理的东西）────────────
 
   /**
-   * 重置一场面试：**清掉面试过程的记录，留下材料与底稿。**
+   * 重置一场面试：**清掉这一轮面试的记录与状态，留下材料与底稿。**
    *
    * 为什么需要它：误触「开始面试」再停掉，会留下几条零碎 system 行、
    * 一段假的计时、一个「结束了」的状态——这些脏片段既进不了报告，
    * 又不能用「删除」清掉（用户不想连简历 / JD / 底稿一起删）。
    *
-   * **清什么、留什么必须一句话说得清**（界面照抄这一段）：
+   * **两种模式**（界面用单选，别让用户猜）：
    *
-   * | 清掉 | 留下 |
-   * |---|---|
-   * | 转录（含 system 行）、报告、计时与暂停账本 | 简历、JD、考点清单本身 |
-   * | 清单上的「问过」标记、证据与调整记录 | 标题 / 公司 / 岗位 / 档案关联 |
-   * | 「等助手」的任务记录 | 卷宗目录本身 |
-   * | 录音录像（**默认保留**，`dropRecordings` 才删） | |
+   * | 模式 | 转录 / 报告 / 录音录像 | 用途 |
+   * |---|---|---|
+   * | `purge`（彻底清掉） | 直接删除 | 误触、试跑，本来就没想留 |
+   * | `archive`（留副本再重置） | **移动到** `<工作区>/archive/<会话>/<时间>/` | 面过一轮，想留证但要从头再来 |
    *
-   * **助手会话要解绑，不是留着。** 旧会话里躺着一整轮面试的上下文；
-   * 重置之后还用它开场，助手会接着上一轮的思路说话——那正是「会话串场」
-   * （AGENTS §6.14）。解绑只改引用，旧对话仍在 DSH 里，用户自己处置。
+   * 两种模式都会清掉：计时与暂停账本、清单上的「问过」标记 / 证据 / 调整记录、
+   * 「等助手」的任务记录，并把**两个角色的助手会话都解绑**——旧对话里躺着
+   * 上一轮的上下文，重置后继续用就是「会话串场」。
+   *
+   * 永远留下：简历、JD、考点清单本身、标题 / 公司 / 岗位 / 档案关联。
    *
    * @param {string} sessionId
-   * @param {{dropRecordings?: boolean}} [input]
+   * @param {{mode?: 'purge'|'archive'}} [input]
    */
   async resetSession(sessionId, input = {}) {
+    const mode = input.mode === 'archive' ? 'archive' : 'purge'
     const meta = await this.getSession(sessionId)
     const dir = await this.sessionDir(sessionId)
     const transcript = await readJsonl(join(dir, 'transcript.jsonl'))
+    const recordingsDir = join(dir, 'recordings')
+    const recordings = await listDirIfExists(recordingsDir)
+    const hasReport = await isFile(join(dir, 'report.md'))
+    const reportChars = hasReport ? (await readTextIfExists(join(dir, 'report.md'))).length : 0
     const cleared = {
       turns: transcript.length,
       interviewTurns: transcript.filter(row => row.role !== 'system').length,
-      report: false,
-      recordings: 0,
+      report: hasReport,
+      recordings: recordings.length,
       checklistProbed: 0,
       checklistAdjustments: 0,
       agentTasks: meta.agentTasks !== null && typeof meta.agentTasks === 'object'
@@ -853,21 +891,44 @@ export class InterviewService {
         : 0,
     }
 
-    // 1. 转录与报告：删文件，不写空文件——空文件会让「有没有记录」的判断失真。
-    await rm(join(dir, 'transcript.jsonl'), { force: true })
-    if (await isFile(join(dir, 'report.md'))) {
-      await rm(join(dir, 'report.md'), { force: true })
-      cleared.report = true
+    // 0. 留副本模式：整轮搬进工作区的归档目录（移动，不是复制——
+    //    重置后这一场就是干净的，副本在归档区里单独存在）。
+    let archivedTo = ''
+    if (mode === 'archive') {
+      const root = await this.effectiveRoot()
+      const ensured = await ensureDataRoot(root)
+      const archiveRoot = join(ensured.error !== undefined ? root : ensured.path, 'archive', sessionId)
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      archivedTo = join(archiveRoot, stamp)
+      await mkdir(join(archivedTo, 'recordings'), { recursive: true })
+      if (await isFile(join(dir, 'transcript.jsonl'))) {
+        await cp(join(dir, 'transcript.jsonl'), join(archivedTo, 'transcript.jsonl'))
+      }
+      if (hasReport) await cp(join(dir, 'report.md'), join(archivedTo, 'report.md'))
+      for (const name of recordings) {
+        await cp(join(recordingsDir, name), join(archivedTo, 'recordings', name), { recursive: true })
+      }
+      await writeJsonAtomic(join(archivedTo, 'archive.json'), {
+        version: 1,
+        kind: 'reset-archive',
+        sessionId,
+        title: meta.title ?? sessionId,
+        company: meta.company ?? '',
+        position: meta.position ?? '',
+        at: Date.now(),
+        turns: transcript.length,
+        reportChars,
+        recordings,
+      })
     }
 
-    // 2. 录音录像是**不可恢复的文件**：默认留着，要删得显式要求。
-    const recordingsDir = join(dir, 'recordings')
-    const recordings = await listDirIfExists(recordingsDir)
-    if (input.dropRecordings === true) {
-      for (const name of recordings) {
-        await rm(join(recordingsDir, name), { recursive: true, force: true })
-      }
-      cleared.recordings = recordings.length
+    // 1. 转录与报告：删文件（留副本模式已经搬走）。
+    await rm(join(dir, 'transcript.jsonl'), { force: true })
+    if (hasReport) await rm(join(dir, 'report.md'), { force: true })
+
+    // 2. 录音录像：留副本模式已经搬走；彻底模式一律删（要留就选留副本）。
+    for (const name of recordings) {
+      await rm(join(recordingsDir, name), { recursive: true, force: true })
     }
 
     // 3. 底稿：只清「这场问过什么」，不清考点本身——底稿是准备阶段的成果。
@@ -890,32 +951,73 @@ export class InterviewService {
       })
     }
 
-    // 4. session.json：回到「还没开始」，解绑助手会话，清掉等助手的任务。
-    const previousAgent = typeof meta.agentSessionId === 'string' ? meta.agentSessionId.trim() : ''
+    // 4. session.json：回到「还没开始」，解绑两个角色的助手会话，清掉等助手的任务。
+    const previousAgents = this.agentSessionsOf(meta)
+    const detached = Object.values(previousAgents).filter(id => id !== '').length
     for (const key of ['startedAt', 'endedAt', 'pausedAt', 'pausedMs', 'agentTasks']) delete meta[key]
     meta.status = SESSION_STATUS.DRAFT
+    meta.agentSessions = { prepare: '', live: '' }
     meta.agentSessionId = ''
     meta.updatedAt = Date.now()
-    if (previousAgent !== '') {
-      meta.agentLog = [
-        ...(Array.isArray(meta.agentLog) ? meta.agentLog : []),
-        { at: meta.updatedAt, event: 'detach', hostSessionId: previousAgent, reason: 'reset' },
-      ].slice(-AGENT_LOG_MAX)
+    const log = Array.isArray(meta.agentLog) ? meta.agentLog : []
+    for (const role of AGENT_ROLES) {
+      if (previousAgents[role] === '') continue
+      log.push({ at: meta.updatedAt, event: 'detach', role, hostSessionId: previousAgents[role], reason: 'reset' })
     }
+    meta.agentLog = log.slice(-AGENT_LOG_MAX)
     await writeJsonAtomic(join(dir, 'session.json'), meta)
 
     return {
       ok: true,
       sessionId,
-      cleared: { ...cleared, hostSessionDetached: previousAgent !== '' },
+      mode,
+      cleared: { ...cleared, hostSessionsDetached: detached },
       kept: {
-        recordings: input.dropRecordings === true ? 0 : recordings.length,
         checklistItems: Array.isArray(checklist?.items) ? checklist.items.length : 0,
         resume: await isFile(join(dir, 'resume.txt')),
         jd: await isFile(join(dir, 'jd.txt')),
       },
+      ...(archivedTo === '' ? {} : { archivedTo, archive: { turns: transcript.length, reportChars, recordings } }),
       session: { ...meta, dir },
     }
+  }
+
+  /**
+   * 列出「留副本再重置」的归档（`<工作区>/archive/<会话>/<时间>/`）。
+   *
+   * 只读元信息（archive.json 里的几项）+ 目录位置——副本里是什么、
+   * 在哪、什么时候留的，用户点开就能去文件管理器里找。
+   *
+   * @returns {Promise<Array<object>>}
+   */
+  async listArchives() {
+    const root = await this.effectiveRoot()
+    const ensured = await ensureDataRoot(root)
+    const archiveRoot = join(ensured.error !== undefined ? root : ensured.path, 'archive')
+    const out = []
+    for (const sessionId of await listDirIfExists(archiveRoot)) {
+      const sessionDir = join(archiveRoot, sessionId)
+      if (!await isDirectory(sessionDir)) continue
+      for (const stamp of await listDirIfExists(sessionDir)) {
+        const dir = join(sessionDir, stamp)
+        if (!await isDirectory(dir)) continue
+        const info = await readJsonIfExists(join(dir, 'archive.json'))
+        const files = await listDirIfExists(dir)
+        out.push({
+          sessionId,
+          stamp,
+          title: typeof info?.title === 'string' ? info.title : sessionId,
+          at: Number.isFinite(info?.at) ? info.at : 0,
+          turns: Number.isFinite(info?.turns) ? info.turns : 0,
+          reportChars: Number.isFinite(info?.reportChars) ? info.reportChars : 0,
+          recordings: Array.isArray(info?.recordings) ? info.recordings : [],
+          files,
+          dir,
+        })
+      }
+    }
+    out.sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+    return out
   }
 
   /**
@@ -1281,30 +1383,6 @@ export class InterviewService {
   }
 
   /**
-   * Hand a JD link to the host's assistant and let **it** fetch the page.
-   *
-   * **为什么要有这条路。** 直接抓网页看着简单，实际最常挂在三件事上：
-   * 登录墙、验证码、前端渲染的正文。宿主里的助手有浏览器，
-   * 能把页面真的打开、看完、把正文抄下来——所以抓不到的时候，
-   * 正确的做法不是让用户复制粘贴，而是**请助手去拿**。
-   *
-   * 请求发在**当前 DSH 对话**里（用户看得见、也能插话），
-   * 助手拿到正文后调 `interview_save_jd` 写回这场面试。
-   *
-   * @param {string} sessionId the interview session the JD belongs to
-   * @param {string} url
-   * @param {string} [hostSessionId] which host conversation to use
-   */
-  /**
-   * 确保有一个**落在面试工作区**的宿主会话。
-   *
-   * **为什么必须落在那个目录。** 之前这里直接拿"宿主最近的会话"来派活，
-   * 结果请求被发到了别的项目（比如 Interview-Material）的会话里：
-   * 用户看到助手在别的对话里干活，面试卷宗与对话上下文完全对不上。
-   * 现在用 `sessionController.create({ cwd: 工作区根 })`：会话属于这场面试
-   * 的卷宗目录，助手读写的文件、日志都在同一个地方。
-   */
-  /**
    * 把面试工作区**登记进 DSH 的工作区列表**（左侧项目列表）。
    *
    * **绑定 ≠ 登记。** `sessionController.create({ cwd })` 只让会话拥有那个目录，
@@ -1336,30 +1414,51 @@ export class InterviewService {
   }
 
   /**
-   * 确保有一个**落在面试工作区**的宿主助手会话，并且是**这一场面试专属**的。
+   * 这一场用到的助手会话（按角色分开）。
    *
-   * **一场面试 = 一个助手会话，全流程共用。** 拉 JD、出底稿、开场、继续、
-   * 写报告都寻址到同一个 `sessionId`：助手在同一个对话里攒上下文，
-   * 用户点开左栏也只看到一条相关对话（AGENTS §6.14）。
+   * `{ prepare, live }` 两个字符串；老场次只有 `agentSessionId` 一个字段，
+   * 这里不猜——迁移在 `ensureAgentSession` 里做一次（见那里的注释）。
+   *
+   * @param {object} meta session.json 的内容
+   * @returns {{prepare: string, live: string}}
+   */
+  agentSessionsOf(meta) {
+    const stored = meta?.agentSessions
+    const out = { prepare: '', live: '' }
+    if (stored !== null && typeof stored === 'object') {
+      for (const role of AGENT_ROLES) {
+        out[role] = typeof stored[role] === 'string' ? stored[role].trim() : ''
+      }
+    }
+    return out
+  }
+
+  /**
+   * 确保有一个**落在面试工作区**的宿主助手会话，并且是**这一场、这个角色**专属的。
+   *
+   * **一场面试两个对话**（AGENTS §6.14）：
+   *  - `prepare`：抓 JD、出底稿——同一个岗位的调研在同一段对话里；
+   *  - `live`：开场 / 继续 / 续接 / 长沉默 / 写报告——「当面」的上下文。
    *
    * **绝不从「全局面包屑」继承会话 id。** 旧实现让没有 `agentSessionId`
    * 的场次继承 `settings.agentSessionId`——那是「最近一次 create」的记录，
    * 属于**另一场**面试。于是新岗位拉 JD 时请求被发到某个面试中的场次里，
    * 上下文直接串台。现在没有记录就**新建**，旧的全局键只当诊断面包屑。
    *
-   * **为什么不再把已存在的 id 塞给 create。** 宿主语义（装机包 README 读实）：
-   * `create` 只复用**空白**（未开始任何轮次）的会话；对非空白的指定 id
-   * 「保持不变，改为新建 Session」。旧实现每次派活都 create(savedId)——
-   * 第一次派活之后每次都在漂移新会话，「复用会话避免刷屏」的意图落空。
-   * 正确姿势：**有 id 就直接返回**（prompt 时宿主自会恢复冷会话，历史在
-   * 持久日志里完整重建）；create 只在完全没有会话时用一次。
+   * **老场次迁移一次**：session.json 里没有 `agentSessions`、只有 `agentSessionId`
+   * 时，把它认给「更像它身份」的那个角色——已经开过面试（`startedAt > 0`）
+   * 的认给 `live`（那里的上下文主要是面试），还没开始的认给 `prepare`
+   * （那里的上下文主要是调研）。另一个角色在第一次派活时新建。
    *
    * @param {string} [interviewSessionId] 面试会话 id；省略时只读全局诊断键
+   * @param {'prepare'|'live'} [role]
    */
-  async ensureAgentSession(interviewSessionId = undefined) {
+  async ensureAgentSession(interviewSessionId = undefined, role = 'live') {
     const workspacePath = await this.effectiveRoot()
+    const wanted = AGENT_ROLES.includes(role) ? role : 'live'
     const describe = (sessionId, extra) => ({
       sessionId,
+      role: wanted,
       workspace: this.workspaceRegistration?.path ?? workspacePath,
       workspaceId: this.workspaceRegistration?.workspaceId ?? '',
       registered: this.workspaceRegistration?.registered === true,
@@ -1370,17 +1469,20 @@ export class InterviewService {
     if (id !== '') {
       // 会话不存在就抛——派活落错地方比失败更糟。
       const meta = await this.getSession(id)
-      const stored = typeof meta.agentSessionId === 'string' ? meta.agentSessionId.trim() : ''
+      const stored = this.agentSessionsOf(meta)[wanted]
       if (stored !== '') {
         // **先问宿主它在不在。** 只在 prompt 失败时才重建，等于让用户先
         // 看一次失败；宿主有 `state()` 就先探一次（读不到 ≠ 不在，见
         // `hostAgentState`——`unknown` 一律当还在）。
         const alive = await this.agentSessionAlive(stored)
         if (alive !== 'gone') return describe(stored, { reused: true })
-        await this.clearAgentSession(id, 'gone-before-dispatch')
+        await this.clearAgentSession(id, wanted, 'gone-before-dispatch')
+      } else {
+        const adopted = await this.adoptLegacyAgentSession(id, meta, wanted)
+        if (adopted !== '') return describe(adopted, { reused: true, migrated: true })
       }
     } else {
-      // 没给面试 id（interview_agent_session 的诊断路径）：全局键只读不寻址。
+      // 没给面试 id（诊断路径）：全局键只读不寻址。
       const settings = await readSettings()
       const stored = typeof settings.agentSessionId === 'string' ? settings.agentSessionId.trim() : ''
       if (stored !== '') return describe(stored, { reused: true })
@@ -1400,12 +1502,13 @@ export class InterviewService {
     const agentSessionId = String(created?.sessionId ?? '')
     if (agentSessionId === '') throw new Error('宿主没有返回会话 id')
     if (id !== '') {
-      await this.updateSession(id, { agentSessionId })
+      await this.setAgentSessionId(id, wanted, agentSessionId)
       await this.noteAgentLog(id, {
         event: 'open',
+        role: wanted,
         hostSessionId: agentSessionId,
         workspaceId: workspace.workspaceId,
-        reason: '首次派活',
+        reason: wanted === 'prepare' ? '准备阶段（抓 JD / 出底稿）' : '面试阶段（开场 / 追问 / 报告）',
       })
     }
     // 全局键留作「最近一次 create 用过的会话」的面包屑（诊断用，不再参与寻址）。
@@ -1420,6 +1523,58 @@ export class InterviewService {
       registered: workspace.registered,
       workspaceCreated: workspace.created === true,
     })
+  }
+
+  /**
+   * 老场次只有一个 `agentSessionId`：**一次性**认给合适的角色。
+   *
+   * 判据是「这段对话里装的是什么」：
+   *  - 已经开过面试（`startedAt > 0`）→ 里面主要是面试上下文 → `live`；
+   *  - 还没开始 → 里面主要是 JD / 底稿的调研上下文 → `prepare`。
+   *
+   * 只认一次（写进 `agentSessions` 之后不再迁移）；另一个角色照常新建。
+   *
+   * @param {string} interviewSessionId
+   * @param {object} meta
+   * @param {'prepare'|'live'} role 当前要会话的角色
+   * @returns {Promise<string>} 迁移过来的会话 id（没有可迁移的 = 空串）
+   */
+  async adoptLegacyAgentSession(interviewSessionId, meta, role) {
+    if (meta?.agentSessions !== undefined) return ''
+    const legacy = typeof meta?.agentSessionId === 'string' ? meta.agentSessionId.trim() : ''
+    if (legacy === '') return ''
+    const started = Number.isFinite(meta?.startedAt) && meta.startedAt > 0
+    const owner = started ? 'live' : 'prepare'
+    if (owner !== role) return ''
+    await this.setAgentSessionId(interviewSessionId, role, legacy)
+    await this.noteAgentLog(interviewSessionId, {
+      event: 'migrate',
+      role,
+      hostSessionId: legacy,
+      reason: '老场次只有一个助手会话，按已开过面试 / 未开始认给对应角色',
+    })
+    return legacy
+  }
+
+  /**
+   * 写某个角色的助手会话 id（同时维护老字段的镜像，见 `getState`）。
+   *
+   * @param {string} interviewSessionId
+   * @param {'prepare'|'live'} role
+   * @param {string} agentSessionId
+   */
+  async setAgentSessionId(interviewSessionId, role, agentSessionId) {
+    const wanted = AGENT_ROLES.includes(role) ? role : 'live'
+    const dir = await this.sessionDir(interviewSessionId)
+    const meta = await readJsonIfExists(join(dir, 'session.json'))
+    if (meta === undefined) return
+    const sessions = this.agentSessionsOf(meta)
+    sessions[wanted] = String(agentSessionId ?? '')
+    meta.agentSessions = sessions
+    // 老字段只做镜像（= live），给还没升级的读法留一条路；寻址一律读 agentSessions。
+    if (sessions.live !== '') meta.agentSessionId = sessions.live
+    meta.updatedAt = Date.now()
+    await writeJsonAtomic(join(dir, 'session.json'), meta)
   }
 
   /**
@@ -1459,6 +1614,7 @@ export class InterviewService {
       const record = {
         at,
         event: String(entry.event ?? ''),
+        ...(AGENT_ROLES.includes(entry.role) ? { role: entry.role } : {}),
         ...(typeof entry.hostSessionId === 'string' && entry.hostSessionId !== ''
           ? { hostSessionId: entry.hostSessionId }
           : {}),
@@ -1477,20 +1633,24 @@ export class InterviewService {
   }
 
   /**
-   * 清掉这一场存着的助手会话 id（会话被宿主删除后重建用）。
+   * 清掉某一场、某个角色的助手会话 id（会话被宿主删除后重建用）。
    *
-   * **置空串而不是删字段**：字段缺失 = 「老场次」，旧实现会去继承全局面包屑
-   * （见 `ensureAgentSession`）；空串 = 「明确没有」，直接走 create 重建。
+   * **置空串而不是删字段**：空串 = 「明确没有」，下一次派活直接 create。
    *
    * @param {string} interviewSessionId
+   * @param {'prepare'|'live'} [role]
    * @param {string} [reason] 记进账本的原因（gone / reset / manual）
    */
-  async clearAgentSession(interviewSessionId, reason = undefined) {
+  async clearAgentSession(interviewSessionId, role = 'live', reason = undefined) {
+    const wanted = AGENT_ROLES.includes(role) ? role : 'live'
     const dir = await this.sessionDir(interviewSessionId)
     const meta = await readJsonIfExists(join(dir, 'session.json'))
     if (meta === undefined) return
-    const previous = typeof meta.agentSessionId === 'string' ? meta.agentSessionId.trim() : ''
-    meta.agentSessionId = ''
+    const sessions = this.agentSessionsOf(meta)
+    const previous = sessions[wanted]
+    sessions[wanted] = ''
+    meta.agentSessions = sessions
+    if (wanted === 'live') meta.agentSessionId = ''
     meta.updatedAt = Date.now()
     if (previous !== '') {
       meta.agentLog = [
@@ -1498,12 +1658,23 @@ export class InterviewService {
         {
           at: meta.updatedAt,
           event: 'clear',
+          role: wanted,
           hostSessionId: previous,
           ...(typeof reason === 'string' && reason !== '' ? { reason } : {}),
         },
       ].slice(-AGENT_LOG_MAX)
     }
     await writeJsonAtomic(join(dir, 'session.json'), meta)
+  }
+
+  /**
+   * 两个角色都清掉（重置时用）：换一轮面试就是换两段对话。
+   *
+   * @param {string} interviewSessionId
+   * @param {string} [reason]
+   */
+  async clearAgentSessions(interviewSessionId, reason = 'reset') {
+    for (const role of AGENT_ROLES) await this.clearAgentSession(interviewSessionId, role, reason)
   }
 
   /**
@@ -1534,9 +1705,13 @@ export class InterviewService {
       throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
     }
     const explicitId = typeof dispatch.hostSessionId === 'string' ? dispatch.hostSessionId.trim() : ''
+    // 角色由派活类型决定：调研（JD / 底稿）走 prepare，面试与报告走 live。
+    const role = AGENT_ROLES.includes(dispatch.role)
+      ? dispatch.role
+      : (AGENT_ROLE_BY_KIND[dispatch.kind] ?? 'live')
     const hostSession = explicitId !== ''
-      ? { sessionId: explicitId, workspace: undefined, explicit: true }
-      : { ...(await this.ensureAgentSession(sessionId)), explicit: false }
+      ? { sessionId: explicitId, workspace: undefined, explicit: true, role }
+      : { ...(await this.ensureAgentSession(sessionId, role)), explicit: false }
     // **signal 是必填的第二个参数。** 宿主实现的第一句就是
     // `signal.throwIfAborted()`——不传就炸。
     const send = target => controller.prompt({
@@ -1547,6 +1722,7 @@ export class InterviewService {
     }, new AbortController().signal)
     const note = (target, extra = {}) => this.noteAgentLog(sessionId, {
       event: 'dispatch',
+      role,
       hostSessionId: target,
       kind: dispatch.kind,
       requestId: dispatch.requestId,
@@ -1560,35 +1736,38 @@ export class InterviewService {
       if (!isAgentSessionGone(error)) throw error
       // 点名的对话已经不在了：如实抛回，不偷偷换一个会话去发。
       if (hostSession.explicit === true) throw error
-      await this.clearAgentSession(sessionId, 'dispatch-gone')
-      const rebuilt = await this.ensureAgentSession(sessionId)
+      await this.clearAgentSession(sessionId, role, 'dispatch-gone')
+      const rebuilt = await this.ensureAgentSession(sessionId, role)
       await send(rebuilt.sessionId)
       await note(rebuilt.sessionId, { reason: 'rebuilt' })
       await this.appendTurn(sessionId, {
         role: 'system',
-        text: '助手会话已重建，上下文从卷宗恢复。',
-        meta: { agent: { rebuilt: true, kind: dispatch.kind, requestId: dispatch.requestId } },
+        text: role === 'prepare' ? '准备阶段的助手会话已重建，上下文从卷宗恢复。' : '助手会话已重建，上下文从卷宗恢复。',
+        meta: { agent: { rebuilt: true, role, kind: dispatch.kind, requestId: dispatch.requestId } },
       }).catch(() => { /* 留痕失败不挡派活 */ })
       return {
         dispatched: true,
         rebuilt: true,
         kind: dispatch.kind,
+        role,
         requestId: dispatch.requestId,
-        hostSession: { id: rebuilt.sessionId, workspace: rebuilt.workspace, explicit: false },
+        hostSession: { id: rebuilt.sessionId, workspace: rebuilt.workspace, explicit: false, role },
       }
     }
     return {
       dispatched: true,
       kind: dispatch.kind,
+      role,
       requestId: dispatch.requestId,
       hostSession: {
         id: hostSession.sessionId,
         workspace: hostSession.workspace,
         explicit: hostSession.explicit === true,
+        role,
       },
       message: hostSession.explicit === true
         ? '请求已发到你指定的对话。'
-        : `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
+        : `请求已发到面试工作区里的${role === 'prepare' ? '准备阶段' : '面试阶段'}助手会话：${hostSession.workspace}`,
     }
   }
 
@@ -1908,18 +2087,25 @@ export class InterviewService {
    * 判定只认三件事：**宿主会话在不在跑**、**跑完有没有写回**、**等多久了**。
    * 任何一条都不能给出 endless waiting：
    *
-   * @param {object} meta session.json 的内容（含 agentTasks / agentSessionId）
+   * @param {object} meta session.json 的内容（含 agentTasks / agentSessions）
    * @returns {Promise<Record<string, object>>}
    */
   async agentTaskStatus(meta) {
     const recorded = meta?.agentTasks
     if (recorded === null || typeof recorded !== 'object') return {}
     const now = Date.now()
-    const host = await this.hostAgentState(meta.agentSessionId)
+    // **每个任务看自己那个角色的会话。** 抓 JD / 底稿落在 prepare 对话，
+    // 写报告落在 live 对话——拿错会话去判「在不在跑」，waiting 会假活或误杀。
+    const sessions = this.agentSessionsOf(meta)
+    const hostByRole = {}
+    for (const role of AGENT_ROLES) {
+      hostByRole[role] = sessions[role] === '' ? { phase: 'unknown' } : await this.hostAgentState(sessions[role])
+    }
     const tasks = {}
     for (const kind of AGENT_TASK_KINDS) {
       const raw = recorded[kind]
       if (raw === null || typeof raw !== 'object') continue
+      const host = hostByRole[AGENT_TASK_ROLE[kind] ?? 'live'] ?? { phase: 'unknown' }
       const at = Number.isFinite(raw.at) ? raw.at : 0
       const age = Math.max(0, now - at)
       const deadline = AGENT_TASK_DEADLINE_MS[kind] ?? 10 * 60 * 1000
@@ -2740,6 +2926,101 @@ export class InterviewService {
   }
 
   /**
+   * **开始一段连续录制**（面试全程，不是「录一段」）。
+   *
+   * 为什么要分块上传：整段录完再上传，一小时的音视频是几百 MB，
+   * 而 HTTP body 上限是 8 MB；而且那几百 MB 得先在浏览器内存里攒着
+   * （AGENTS §11「大对象不进内存常驻」）。所以：
+   *
+   *   `recording/start`  → 建空文件，拿回文件名
+   *   `recording/chunk`  → 每 5 秒把 MediaRecorder 的一块追加进同一个文件
+   *   `recording/finish` → 收尾（回大小），面板刷新就能看到这段录像
+   *
+   * 崩了也**不丢已经上传的部分**——文件在盘上，只是可能缺最后几秒。
+   *
+   * @param {string} sessionId
+   * @param {{kind?: 'audio'|'video', tag?: string}} [input]
+   */
+  async beginRecording(sessionId, input = {}) {
+    const dir = await this.sessionDir(sessionId)
+    const kind = input.kind === 'audio' ? 'audio' : 'video'
+    const tag = sanitizeName(input.tag) || 'interview'
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const folder = join(dir, 'recordings')
+    await mkdir(folder, { recursive: true })
+    const name = `${kind}-${tag}-${stamp}.webm`
+    const target = resolveWithin(folder, name)
+    await writeFile(target, Buffer.alloc(0))
+    await this.touch(sessionId)
+    return { name, kind, path: target, bytes: 0 }
+  }
+
+  /**
+   * 追加一块录制数据（base64）。
+   *
+   * **文件名必须是这一场 recordings/ 里已经存在的**：先校验再追加，
+   * 不允许拼出目录穿越的路径（`resolveWithin` + 名字白名单双保险）。
+   *
+   * @param {string} sessionId
+   * @param {{name?: string, dataBase64?: string}} input
+   */
+  async appendRecording(sessionId, input = {}) {
+    const name = String(input.name ?? '').trim()
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/.test(name)) throw new Error(`非法的录像文件名：${name}`)
+    const dir = await this.sessionDir(sessionId)
+    const folder = join(dir, 'recordings')
+    const target = resolveWithin(folder, name)
+    if (!await isFile(target)) throw new Error(`这段录像还没开始：${name}`)
+    const buffer = Buffer.from(String(input.dataBase64 ?? ''), 'base64')
+    if (buffer.length === 0) return { name, bytes: 0 }
+    await appendFile(target, buffer)
+    return { name, bytes: buffer.length }
+  }
+
+  /**
+   * 收尾一段连续录制：回最终文件名与大小（不 touch，避免每 5 秒一次指纹抖动）。
+   *
+   * @param {string} sessionId
+   * @param {{name?: string}} input
+   */
+  async finishRecording(sessionId, input = {}) {
+    const name = String(input.name ?? '').trim()
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/.test(name)) throw new Error(`非法的录像文件名：${name}`)
+    const dir = await this.sessionDir(sessionId)
+    const target = resolveWithin(join(dir, 'recordings'), name)
+    const info = await stat(target).catch(() => undefined)
+    if (info === undefined) return { ok: false, name, bytes: 0, reason: '这段录像没有落盘' }
+    await this.touch(sessionId)
+    return {
+      ok: true,
+      name,
+      bytes: info.size,
+      kind: name.startsWith('audio') ? 'audio' : 'video',
+      empty: info.size === 0,
+    }
+  }
+
+  /**
+   * 读某一场两个角色各用哪个助手会话（**只读，不建**）。
+   *
+   * 诊断用：`interview_agent_session` / 面板上的「助手会话」芯片。
+   * 一次把两段对话都摆出来——用户要能回答「准备和面试分别在哪个对话里」。
+   *
+   * @param {string} sessionId
+   */
+  async agentSessionsSnapshot(sessionId) {
+    const meta = await this.getSession(sessionId)
+    const sessions = this.agentSessionsOf(meta)
+    const summary = summarizeAgentSessions(meta.agentLog, sessions)
+    return {
+      sessionId,
+      workspace: this.workspaceRegistration?.path ?? await this.effectiveRoot(),
+      prepare: summary.prepare,
+      live: summary.live,
+    }
+  }
+
+  /**
    * List the recordings of a session.
    *
    * @param {string} sessionId
@@ -2854,12 +3135,11 @@ export class InterviewService {
         // pausedMs 是累计暂停时长（计时公式要扣掉它）。
         pausedAt: Number.isFinite(meta.pausedAt) ? meta.pausedAt : 0,
         pausedMs: Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0,
-        // 这一场专属的宿主助手会话（派活寻址用；空 = 还没建过）。
-        agentSessionId: typeof meta.agentSessionId === 'string' ? meta.agentSessionId : '',
-        // 助手会话的**可溯源摘要**（AGENTS §6.14）：最近的派活发到了哪个
-        // 宿主对话、有没有重建过。面板据此显示「这场面试的助手在哪」，
-        // 用户不必去 DSH 会话列表里猜。
-        agent: summarizeAgentLog(meta.agentLog, meta.agentSessionId),
+        // 这一场的助手会话**按角色分开**（AGENTS §6.14）：
+        // prepare = 抓 JD / 出底稿；live = 开场 / 追问 / 续接 / 写报告。
+        agents: summarizeAgentSessions(meta.agentLog, this.agentSessionsOf(meta)),
+        // 老字段：= live 的镜像，给还没升级的读法留一条路。寻址不读它。
+        agentSessionId: this.agentSessionsOf(meta).live,
         // 归档标记：主区要能告诉用户「这场已经收起来了」。
         archived: meta.archived === true,
         dir: meta.dir,
@@ -3428,37 +3708,43 @@ function computeDurationMs(meta) {
 }
 
 /**
- * 把助手会话账本压成面板要的那几项。
+ * 把助手会话账本压成面板要的那几项——**按角色分开**。
  *
  * 只回**能回答问题**的部分：现在用哪个宿主会话、它是不是新建的、
  * 最近的派活发到了哪里、中途重建过几次。完整账本留在 session.json。
  *
  * @param {unknown} log session.json 里的 agentLog
- * @param {unknown} currentId 当前的 agentSessionId
+ * @param {{prepare: string, live: string}} sessions 当前两个角色的会话 id
  */
-function summarizeAgentLog(log, currentId) {
+function summarizeAgentSessions(log, sessions) {
   const entries = Array.isArray(log) ? log.filter(item => item !== null && typeof item === 'object') : []
-  const current = typeof currentId === 'string' ? currentId.trim() : ''
-  const opened = entries.find(entry => entry.event === 'open')
-  const dispatches = entries
-    .filter(entry => entry.event === 'dispatch')
-    .slice(-6)
-    .map(entry => ({
-      at: Number.isFinite(entry.at) ? entry.at : 0,
-      kind: typeof entry.kind === 'string' ? entry.kind : '',
-      requestId: typeof entry.requestId === 'string' ? entry.requestId : '',
-      explicit: entry.explicit === true,
-    }))
-  return {
-    sessionId: current,
-    // 这个会话是什么时候开的（0 = 账本里没有 / 老场次）。
-    createdAt: opened !== undefined && Number.isFinite(opened.at) ? opened.at : 0,
-    workspaceId: opened !== undefined && typeof opened.workspaceId === 'string' ? opened.workspaceId : '',
-    // 中途换过几次宿主会话（重建 / 解绑）。
-    rebuilds: entries.filter(entry => entry.event === 'clear').length,
-    dispatches,
-    lastDispatchAt: dispatches.length > 0 ? dispatches[dispatches.length - 1].at : 0,
+  const out = {}
+  for (const role of AGENT_ROLES) {
+    const current = typeof sessions?.[role] === 'string' ? sessions[role].trim() : ''
+    const mine = entries.filter(entry => entry.role === role || (entry.role === undefined && role === 'live'))
+    const opened = mine.find(entry => entry.event === 'open' || entry.event === 'migrate')
+    const dispatches = mine
+      .filter(entry => entry.event === 'dispatch')
+      .slice(-6)
+      .map(entry => ({
+        at: Number.isFinite(entry.at) ? entry.at : 0,
+        kind: typeof entry.kind === 'string' ? entry.kind : '',
+        requestId: typeof entry.requestId === 'string' ? entry.requestId : '',
+        explicit: entry.explicit === true,
+      }))
+    out[role] = {
+      role,
+      sessionId: current,
+      // 这个会话是什么时候开的（0 = 账本里没有 / 老场次）。
+      createdAt: opened !== undefined && Number.isFinite(opened.at) ? opened.at : 0,
+      workspaceId: opened !== undefined && typeof opened.workspaceId === 'string' ? opened.workspaceId : '',
+      // 中途换过几次宿主会话（重建 / 解绑）。
+      rebuilds: mine.filter(entry => entry.event === 'clear').length,
+      dispatches,
+      lastDispatchAt: dispatches.length > 0 ? dispatches[dispatches.length - 1].at : 0,
+    }
   }
+  return out
 }
 
 /** The absolute workspace root in force, for display. */

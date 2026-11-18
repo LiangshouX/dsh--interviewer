@@ -564,19 +564,23 @@
     }
 
     /**
-     * 重置一场面试的记录。
+     * 重置一场面试的记录：**两种模式二选一**（AGENTS §6.14）。
      *
-     * **清什么、留什么要当面说清**（AGENTS §6.14）——「重置」听起来像
-     * 「重新开始」，但用户最怕的是「我的简历和底稿还在吗」。所以正文
-     * 直接列两栏，录音录像做成显式勾选（文件不可恢复，默认留着）。
+     * - **彻底清掉**：转录 / 报告 / 录音录像直接删掉（误触、试跑用）；
+     * - **留副本再重置**：先把这三样搬到 `<工作区>/archive/<会话>/<时间>/`，
+     *   再重置（面过一轮、想留证但要从头再来）。
+     *
+     * 两种模式都保留简历、JD、底稿与元信息；都要解绑两个助手会话。
+     * 「重置」听起来像「重新开始」，用户最怕的是「我的简历和底稿还在吗」——
+     * 所以清什么、留什么、副本去哪，都在弹层里写清楚。
      */
     function ResetDialog(props) {
       const { row, onCancel, onConfirm } = props
-      const [dropRecordings, setDropRecordings] = useState(false)
+      const [mode, setMode] = useState('purge')
       const [busy, setBusy] = useState(false)
       const run = async () => {
         setBusy(true)
-        try { await onConfirm(dropRecordings) } finally { setBusy(false) }
+        try { await onConfirm(mode) } finally { setBusy(false) }
       }
       useEffect(() => {
         if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
@@ -584,6 +588,28 @@
         window.addEventListener('keydown', handler)
         return () => window.removeEventListener('keydown', handler)
       }, [onCancel])
+      const option = (key, title, detail) => h('label', {
+        key,
+        style: {
+          display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px',
+          borderRadius: RADIUS.sm, cursor: 'pointer',
+          border: `1px solid ${mode === key ? C.rule : C.ruleSoft}`,
+          background: mode === key ? C.surface2 : 'transparent',
+        },
+      }, [
+        h('input', {
+          key: 'r',
+          type: 'radio',
+          name: 'reset-mode',
+          checked: mode === key,
+          onChange: () => setMode(key),
+          style: { marginTop: 2 },
+        }),
+        h('div', { key: 'b', style: { minWidth: 0 } }, [
+          h('div', { key: 't', style: { ...TYPE.sub, color: C.bone, fontWeight: 600 } }, title),
+          h('div', { key: 'd', style: { ...TYPE.sub, color: C.boneFaint, lineHeight: 1.7, marginTop: 2 } }, detail),
+        ]),
+      ])
       return h('div', {
         style: S.overlay,
         role: 'dialog',
@@ -592,7 +618,7 @@
         onClick: event => { if (event.target === event.currentTarget) onCancel() },
       }, h('div', {
         key: 'card',
-        style: { ...S.modal, width: 'min(520px, 100%)', display: 'flex', flexDirection: 'column', gap: 14 },
+        style: { ...S.modal, width: 'min(560px, 100%)', display: 'flex', flexDirection: 'column', gap: 14 },
       }, [
         h('div', { key: 't', style: S.cardTitle }, '重置这场面试的记录'),
         h('div', {
@@ -603,47 +629,46 @@
           },
           title: row?.title ?? '',
         }, row?.title ?? ''),
+        h('div', { key: 'o', style: { display: 'flex', flexDirection: 'column', gap: 8 } }, [
+          option(
+            'purge',
+            '彻底清掉这一轮的记录',
+            '转录、报告、录音录像直接删掉。误触开始、试跑留下的脏片段用这个。',
+          ),
+          option(
+            'archive',
+            '留副本再重置（推荐）',
+            '转录、报告、录音录像先搬到工作区的 archive/ 目录，留一份副本；这一场只清掉记录与状态。',
+          ),
+        ]),
         h('div', {
           key: 'p',
-          style: { display: 'flex', flexDirection: 'column', gap: 10 },
+          style: { display: 'flex', flexDirection: 'column', gap: 6 },
         }, [
-          h('div', { key: 'clear', style: { ...TYPE.sub, color: C.boneDim, lineHeight: 1.75 } }, [
-            h('div', { key: 'h', style: { color: C.tally, fontWeight: 600, marginBottom: 2 } }, '会被清掉'),
-            h('div', { key: 'b' }, '转录与计时、报告、底稿上的「问过」标记与调整记录、等助手的任务。'),
-          ]),
           h('div', { key: 'keep', style: { ...TYPE.sub, color: C.boneDim, lineHeight: 1.75 } }, [
-            h('div', { key: 'h', style: { color: C.jade, fontWeight: 600, marginBottom: 2 } }, '会留下来'),
-            h('div', { key: 'b' }, '简历、JD、考点清单本身，以及标题 / 公司 / 岗位。'),
+            h('span', { key: 'h', style: { color: C.jade, fontWeight: 600 } }, '都保留：'),
+            h('span', { key: 'b' }, '简历、JD、考点清单本身，以及标题 / 公司 / 岗位。'),
+          ]),
+          h('div', { key: 'clear', style: { ...TYPE.sub, color: C.boneDim, lineHeight: 1.75 } }, [
+            h('span', { key: 'h', style: { color: C.tally, fontWeight: 600 } }, '都清掉：'),
+            h('span', { key: 'b' }, '计时与暂停账本、底稿上的「问过」标记与调整记录、等助手的任务。'),
           ]),
         ]),
-        h('label', {
-          key: 'rec',
-          style: {
-            display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer',
-            fontSize: TYPE.sub.fontSize, color: C.boneDim,
-          },
-        }, [
-          h('input', {
-            key: 'c',
-            type: 'checkbox',
-            checked: dropRecordings,
-            onChange: event => setDropRecordings(event.target.checked),
-            style: { marginTop: 2 },
-          }),
-          h('span', { key: 's' }, '连录音录像一起删（文件删了找不回来；不勾就留在卷宗目录里）'),
-        ]),
-        h(Quiet, { key: 'q' }, '助手会话会解绑（新的一轮用新对话）；旧对话仍在 DSH 里，可以自己归档。'),
+        mode === 'archive'
+          ? h(Quiet, { key: 'a', tone: 'ok' }, '副本位置：<工作区>/archive/<这场面试>/<时间>/（转录 + 报告 + 录音录像）')
+          : null,
+        h(Quiet, { key: 'q' }, '两个助手会话都会解绑（新的一轮用新对话）；旧对话仍在 DSH 里，可以自己归档。'),
         h('div', {
-          key: 'a',
+          key: 'act',
           style: { display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' },
         }, [
           h('button', { key: 'c', type: 'button', style: S.btn(false, busy), onClick: onCancel }, '取消'),
           h('button', {
             key: 'ok',
             type: 'button',
-            style: S.btn('tally', busy),
+            style: S.btn(mode === 'archive' ? 'primary' : 'tally', busy),
             onClick: () => { void run() },
-          }, busy ? '重置中…' : '重置'),
+          }, busy ? '重置中…' : (mode === 'archive' ? '留副本并重置' : '彻底清掉')),
         ]),
       ]))
     }
@@ -661,6 +686,7 @@
       const { onCancel, onApplied, notify } = props
       const [rows, setRows] = useState([])
       const [empties, setEmpties] = useState([])
+      const [archives, setArchives] = useState([])
       const [loading, setLoading] = useState(true)
       const [error, setError] = useState(undefined)
       const [picked, setPicked] = useState({})
@@ -670,12 +696,14 @@
       const load = useCallback(async () => {
         setLoading(true)
         try {
-          const [records, emptyResult] = await Promise.all([
+          const [records, emptyResult, archived] = await Promise.all([
             apiGet('sessions/records'),
             apiGet('sessions/empty'),
+            apiGet('sessions/archives'),
           ])
           setRows(Array.isArray(records?.sessions) ? records.sessions : [])
           setEmpties(Array.isArray(emptyResult?.candidates) ? emptyResult.candidates : [])
+          setArchives(Array.isArray(archived?.archives) ? archived.archives : [])
           setError(undefined)
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
@@ -807,7 +835,7 @@
           key: 'h',
           style: { display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' },
         }, [
-          h('div', { key: 't', style: S.cardTitle }, '记录清理'),
+          h('div', { key: 't', style: S.cardTitle }, '管理面试记录'),
           h(Meta, { key: 'n' }, `${rows.length} 场`),
           empties.length > 0
             ? h('button', {
@@ -834,6 +862,39 @@
           : rows.length === 0
             ? [h(Quiet, { key: 'l' }, '还没有面试场次。')]
             : rows.map(rowNode)),
+        // 「留副本再重置」留下的副本：**要让用户找得到**。
+        // 只读列出（目录位置 + 里面有什么），删除请在文件管理器里做。
+        archives.length === 0
+          ? null
+          : h('div', { key: 'arch', style: { flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 6 } }, [
+            h(Meta, { key: 't', style: { display: 'block' } }, `留副本的归档 · ${archives.length}`),
+            h('div', {
+              key: 'l',
+              style: { maxHeight: 132, overflowY: 'auto', overscrollBehavior: 'contain' },
+            }, archives.slice(0, 12).map(item => h('div', {
+              key: `${item.sessionId}:${item.stamp}`,
+              title: item.dir,
+              style: {
+                display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap',
+                padding: '4px 2px', borderBottom: `1px solid ${C.ruleSoft}`,
+              },
+            }, [
+              h('span', {
+                key: 'n',
+                style: {
+                  ...TYPE.sub, color: C.boneDim, minWidth: 0, flex: '1 1 120px',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                },
+              }, item.title),
+              h(Meta, { key: 'm' }, [
+                item.turns > 0 ? `${item.turns} 轮` : '',
+                item.reportChars > 0 ? `报告 ${item.reportChars} 字` : '',
+                item.recordings.length > 0 ? `${item.recordings.length} 个录像` : '',
+                item.stamp.replace('T', ' ').slice(0, 16),
+              ].filter(part => part !== '').join(' · ')),
+            ]))),
+            h(Quiet, { key: 'q' }, '副本在 <工作区>/archive/ 下，可以直接用文件管理器打开或删掉。'),
+          ]),
         h('div', {
           key: 'a',
           style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
@@ -1283,27 +1344,32 @@
       //   - 留空 = 没填 → 写回带日期的占位值（新建公司 / 新建岗位）；
       //   - 标题留空 → 用「公司 · 岗位」拼；
       //   - 用户改过标题 → 保留，不再跟着公司/岗位动。
-      const agentInfo = session?.session?.agent
+      const agentRoles = session?.session?.agents ?? {}
       /**
-       * 助手会话芯片：**这场面试的对话在哪**（AGENTS §6.14）。
+       * 助手会话芯片：**这场面试的两个对话分别在哪**（AGENTS §6.14）。
        *
-       * 它必须存在，但不能是常驻说明文字——这里只留一个会话尾号，
-       * 完整信息（全 id、建于何时、最近派活、重建过几次）在 `title` 里。
+       * 一枚芯片只放「角色 · 尾号」，完整信息（全 id、建于何时、最近派活、
+       * 重建过几次）在 `title` 里——常驻版面不写说明书（§10.0.1）。
        */
-      const agentChip = (agentInfo?.sessionId ?? '') === ''
-        ? null
-        : h(Meta, {
-          key: 'agent',
+      const agentChipOf = (key, label, info) => {
+        if ((info?.sessionId ?? '') === '') return null
+        return h(Meta, {
+          key,
           title: [
-            `助手会话：${agentInfo.sessionId}`,
-            agentInfo.createdAt > 0 ? `建于 ${new Date(agentInfo.createdAt).toLocaleString()}` : '',
-            agentInfo.lastDispatchAt > 0
-              ? `最近派活：${new Date(agentInfo.lastDispatchAt).toLocaleTimeString()}`
+            `${label}：${info.sessionId}`,
+            info.createdAt > 0 ? `建于 ${new Date(info.createdAt).toLocaleString()}` : '',
+            info.lastDispatchAt > 0
+              ? `最近派活：${new Date(info.lastDispatchAt).toLocaleTimeString()}`
               : '还没有派过活',
-            agentInfo.rebuilds > 0 ? `中途换过 ${agentInfo.rebuilds} 次会话` : '',
-            '拉 JD、出底稿、开场、写报告都在这一个对话里',
+            info.rebuilds > 0 ? `中途换过 ${info.rebuilds} 次会话` : '',
+            key === 'agent-prepare' ? '抓 JD / 出底稿都在这个对话里' : '开场 / 追问 / 续接 / 写报告都在这个对话里',
           ].filter(part => part !== '').join('\n'),
-        }, `助手会话 · ${agentInfo.sessionId.slice(-6)}`)
+        }, `${label} · ${info.sessionId.slice(-6).toUpperCase()}`)
+      }
+      const agentChips = [
+        agentChipOf('agent-prepare', '准备', agentRoles.prepare),
+        agentChipOf('agent-live', '面试', agentRoles.live),
+      ]
 
       const saveIdentity = useCallback(async () => {
         setBusy(true)
@@ -1698,11 +1764,14 @@
           index: 0,
           // 保存放在标题行右端：三格输入 + 一个孤零零的按钮会空出一大片，
           // 那一大片正是「薄纸感」的来源。
-          extra: h('div', { key: 'x', style: { display: 'flex', alignItems: 'center', gap: 10 } }, [
+          extra: h('div', {
+            key: 'x',
+            style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' },
+          }, [
             session?.session?.archived === true
               ? h(Pill, { key: 'a', tone: 'amber' }, '已归档')
               : null,
-            agentChip,
+            ...agentChips,
             h('button', { key: 'b', style: S.btn('primary', busy), onClick: saveIdentity }, '保存'),
           ]),
         }, [
@@ -1892,7 +1961,12 @@
     function LiveView(props) {
       const { session, config, onChanged, notify } = props
       const media = useMedia()
-      const recorder = useRecorder(media.stream)
+      // **面试全程的连续录制**（不是「录一段」）：每 5 秒把一块推到 Host 的
+      // 同一个文件里，人在面试中不用管它（AGENTS §6.15）。
+      const autoRecorder = useChunkRecorder({
+        stream: media.stream,
+        sessionId: session?.session?.id ?? '',
+      })
       // 服务端识别要**纯音频**：从音视频合流里单独取音轨。
       const audioOnly = useMemo(() => {
         if (media.stream === undefined) return undefined
@@ -2108,6 +2182,18 @@
         return undefined
       }, [transcript])
 
+      // ── 自动朗读：**面试在跑就开口**（除非用户手动关掉）──────────────────
+      //
+      // 以前 `speaking` 只能靠点「朗读问题」打开，于是每次刷新 / 继续面试，
+      // 面试官就哑了。现在它跟着面试状态走：进入 running 就开（播报没关时），
+      // 用户点「关闭朗读」记在本场（`readMutedRef`），暂停/续接不会把它重置。
+      useEffect(() => {
+        if (!running || paused) return
+        if (configRef.current?.ttsProvider === 'none') return
+        if (readMutedRef.current === true) return
+        setSpeaking(true)
+      }, [running, paused, config?.ttsProvider])
+
       // 新问题自动朗读（可关）。
       const speakLine = tts.speak
       useEffect(() => {
@@ -2115,8 +2201,20 @@
         if (!speaking) return
         if (lastQuestion.text === lastQuestionRef.current) return
         lastQuestionRef.current = lastQuestion.text
-        if (config?.ttsProvider !== 'none') void speakLine(lastQuestion.text, { rate: config?.ttsRate ?? 1 })
-      }, [lastQuestion, speaking, speakLine, config?.ttsProvider, config?.ttsRate])
+        if (config?.ttsProvider === 'none') return
+        // 播不出来要说一次（自动播放被拦、宿主模型没准备好…），不能静默。
+        Promise.resolve(speakLine(lastQuestion.text, { rate: config?.ttsRate ?? 1 }))
+          .then(played => {
+            if (played === true || readFailedRef.current === true) return
+            readFailedRef.current = true
+            notify(
+              '这一问没能自动朗读',
+              tts.notice ?? '播报链路不可用；问题仍以文字显示，点「朗读问题」可以再试一次。',
+              'warn',
+            )
+          })
+          .catch(() => { /* 播报失败不该影响面试 */ })
+      }, [lastQuestion, speaking, speakLine, config?.ttsProvider, config?.ttsRate, notify, tts.notice])
 
       /**
        * 提交回答 —— **手动点按钮与自动倒计时走的是这同一个函数**。
@@ -2177,23 +2275,26 @@
         }
       }, [answer, notify])
 
-      /** Save the recorded clip to this machine (never uploaded anywhere else). */
-      const saveClip = useCallback(async () => {
-        if (recorder.clip === undefined) return
-        try {
-          const dataBase64 = await blobToBase64(recorder.clip.blob)
-          await apiPost(`sessions/${session.session.id}/recording`, {
-            kind: media.stream?.getVideoTracks().length > 0 ? 'video' : 'audio',
-            mimeType: recorder.clip.mimeType,
-            dataBase64,
-          })
-          recorder.reset()
-          notify('已保存到本机', '片段留在本场面试的卷宗目录里。', 'ok')
+      /**
+       * 手动控制**这一场的连续录制**（和开始面试时自动开的是同一条）。
+       *
+       * 停止不需要「保存」这一步：文件一直在追加，收尾只是把最后一块传完。
+       */
+      const toggleCapture = useCallback(async () => {
+        if (autoRecorder.recording) {
+          const result = await autoRecorder.stop()
+          captureRef.current.browser = false
+          if (result?.name !== undefined) {
+            if (result.empty === true) notify('这段录像没录到内容', '设备可能没接通，或者没开几秒就停了。', 'warn')
+            else notify('录像已保存', `${result.name}（${formatBytes(result.bytes)}）留在卷宗目录里。`, 'ok')
+          }
           onChanged()
-        } catch (failure) {
-          notify('保存失败', failure instanceof Error ? failure.message : String(failure), 'error')
+          return
         }
-      }, [recorder, session?.session?.id, media.stream, onChanged, notify])
+        const began = await autoRecorder.start(media.stream)
+        captureRef.current.browser = began === true
+        if (began !== true) notify('录不了', typeof began === 'string' ? began : '设备没接通。', 'warn')
+      }, [autoRecorder, media.stream, onChanged, notify])
 
       /** Send the recorded clip to the server-side recognizer. */
       const transcribeClip = useCallback(async () => {
@@ -2231,8 +2332,138 @@
 
       // 「开始面试」要先判断宿主摄像头开没开，而 `hostCamera` 在下面才创建
       // （hooks 顺序决定的）。**依赖数组是渲染期求值的**，直接引用会踩 TDZ
-      // （`performanc/§11` 记过这条）；用 ref 在点击那一刻读最新值。
+      // （`ReferenceError: Cannot access 'hostCamera' before initialization`）；
+      // 用 ref 在点击那一刻读最新值。
       const hostCameraRef = useRef(undefined)
+
+      // ── 面试运行时：设备 + 录制 + 朗读，**所有入口只走这一对函数** ────────
+      //
+      // 之前每个按钮各做各的（开始只开设备、继续只开设备、暂停忘了收录制），
+      // 于是「暂停后继续」漏了录制和朗读。现在把这套生命周期收成两个函数，
+      // 开始 / 继续 / 续接 / 恢复板 / 暂停 / 结束 / 重置 / 卸载全部走它们。
+      const runtimeRef = useRef(false)
+      // 用户手动关掉朗读：这一场不再自动开口（暂停/续接不重置它）。
+      const readMutedRef = useRef(false)
+      // 自动朗读失败已经说过一次了（不刷屏）。
+      const readFailedRef = useRef(false)
+      // 这一轮录制开了哪几路（浏览器 / 宿主）。
+      const captureRef = useRef({ browser: false, host: false })
+      const sessionIdRef = useRef(session?.session?.id)
+      sessionIdRef.current = session?.session?.id
+      const mediaApiRef = useRef(media)
+      mediaApiRef.current = media
+      const autoRecorderRef = useRef(autoRecorder)
+      autoRecorderRef.current = autoRecorder
+
+      /**
+       * 开录像：**按「谁在出画面」决定录什么。**
+       *
+       * | 情形 | 录什么 |
+       * |---|---|
+       * | 浏览器有画面（网页版 / 桌面端放行了摄像头） | 浏览器录整条流（音+视频，一个文件） |
+       * | 宿主在出画面（桌面端） | Host 录画面（**静音**）+ 浏览器录麦克风（音频文件） |
+       * | 都没有画面 | 只录麦克风（`recordAudio` 开着的话） |
+       *
+       * 失败**不挡面试**，但要把原因说出来（AGENTS §7）。
+       *
+       * @param {MediaStream|undefined} stream 刚申请到的流
+       */
+      const startAutoCapture = useCallback(async stream => {
+        const cfg = configRef.current
+        const sid = sessionIdRef.current
+        if (typeof sid !== 'string' || sid === '') return
+        const wantVideo = cfg?.recordVideo !== false
+        const wantAudio = cfg?.recordAudio !== false
+        const host = hostCameraRef.current
+        const hostRecording = host?.active === true && typeof host.startRecording === 'function'
+        if (wantVideo && hostRecording && captureRef.current.host !== true) {
+          const ok = await host.startRecording(sid)
+          captureRef.current.host = ok === true
+          if (ok !== true) notify('宿主录像没开起来', '画面还在，但这一场可能没有视频文件。', 'warn')
+        }
+        const browserWanted = wantAudio || (wantVideo && !hostRecording)
+        if (!browserWanted || captureRef.current.browser === true) return
+        const began = await autoRecorderRef.current.start(stream)
+        captureRef.current.browser = began === true
+        if (began !== true) notify('录制没开起来', typeof began === 'string' ? began : '设备没接通。', 'warn')
+      }, [notify])
+
+      /**
+       * 收录像：把两路都停掉并落盘（暂停 / 结束 / 重置 / 卸载都会走这里）。
+       *
+       * **先同步调用 recorder.stop()**，再等上传与宿主转码——设备随后被释放，
+       * 晚一步就吐不出最后一块数据了。
+       */
+      const stopAutoCapture = useCallback(async () => {
+        const captured = captureRef.current
+        const sid = sessionIdRef.current
+        captureRef.current = { browser: false, host: false }
+        const saved = []
+        if (captured.browser === true) {
+          const result = await autoRecorderRef.current.stop()
+          if (result?.name !== undefined) {
+            if (result.empty === true) notify('这段录像没录到内容', '设备可能没接通，或者没开几秒就停了。', 'warn')
+            else saved.push(`${result.name}（${formatBytes(result.bytes)}）`)
+          }
+        }
+        if (captured.host === true && typeof sid === 'string' && sid !== '') {
+          const result = await hostCameraRef.current?.stopRecording(sid)
+          if (typeof result?.name === 'string') saved.push(`${result.name}（${formatBytes(result.bytes)}）`)
+        }
+        if (saved.length > 0) notify('录像已保存', `${saved.join('、')} 留在本场面试的卷宗目录里。`, 'ok')
+      }, [notify])
+
+      /**
+       * **进入面试运行时**：接设备 → 开录制 → 开自动朗读。
+       *
+       * @param {string} reason 哪扇门进来的（start / resume / continue / resume-board）
+       * @returns {Promise<{mic: boolean, cam: boolean, host: boolean}|undefined>}
+       */
+      const enterRuntime = useCallback(async reason => {
+        if (runtimeRef.current === true) return undefined
+        runtimeRef.current = true
+        let ready
+        try {
+          const stream = mediaApiRef.current.stream
+          const micOk = stream !== undefined && (stream.getAudioTracks?.() ?? []).length > 0
+          if (stream === undefined || !micOk) {
+            setAcquireStage({ text: '正在准备摄像头与麦克风…' })
+            ready = await acquireMediaRef.current?.()
+          } else {
+            ready = {
+              mic: true,
+              cam: (stream.getVideoTracks?.() ?? []).length > 0,
+              host: hostCameraRef.current?.active === true,
+            }
+          }
+          await startAutoCapture(ready?.stream ?? stream)
+          const ttsOff = configRef.current?.ttsProvider === 'none'
+          if (!ttsOff && readMutedRef.current !== true) setSpeaking(true)
+          return ready
+        } catch (error) {
+          // 进不了运行时也不能挡住面试（AGENTS §6.3）：如实说，然后继续。
+          notify('面试环境没准备好', error instanceof Error ? error.message : String(error), 'warn')
+          return ready
+        }
+      }, [notify, startAutoCapture])
+
+      /**
+       * **退出面试运行时**：停录制 → 停设备 → 停朗读。
+       *
+       * 反向顺序很关键：先收录制（还要读流），再释放设备。
+       */
+      const leaveRuntime = useCallback(async reason => {
+        runtimeRef.current = false
+        ttsRef.current.stop()
+        await stopAutoCapture()
+        const current = mediaApiRef.current
+        if (current.stream !== undefined) current.stop()
+        if (hostCameraRef.current?.active === true) void hostCameraRef.current.stop()
+      }, [stopAutoCapture])
+
+      // 状态驱动的那半边走 ref：effect 的依赖里不放函数，避免每次渲染重跑。
+      const runtimeApiRef = useRef({ enter: enterRuntime, leave: leaveRuntime })
+      runtimeApiRef.current = { enter: enterRuntime, leave: leaveRuntime }
 
       /**
        * 开始面试：**先把设备准备好，再让面试开始。**
@@ -2250,69 +2481,65 @@
         // 第一句提问自动播报时才不会被浏览器拦掉。
         unlockAudio()
         setPreparing(true)
-        const hadDevices = media.stream !== undefined || hostCameraRef.current?.active === true
-        let ready
         try {
-          if (!hadDevices) {
-            setAcquireStage({ text: '正在准备摄像头与麦克风…' })
-            ready = await acquireMediaRef.current?.()
-          }
           // Host 端 startSession 置 running 并**异步派活开场**（§5.1）：
           // 点完这一下，助手自己会开口，不需要再去 DSH 对话区做任何事。
           await apiPost(`sessions/${session.session.id}/start`, {})
           // 本地先进 thinking：开场白由轮询带回来（新问题 → questioning）。
           setTurnPhase('thinking')
+          // 设备 + 录制 + 自动朗读**统一走运行时**（和继续 / 续接同一条路）。
+          const ready = await runtimeApiRef.current.enter('start')
           onChanged()
-          if (hadDevices) {
-            notify('面试开始了', undefined, 'ok')
-          } else if (ready?.mic === true && ready?.cam === true) {
-            notify('面试开始了', '摄像头与麦克风已接通。', 'ok')
-          } else if (ready?.mic === true) {
-            notify('面试开始了', '麦克风已接通；摄像头没接上——舞台会给画面留位置，随时可以补。', 'warn')
-          } else {
+          if (ready === undefined || (ready.mic !== true && ready.cam !== true)) {
             notify('面试开始了', '设备没接上：提问照常、回答用键盘，面试不会中断。', 'warn')
+          } else if (ready.mic === true && ready.cam !== true) {
+            notify('面试开始了', '麦克风已接通；摄像头没接上——舞台会给画面留位置，随时可以补。', 'warn')
+          } else if (ready.cam === true && ready.mic !== true) {
+            notify('面试开始了', '摄像头已接通；麦克风没接上，回答用键盘。', 'warn')
+          } else {
+            notify('面试开始了', '摄像头与麦克风已接通。', 'ok')
           }
         } catch (failure) {
           notify('没能开始', failure instanceof Error ? failure.message : String(failure), 'error')
         } finally {
           setPreparing(false)
         }
-      }, [session?.session?.id, media.stream, onChanged, notify])
+      }, [session?.session?.id, onChanged, notify])
 
       /**
        * 续接一场**已结束**的面试：状态回 running，并在同一个手势里把设备接上。
        *
        * 和「继续面试」（paused → running）的区别只在服务端：续接不重开一轮，
-       * 中断的那段时间记进 pausedMs。客户端这边两者一样——接设备、等下一问。
+       * 中断的那段时间记进 pausedMs。客户端这边两者一样——接设备、开录制、朗读。
        */
       const continueInterview = useCallback(async () => {
         unlockAudio()
         setPreparing(true)
         try {
           await apiPost(`sessions/${session.session.id}/continue`, {})
+          await runtimeApiRef.current.enter('continue')
           onChanged()
           notify('续接上了', '助手会从上一问接着问，不会重新开场。', 'ok')
         } catch (failure) {
           notify('没法续接', failure instanceof Error ? failure.message : String(failure), 'error')
-          return
         } finally {
           setPreparing(false)
         }
-        if (media.stream === undefined && hostCameraRef.current?.active !== true) {
-          setAcquireStage({ text: '正在准备摄像头与麦克风…' })
-          await acquireMediaRef.current?.()
-        }
-      }, [session?.session?.id, media.stream, onChanged, notify])
+      }, [session?.session?.id, onChanged, notify])
 
       const finishInterview = useCallback(async () => {
+        // 先开始收录像（同步 stop），再置 done；宿主转码可能要几秒，
+        // 不挡「已结束」的响应，保存好会再提示一次。
+        const stopping = leaveRuntime('finish')
         try {
           await apiPost(`sessions/${session.session.id}/finish`, {})
           onChanged()
-          notify('面试已结束', '去「报告」页让助手写分析。', 'ok')
+          notify('面试已结束', '去「报告」页让助手写分析；录像正在收尾，存好会再提示。', 'ok')
         } catch (failure) {
           notify('没能结束', failure instanceof Error ? failure.message : String(failure), 'error')
         }
-      }, [session?.session?.id, onChanged, notify])
+        void stopping
+      }, [session?.session?.id, onChanged, notify, leaveRuntime])
 
       // `running` / `paused` / `status` 已在话轮状态机区块里提前定义。
       /**
@@ -2365,18 +2592,18 @@
         const camOk = (stream?.getVideoTracks?.() ?? []).length > 0
         if (camOk) {
           setAcquireStage({ text: '✓ 麦克风与摄像头已接入' })
-          return { mic: micOk, cam: true, host: false }
+          return { mic: micOk, cam: true, host: false, stream }
         }
         if (!inDesktopHost()) {
           setAcquireStage({ text: micOk ? '✓ 麦克风已接入；摄像头没拿到（可再试一次）' : '麦克风与摄像头都没接上；键盘输入可用。' })
-          return { mic: micOk, cam: false, host: false }
+          return { mic: micOk, cam: false, host: false, stream }
         }
         setAcquireStage({ text: `${micOk ? '✓ 麦克风已接入 · ' : ''}摄像头被桌面端挡下，正在尝试宿主采集…` })
         const started = await hostCamera.start()
         setAcquireStage({
           text: `${micOk ? '✓ 麦克风已接入 · ' : ''}${started ? '✓ 摄像头已通过宿主接入' : '摄像头仍未接上（可点「用宿主摄像头」重试）'}`,
         })
-        return { mic: micOk, cam: started === true, host: started === true }
+        return { mic: micOk, cam: started === true, host: started === true, stream }
       }
 
       // 手动点「开宿主摄像头」重试成功时，分步文案也要跟着变成成功态。
@@ -2408,10 +2635,16 @@
         lastSeenQuestionRef.current = undefined
         autoStartTriedRef.current = false
         spokeRef.current = false
+        readMutedRef.current = false
+        readFailedRef.current = false
         ttsRef.current.stop()
         try { segmentAsr.stop() } catch { /* 没开过 */ }
         try { webAsr.stop() } catch { /* 没开过 */ }
       }, [sessionId, cancelCountdown])
+
+      // 卸载（切页签 / 关面板）：录制要收尾，设备要关灯。
+      // 面板层的 GuardDialog 负责先问一句；这里只负责「真的走」。
+      useEffect(() => () => { void runtimeApiRef.current.leave('unmount') }, [])
 
       /**
        * 初始相态推导（§6.6：崩溃/刷新恢复与手动继续走**同一条路**）。
@@ -2482,46 +2715,34 @@
        *
        * **指示灯必须灭**：用户人走了，摄像头麦克风还开着，比功能坏了更
        * 严重（§6.3/§10.3）。stop 都是幂等的，重复执行无害。
+       *
+       * 录制也在这里收：离开运行时 = 停录制 + 停设备 + 停朗读，
+       * **一个入口**，不靠每个按钮自己记得。
        */
       useEffect(() => {
         if (!paused) return
+        void runtimeApiRef.current.leave('paused')
         cancelCountdown()
         setLongSilence(undefined)
         if (turnPhaseRef.current !== 'idle') setTurnPhase('idle')
-        ttsRef.current.stop()
         try { segmentAsr.stop() } catch { /* 已停 */ }
         try { webAsr.stop() } catch { /* 已停 */ }
-        if (media.stream !== undefined) media.stop()
-        if (hostCamera.active) void hostCamera.stop()
       }, [paused, cancelCountdown])
 
-      /** 面试结束：设备关灯、状态机归零。 */
-      useEffect(() => {
-        if (status !== 'done') return
-        if (turnPhaseRef.current === 'idle' && countdownRef.current === undefined) return
-        cancelCountdown()
-        setTurnPhase('idle')
-        ttsRef.current.stop()
-        if (media.stream !== undefined) media.stop()
-        if (hostCamera.active) void hostCamera.stop()
-      }, [status, cancelCountdown])
-
       /**
-       * 重置把状态打回 draft：**设备必须关灯**（AGENTS §10.3）。
+       * **不在面试中 → 运行时要退干净。**
        *
-       * 「没进 done」不等于「设备已经放了」——重置是 Host 端的动作，
-       * 它不知道浏览器这边摄像头还开着。所以这里按「不在面试中」兜底，
-       * 顺手把本地相态与识别也归零。
+       * 这兜住的是「不是我发起的」状态变化：助手调了 interview_pause、
+       * 另一处点了结束、重置把状态打回 draft。设备关灯、录制收尾、朗读停口
+       * 全在这一条里，不必每个入口各写一遍。
        */
       useEffect(() => {
-        if (status === 'running' || status === 'paused' || status === 'done') return
+        if (status === 'running') return
+        void runtimeApiRef.current.leave(`status:${status}`)
         cancelCountdown()
         if (turnPhaseRef.current !== 'idle') setTurnPhase('idle')
-        ttsRef.current.stop()
         try { segmentAsr.stop() } catch { /* 没开过 */ }
         try { webAsr.stop() } catch { /* 没开过 */ }
-        if (media.stream !== undefined) media.stop()
-        if (hostCamera.active) void hostCamera.stop()
       }, [status, cancelCountdown])
 
       /**
@@ -2539,41 +2760,39 @@
         void segmentAsr.start()
       }, [autoDetectActive, turnPhase, segmentAsr.active, segmentAsr.error, media.stream])
 
-      /** 暂停面试：Host 记状态与留痕，客户端**立刻**释放设备（不等轮询）。 */
+      /** 暂停面试：先收录制（要读流），再置状态；设备由状态 effect 收。 */
       const pauseInterview = useCallback(async () => {
+        // **先同步开始收尾**：recorder.stop() 要赶在设备被释放之前吐最后一块。
+        const stopping = leaveRuntime('pause')
         try {
           await apiPost(`sessions/${session.session.id}/pause`, {})
-          ttsRef.current.stop()
           cancelCountdown()
           setTurnPhase('idle')
           setLongSilence(undefined)
           try { segmentAsr.stop() } catch { /* 已停 */ }
           try { webAsr.stop() } catch { /* 已停 */ }
-          media.stop()
-          if (hostCamera.active) void hostCamera.stop()
           onChanged()
           notify('面试已暂停', '摄像头与麦克风已关闭、计时停走；回来点「继续面试」，助手会带着原上下文接着问。', 'ok')
         } catch (failure) {
           notify('没能暂停', failure instanceof Error ? failure.message : String(failure), 'error')
         }
-      }, [session?.session?.id, cancelCountdown, media, hostCamera.active, hostCamera.stop, segmentAsr, webAsr, onChanged, notify])
+        void stopping
+      }, [session?.session?.id, cancelCountdown, segmentAsr, webAsr, onChanged, notify, leaveRuntime])
 
       /**
        * 继续面试：Host 端 resumeSession 累计暂停时长并**异步派活唤醒助手**
-       * （§6.4）；媒体在用户手势内重新申请，权限路径与 start 相同。
+       * （§6.4）；媒体 / 录制 / 朗读在用户手势内重新起来，和「开始」同一条路。
        * DSH 重启过也不怕：冷会话被 prompt 唤醒时历史完整重建（§6.5）。
        */
       const resumeInterview = useCallback(async () => {
         try {
           await apiPost(`sessions/${session.session.id}/unpause`, {})
+          await runtimeApiRef.current.enter('resume')
           onChanged()
           notify('面试继续', '助手正在重新对齐上下文，下一问马上来。', 'ok')
         } catch (failure) {
           notify('没能继续', failure instanceof Error ? failure.message : String(failure), 'error')
-          return
         }
-        await acquireMediaRef.current?.()
-        // 相态由恢复 effect 从转录推导：最后一行是 interviewer 提问 → listening。
       }, [session?.session?.id, onChanged, notify])
 
       /**
@@ -2711,10 +2930,15 @@
       /** 「朗读问题」的真实入口：没有问题就播测试音频，并说明是测试。 */
       const speakButton = useCallback(() => {
         if (speaking) {
+          // 手动关掉 = 这一场不再自动开口（暂停/续接也不自动开回来）。
+          readMutedRef.current = true
           tts.stop()
           setSpeaking(false)
+          notify('朗读已关闭', '这一场不再自动朗读；点「朗读问题」可以重新开启。', 'ok')
           return
         }
+        readMutedRef.current = false
+        readFailedRef.current = false
         setSpeaking(true)
         if (questionText !== undefined) {
           lastQuestionRef.current = questionText
@@ -2734,10 +2958,11 @@
       const stacked = liveWidth > 0 && liveWidth < 760
 
       /** 计时器 + REC 灯。组件在模块作用域，key 由调用点给。 */
+      const captureActive = autoRecorder.recording || hostCamera.recording
       const clockProps = absolute => ({
         absolute,
         durationMs: session?.stats?.durationMs ?? 0,
-        recording: recorder.recording || hostCamera.recording,
+        recording: captureActive,
       })
 
       // 麦克风是否真的接通：看音轨，不看流存不存在。
@@ -2977,9 +3202,9 @@
         }, [
           h('button', {
             key: 'go',
-            style: S.btn('primary', media.busy),
-            onClick: () => { void acquireMedia() },
-          }, media.busy || hostCamera.busy ? '正在申请…' : '继续面试'),
+            style: S.btn('primary', media.busy || preparing),
+            onClick: () => { void runtimeApiRef.current.enter('resume-board') },
+          }, media.busy || hostCamera.busy || preparing ? '正在申请…' : '继续面试'),
           hostCameraButton,
           permissionRetryButton,
           h('button', {
@@ -3256,7 +3481,7 @@
             ]),
           ]),
         // 录制指示灯：只有真正在录的时候才亮。
-        (recorder.recording || hostCamera.recording)
+        captureActive
           ? h('div', { key: 'rec', style: { position: 'absolute', top: 14, left: 16 } }, h(Tally, { on: true }))
           : null,
         // 计时器：有画面时压在右上角；没画面时它进板子的标题行（见上）。
@@ -3384,12 +3609,13 @@
             }, hostCamera.recording ? '停止录制' : '开始录制')
             : h('button', {
               key: 'rec',
-              style: S.btn(recorder.recording ? 'tally' : false, media.stream === undefined),
-              onClick: () => (recorder.recording ? recorder.stop() : recorder.start()),
-            }, recorder.recording ? '停止录制' : (hasVideo ? '开始录制' : '开始录音')),
-        recorder.clip !== undefined && config?.recordVideo !== false
-          ? h('button', { key: 'save', style: S.btn('primary', false), onClick: saveClip }, hasVideo ? '保存录像' : '保存录音')
-          : null,
+              // 连续录制（自动保存）——和开始面试时自动开的是同一条。
+              style: S.btn(captureActive ? 'tally' : false, media.stream === undefined || autoRecorder.busy),
+              title: captureActive
+                ? '停止并收尾（文件一直在写，不需要另外保存）'
+                : '开始录制这一场（自动保存到本场卷宗）',
+              onClick: () => { void toggleCapture() },
+            }, autoRecorder.busy ? '准备中…' : captureActive ? '停止录制' : (hasVideo ? '开始录制' : '开始录音')),
       ])
 
       const voiceButtons = h('div', { key: 'gr', style: S.row }, [
@@ -3445,6 +3671,19 @@
         h('div', { key: 'g-cam' }, [
           h(Meta, { key: 'l', style: { display: 'block', marginBottom: 6 } }, '画面'),
           mediaButtons,
+          // **录制状态必须看得见**：自动录制开没开、有没有报错，
+          // 不能等面试结束才发现「什么都没留下」（AGENTS §6.15）。
+          h(Quiet, {
+            key: 'cap',
+            tone: autoRecorder.error !== undefined ? 'warn' : captureActive ? 'ok' : 'muted',
+            style: { display: 'block', marginTop: 6 },
+          }, autoRecorder.error !== undefined
+            ? `录制有问题：${autoRecorder.error}`
+            : captureActive
+              ? `● 正在录制（${autoRecorder.recording ? '浏览器' : '宿主'}）· 自动存进本场卷宗`
+              : (config?.recordVideo === false && config?.recordAudio === false
+                ? '录制已在设置里关掉'
+                : '未在录制：开始面试会自动开；也可以点上面的「开始录制」')),
         ]),
         h('div', { key: 'g-voice' }, [
           h(Meta, { key: 'l', style: { display: 'block', marginBottom: 6 } }, '声音'),

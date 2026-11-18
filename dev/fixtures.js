@@ -101,15 +101,28 @@
     updatedAt: now,
     profileId: 'pf-2026111-a2c9',
     dir: 'D:\\DSH-REALTIME-INTERVIEW-ROOT\\workspaces\\iv-20261116-a3f1',
-    // 助手会话：拉 JD / 出底稿 / 开场 / 写报告共用的那个宿主对话（AGENTS §6.14）。
+    // 助手会话：**两个角色两个对话**（AGENTS §6.14）——
+    // prepare = 抓 JD / 出底稿，live = 开场 / 追问 / 报告。
     agentSessionId: 'sess_7f3a91c2',
-    agent: {
-      sessionId: 'sess_7f3a91c2',
-      createdAt: now - 5400000,
-      workspaceId: 'ws-20261116-b7d2',
-      rebuilds: 0,
-      dispatches: [{ at: now - 120000, kind: 'checklist', requestId: 'checklist-demo', explicit: false }],
-      lastDispatchAt: now - 120000,
+    agents: {
+      prepare: {
+        role: 'prepare',
+        sessionId: 'sess_prep51ab',
+        createdAt: now - 5400000,
+        workspaceId: 'ws-20261116-b7d2',
+        rebuilds: 0,
+        dispatches: [{ at: now - 900000, kind: 'checklist', requestId: 'checklist-demo', explicit: false }],
+        lastDispatchAt: now - 900000,
+      },
+      live: {
+        role: 'live',
+        sessionId: 'sess_7f3a91c2',
+        createdAt: now - 3600000,
+        workspaceId: 'ws-20261116-b7d2',
+        rebuilds: 0,
+        dispatches: [{ at: now - 120000, kind: 'continue', requestId: 'continue-demo', explicit: false }],
+        lastDispatchAt: now - 120000,
+      },
     },
   }
 
@@ -484,6 +497,41 @@ Nginx、Prometheus / Grafana、Kubernetes`
           if (parts.length === 1) {
             return { session: { ...session, id: 'iv-20261117-new1', title: '新面试', status: 'draft' } }
           }
+          // 生命周期动作要**真的改状态**：预览里的「开始 → 暂停 → 继续」
+          // 探针靠这条链路（`dev/check-runtime.mjs`）。返回 `{ok:true}` 不动状态，
+          // 界面就永远停在原地——探针会误判成「按钮没用」。
+          const statusAction = parts[2]
+          if (statusAction === 'start' || statusAction === 'unpause' || statusAction === 'continue') {
+            state.session.status = 'running'
+            return { session: state.session }
+          }
+          if (statusAction === 'pause') {
+            state.session.status = 'paused'
+            return { session: state.session }
+          }
+          if (statusAction === 'finish') {
+            state.session.status = 'done'
+            return { session: state.session }
+          }
+          // 连续录制：分块追加。记进 `window.__RUNTIME_LOG__` 供探针断言。
+          if (parts[2] === 'recording') {
+            const step = parts[3] ?? 'chunk'
+            const log = (window.__RUNTIME_LOG__ = window.__RUNTIME_LOG__ ?? [])
+            if (step === 'start') {
+              const name = `video-interview-${log.length + 1}.webm`
+              log.push({ type: 'recording-start', name, kind: body?.kind ?? '' })
+              return { name, kind: body?.kind ?? 'video', bytes: 0 }
+            }
+            if (step === 'chunk') {
+              log.push({ type: 'recording-chunk', name: body?.name ?? '', size: String(body?.dataBase64 ?? '').length })
+              return { name: body?.name ?? '', bytes: String(body?.dataBase64 ?? '').length }
+            }
+            if (step === 'finish') {
+              log.push({ type: 'recording-finish', name: body?.name ?? '' })
+              return { ok: true, name: body?.name ?? '', bytes: 1024 }
+            }
+            return { ok: true }
+          }
           // 「记录清理」：批量删（逐场回结果，进行中的会被拒）。
           if (parts[1] === 'delete-batch') {
             const ids = Array.isArray(body?.ids) ? body.ids : []
@@ -494,7 +542,7 @@ Nginx、Prometheus / Grafana、Kubernetes`
               refusedCount: 0,
             }
           }
-          // 重置：清掉面试过程的记录，状态回 draft。
+          // 重置：清掉面试过程的记录，状态回 draft。两种模式都回同一份体量。
           if (parts[2] === 'reset') {
             state.session.status = 'draft'
             state.transcript = []
@@ -503,14 +551,19 @@ Nginx、Prometheus / Grafana、Kubernetes`
             state.stats.asked = 0
             state.stats.answered = 0
             state.stats.checklistProbed = 0
+            const mode = body?.mode === 'archive' ? 'archive' : 'purge'
             return {
               ok: true,
               sessionId: parts[1],
+              mode,
               cleared: {
-                turns: 30, interviewTurns: 15, report: true, recordings: 0,
-                checklistProbed: 5, checklistAdjustments: 2, agentTasks: 0, hostSessionDetached: true,
+                turns: 30, interviewTurns: 15, report: true, recordings: 2,
+                checklistProbed: 5, checklistAdjustments: 2, agentTasks: 0, hostSessionsDetached: 2,
               },
-              kept: { recordings: 2, checklistItems: 14, resume: true, jd: true },
+              kept: { checklistItems: 14, resume: true, jd: true },
+              ...(mode === 'archive'
+                ? { archivedTo: `D:\\DSH-REALTIME-INTERVIEW-ROOT\\archive\\${parts[1]}\\2026-11-19T02-30-00` }
+                : {}),
               session: state.session,
             }
           }
@@ -630,6 +683,24 @@ Nginx、Prometheus / Grafana、Kubernetes`
         if (path === '/sessions/empty') {
           return { candidates: [{ id: 'iv-20261117-e1f2', title: '新面试', createdAt: now - 600000 }] }
         }
+        if (path === '/sessions/archives') {
+          // 「留副本再重置」留下的归档（只读元信息）。
+          return {
+            archives: [
+              {
+                sessionId: session.id,
+                stamp: '2026-11-18T15-40-12',
+                title: session.title,
+                at: now - 3600000,
+                turns: 18,
+                reportChars: 2400,
+                recordings: ['video-interview-2026-11-18T14-10-02.webm'],
+                files: ['archive.json', 'report.md', 'transcript.jsonl', 'recordings'],
+                dir: 'D:\\DSH-REALTIME-INTERVIEW-ROOT\\archive\\' + session.id + '\\2026-11-18T15-40-12',
+              },
+            ],
+          }
+        }
         if (path === '/sessions') {
           // 空状态预设：一场都还没有。左栏与主区的「一句话 + 一个动作」
           // 只有在真的没有场次时才会渲染，不给它一档就永远截不到。
@@ -662,7 +733,8 @@ Nginx、Prometheus / Grafana、Kubernetes`
             ],
           }
         }
-        return state
+        // 状态也要进指纹：探针点了暂停/继续之后，轮询必须真的重渲染。
+        return { ...state, revision: `${state.revision}|st:${state.session.status}` }
       }
       if (path === '/resumes' || path.startsWith('/resumes?')) {
         // 简历库：三份名字要**认得出来**（公司 · 岗位），其中一份名字很长，

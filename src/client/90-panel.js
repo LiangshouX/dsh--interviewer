@@ -492,20 +492,27 @@
         }
       }, [notify, refreshAll])
 
-      /** 重置一场面试的记录：面试过程清零，材料与底稿保留。 */
-      const resetSession = useCallback(async (row, dropRecordings) => {
+      /**
+       * 重置一场面试的记录：**两种模式**（彻底清掉 / 留副本再重置）。
+       *
+       * 界面照抄 Host 返回的 `cleared` 数字，不自己编「清掉了什么」。
+       */
+      const resetSession = useCallback(async (row, mode) => {
         try {
-          const result = await apiPost(`sessions/${row.id}/reset`, { dropRecordings })
+          const result = await apiPost(`sessions/${row.id}/reset`, { mode })
           const cleared = result?.cleared ?? {}
           const parts = []
           if (cleared.turns > 0) parts.push(`${cleared.turns} 条转录`)
           if (cleared.report === true) parts.push('报告')
-          if (cleared.checklistProbed > 0) parts.push(`${cleared.checklistProbed} 个「问过」标记`)
           if (cleared.recordings > 0) parts.push(`${cleared.recordings} 个录音录像`)
+          if (cleared.checklistProbed > 0) parts.push(`${cleared.checklistProbed} 个「问过」标记`)
           setResetTarget(undefined)
+          const archived = typeof result?.archivedTo === 'string' ? result.archivedTo : ''
           notify(
-            '已重置',
-            `${parts.length > 0 ? `清掉 ${parts.join('、')}；` : ''}简历、JD、底稿都还在。`,
+            archived === '' ? '已彻底清掉这一轮' : '已留副本并重置',
+            archived === ''
+              ? `${parts.length > 0 ? `清掉 ${parts.join('、')}；` : ''}简历、JD、底稿都还在。`
+              : `${parts.length > 0 ? `清掉 ${parts.join('、')}；` : ''}副本在 ${archived}`,
             'ok',
           )
           refreshAll()
@@ -949,10 +956,19 @@
                 h('button', {
                   key: 'reset',
                   type: 'button',
-                  title: '清掉这场面试的记录（转录 / 报告 / 计时），保留简历、JD 与底稿',
+                  title: '清掉这一轮面试的记录（转录 / 报告 / 录音），保留简历、JD 与底稿',
                   style: menuItemStyle(),
                   onClick: () => { setRowMenu(undefined); setResetTarget(row) },
-                }, '重置记录…'),
+                }, '重置这一轮…'),
+                // 批量整理（删除 / 空场次 / 归档副本）——单行菜单里也留一个入口，
+                // 免得用户只记得「删这一场」而找不到「管理所有记录」。
+                h('button', {
+                  key: 'mgr',
+                  type: 'button',
+                  title: '管理面试记录：勾选删除、查看留副本的归档',
+                  style: menuItemStyle(),
+                  onClick: () => { setRowMenu(undefined); setManagerOpen(true) },
+                }, '管理所有记录…'),
                 h('button', {
                   key: 'arch',
                   type: 'button',
@@ -1303,109 +1319,139 @@
                 borderRight: 'none', borderBottom: `1px solid ${C.rule}`, background: C.surface3,
                 boxShadow: `inset 0 -1px 0 ${C.ruleSoft}`,
               }
-              : S.rail,
+              // 宽：**三段式**——表头固定、列表自己滚、管理入口固定贴底。
+              // 管理入口如果跟着列表滚，场次一多用户就再也看不见它
+              // （上一版就是把「清理」塞在表头的小字里，结果没人找到）。
+              : { ...S.rail, display: 'flex', flexDirection: 'column', overflow: 'hidden', gap: 8 },
           }, [
             h('div', {
               key: 'h',
               style: narrow
                 ? { display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }
-                : { display: 'flex', alignItems: 'center', gap: 8, padding: '2px 8px 10px' },
+                : { display: 'flex', alignItems: 'center', gap: 8, padding: '2px 8px 2px', flex: '0 0 auto' },
             }, [
               h(Meta, { key: 'l', tone: 'faint' }, '面试场次'),
               // 归档只是「收起来」——收起来之后得有个地方把它再翻出来。
-              // 清理是另一件事：勾选一批场次删掉，或一键收拾空场次。
-              rows.length === 0
-                ? null
-                : h('div', {
+              archivedRows.length > 0
+                ? h('div', {
                   key: 'acts',
-                  style: {
-                    marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto',
-                  },
+                  style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto' },
                 }, [
                   h(IconBtn, {
-                    key: 'mgr',
-                    label: '记录清理',
-                    title: '记录清理：勾选要删的场次，或一键清理空场次',
-                    style: { minWidth: 0, minHeight: 0, padding: '2px 8px' },
-                    onClick: () => setManagerOpen(true),
-                  }, '清理'),
-                  archivedRows.length > 0
-                    ? h(IconBtn, {
-                      key: 'a',
-                      label: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
-                      title: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
-                      style: { flex: '0 0 auto', minWidth: 0, minHeight: 0, padding: '2px 8px' },
-                      onClick: () => setShowArchived(value => !value),
-                    }, showArchived ? '收起' : `归档 ${archivedRows.length}`)
-                    : null,
-                ]),
+                    key: 'a',
+                    label: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
+                    title: showArchived ? '收起已归档的场次' : `显示已归档的 ${archivedRows.length} 场`,
+                    style: { flex: '0 0 auto', minWidth: 0, minHeight: 0, padding: '2px 8px' },
+                    onClick: () => setShowArchived(value => !value),
+                  }, showArchived ? '收起' : `归档 ${archivedRows.length}`),
+                ])
+                : null,
             ]),
-            // 空状态：一句话 + 一个动作（Empty 自带虚线框，不写说明书）。
-            visibleRows.length === 0
-              ? h('div', { key: 'e', style: { paddingTop: 4 } }, [
-                h(Empty, {
-                  key: 'empty',
-                  title: '还没有面试场次',
-                  action: h('button', {
-                    key: 'new',
-                    type: 'button',
-                    style: S.btn('primary', false),
-                    onClick: () => guardRun('新建面试', createSession),
-                  }, '新建面试'),
-                }),
-              ])
-              : narrow
-                // 窄：一条横向的场次带。分组在这种形态里没有意义
-                // （一行放不下一个组头），所以只平铺。
-                ? visibleRows.map(row => sessionCard(row))
-                // 宽：按公司分组。组头 = 公司名 + 场数，可点开/收起。
-                // 行内的岗位名放第二行小字——组头短了，行才认得出。
-                : groups.map(group => {
-                  const collapsed = collapsedGroups[group.key] === true
-                  return h('div', { key: group.key, style: { marginBottom: 12 } }, [
-                    h('button', {
-                      key: 'gh',
+            // 列表：只有这一段滚（窄布局里它是横向场次带，不滚纵向）。
+            h('div', {
+              key: 'list',
+              style: narrow
+                ? { display: 'flex', alignItems: 'stretch', gap: 8, flex: '0 0 auto', minWidth: 0 }
+                : { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', paddingRight: 2 },
+            }, [
+              // 空状态：一句话 + 一个动作（Empty 自带虚线框，不写说明书）。
+              visibleRows.length === 0
+                ? h('div', { key: 'e', style: { paddingTop: 4 } }, [
+                  h(Empty, {
+                    key: 'empty',
+                    title: '还没有面试场次',
+                    action: h('button', {
+                      key: 'new',
                       type: 'button',
-                      'aria-expanded': !collapsed,
-                      title: collapsed ? `展开「${group.label}」` : `收起「${group.label}」`,
-                      style: {
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        width: '100%', padding: '3px 6px 6px', minWidth: 0,
-                        background: 'transparent', border: 'none', cursor: 'pointer',
-                        fontFamily: F.ui, textAlign: 'left',
-                      },
-                      onClick: () => setCollapsedGroups(previous => ({
-                        ...previous,
-                        [group.key]: !collapsed,
-                      })),
-                    }, [
-                      h('span', {
-                        key: 'chev',
-                        'aria-hidden': 'true',
+                      style: S.btn('primary', false),
+                      onClick: () => guardRun('新建面试', createSession),
+                    }, '新建面试'),
+                  }),
+                ])
+                : narrow
+                  // 窄：一条横向的场次带。分组在这种形态里没有意义
+                  // （一行放不下一个组头），所以只平铺。
+                  ? visibleRows.map(row => sessionCard(row))
+                  // 宽：按公司分组。组头 = 公司名 + 场数，可点开/收起。
+                  // 行内的岗位名放第二行小字——组头短了，行才认得出。
+                  : groups.map(group => {
+                    const collapsed = collapsedGroups[group.key] === true
+                    return h('div', { key: group.key, style: { marginBottom: 12 } }, [
+                      h('button', {
+                        key: 'gh',
+                        type: 'button',
+                        'aria-expanded': !collapsed,
+                        title: collapsed ? `展开「${group.label}」` : `收起「${group.label}」`,
                         style: {
-                          display: 'inline-block', width: 0, height: 0, flex: '0 0 auto',
-                          borderLeft: '4px solid transparent', borderRight: '4px solid transparent',
-                          borderTop: `5px solid ${C.boneFaint}`,
-                          transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                          transition: 'transform 160ms var(--iv-ease)',
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          width: '100%', padding: '3px 6px 6px', minWidth: 0,
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          fontFamily: F.ui, textAlign: 'left',
                         },
-                      }),
-                      h('span', {
-                        key: 'n',
-                        style: {
-                          ...TYPE.sub, color: C.boneDim, minWidth: 0,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        },
-                      }, group.label),
-                      h(Meta, {
-                        key: 'c',
-                        tone: 'faint',
-                        style: { marginLeft: 'auto', flex: '0 0 auto' },
-                      }, `${group.items.length} 场`),
-                    ]),
-                    collapsed ? null : group.items.map(row => sessionRow(row)),
-                  ])
-                }),
+                        onClick: () => setCollapsedGroups(previous => ({
+                          ...previous,
+                          [group.key]: !collapsed,
+                        })),
+                      }, [
+                        h('span', {
+                          key: 'chev',
+                          'aria-hidden': 'true',
+                          style: {
+                            display: 'inline-block', width: 0, height: 0, flex: '0 0 auto',
+                            borderLeft: '4px solid transparent', borderRight: '4px solid transparent',
+                            borderTop: `5px solid ${C.boneFaint}`,
+                            transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                            transition: 'transform 160ms var(--iv-ease)',
+                          },
+                        }),
+                        h('span', {
+                          key: 'n',
+                          style: {
+                            ...TYPE.sub, color: C.boneDim, minWidth: 0,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          },
+                        }, group.label),
+                        h(Meta, {
+                          key: 'c',
+                          tone: 'faint',
+                          style: { marginLeft: 'auto', flex: '0 0 auto' },
+                        }, `${group.items.length} 场`),
+                      ]),
+                      collapsed ? null : group.items.map(row => sessionRow(row)),
+                    ])
+                  }),
+            ]),
+            // **管理面试记录：常驻在左栏底部。**
+            //
+            // 上一版把它做成表头里一枚小「清理」，用户根本没看见——
+            // 「找不到」等于「没做」。所以这里给足位置：整行按钮 +
+            // 说明它管什么（删除 / 重置 / 留副本的归档）。
+            narrow
+              ? h('button', {
+                key: 'mgr-narrow',
+                type: 'button',
+                title: '管理面试记录：勾选删除、重置、查看归档副本',
+                style: { ...S.btn(false, false), flex: '0 0 auto', padding: '6px 10px' },
+                onClick: () => setManagerOpen(true),
+              }, '记录…')
+              : h('button', {
+                key: 'mgr',
+                type: 'button',
+                'data-iv-manage': '1',
+                title: '管理面试记录：勾选删除、重置这一轮、查看留副本的归档',
+                style: {
+                  flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8,
+                  width: '100%', padding: '9px 10px', borderRadius: RADIUS.sm,
+                  background: 'transparent', border: `1px solid ${C.ruleSoft}`,
+                  color: C.boneDim, cursor: 'pointer', fontFamily: F.ui,
+                  fontSize: TYPE.sub.fontSize, textAlign: 'left',
+                },
+                onClick: () => setManagerOpen(true),
+              }, [
+                h('span', { key: 'g', 'aria-hidden': true, style: { fontFamily: F.mono, fontSize: 12 } }, '⌦'),
+                h('span', { key: 't', style: { flex: '1 1 auto', minWidth: 0 } }, '管理面试记录'),
+                h(Meta, { key: 'c', tone: 'faint' }, `${rows.length} 场`),
+              ]),
           ]),
 
           // 主区
@@ -1433,6 +1479,8 @@
                 session,
                 config,
                 notify,
+                // 「管理面试记录」在设置页也留一个入口（左栏底部是主入口）。
+                onManageRecords: () => setManagerOpen(true),
                 // 主题的开关在面板这一层（它要驱动整页的样式变量），
                 // 设置页只是它的一个面板——所以状态通过 props 透传。
                 theme,
@@ -1509,7 +1557,7 @@
             key: 'reset',
             row: resetTarget,
             onCancel: () => setResetTarget(undefined),
-            onConfirm: drop => { void resetSession(resetTarget, drop) },
+            onConfirm: mode => { void resetSession(resetTarget, mode) },
           }),
       ])
     }

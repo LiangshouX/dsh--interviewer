@@ -683,6 +683,136 @@
     }
 
     /**
+     * 面试全程的连续录制：**每 5 秒把一块数据追加到 Host 的同一个文件里**。
+     *
+     * 为什么不沿用 `useRecorder`（整段录完再上传）：一小时 720p 的视频有几百 MB，
+     * 先在浏览器内存里攒着、最后一次性 POST 上来——body 上限 8 MB，而且违背
+     * AGENTS §11「大对象不进内存常驻」。分块追加的代价只是每 5 秒一次小请求。
+     *
+     * **崩了也不全丢。** 已经上传的块就在盘上（名字在 `recording/start` 时就定了），
+     * 只是可能缺最后几秒——比「什么都没留下」好得多。
+     *
+     * @param {{stream?: MediaStream, sessionId?: string}} options
+     */
+    function useChunkRecorder(options = {}) {
+      const [state, setState] = useState({ recording: false, busy: false, error: undefined, bytes: 0 })
+      const recorderRef = useRef(undefined)
+      const nameRef = useRef('')
+      const queueRef = useRef(Promise.resolve())
+      const bytesRef = useRef(0)
+      const sessionRef = useRef(options.sessionId)
+      sessionRef.current = options.sessionId
+      const streamRef = useRef(options.stream)
+      streamRef.current = options.stream
+      // 卸载时用：异步收尾不能依赖 props 的最新值。
+      const stoppedRef = useRef(true)
+
+      /**
+       * @param {MediaStream} [streamOverride] 刚申请到的流（`media.stream` 这一帧
+       *   还是旧值，不能靠 state 兜进来）
+       * @returns {Promise<true|string>} true = 开始录了；字符串 = 为什么录不了
+       */
+      const start = useCallback(async streamOverride => {
+        if (recorderRef.current !== undefined) return true
+        const stream = streamOverride ?? streamRef.current
+        const sessionId = sessionRef.current
+        if (stream === undefined || typeof MediaRecorder === 'undefined') {
+          const reason = '这个环境不支持录制（没有 MediaRecorder）。'
+          setState({ recording: false, busy: false, error: reason, bytes: 0 })
+          return reason
+        }
+        if (typeof sessionId !== 'string' || sessionId === '') return '还没有选中的面试场次。'
+        setState(previous => ({ ...previous, busy: true, error: undefined }))
+        try {
+          const hasVideo = typeof stream.getVideoTracks === 'function' && stream.getVideoTracks().length > 0
+          const begun = await apiPost(`sessions/${sessionId}/recording/start`, {
+            kind: hasVideo ? 'video' : 'audio',
+            tag: 'interview',
+          })
+          const name = String(begun?.name ?? '')
+          if (name === '') throw new Error('宿主没有返回录像文件名')
+          const mimeType = pickMimeType(stream)
+          const recorder = mimeType === undefined ? new MediaRecorder(stream) : new MediaRecorder(stream, { mimeType })
+          nameRef.current = name
+          bytesRef.current = 0
+          queueRef.current = Promise.resolve()
+          recorder.ondataavailable = event => {
+            if (event.data === undefined || event.data.size === 0) return
+            const blob = event.data
+            // **串行上传**：并行 append 会让块顺序错乱，WebM 直接播不出来。
+            queueRef.current = queueRef.current
+              .then(async () => {
+                const dataBase64 = await blobToBase64(blob)
+                const result = await apiPost(`sessions/${sessionId}/recording/chunk`, {
+                  name: nameRef.current,
+                  dataBase64,
+                })
+                bytesRef.current += Number(result?.bytes ?? 0)
+              })
+              .catch(() => { /* 丢一块不致命：后面继续传，文件仍可播 */ })
+          }
+          recorder.start(5000)
+          recorderRef.current = recorder
+          stoppedRef.current = false
+          setState({ recording: true, busy: false, error: undefined, bytes: 0 })
+          return true
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error)
+          setState({ recording: false, busy: false, error: reason, bytes: 0 })
+          return reason
+        }
+      }, [])
+
+      /**
+       * 收尾：等最后一块落盘，回 `{ name, bytes }`。
+       * @returns {Promise<{name: string, bytes: number}|undefined>}
+       */
+      const stop = useCallback(async () => {
+        const recorder = recorderRef.current
+        if (recorder === undefined) return undefined
+        stoppedRef.current = true
+        // 先让 MediaRecorder 吐出最后一块（在 Promise 执行器里同步调用 stop）。
+        await new Promise(resolve => {
+          recorder.onstop = () => resolve(undefined)
+          try { recorder.stop() } catch { resolve(undefined) }
+        })
+        recorderRef.current = undefined
+        await queueRef.current
+        const name = nameRef.current
+        const sessionId = sessionRef.current
+        nameRef.current = ''
+        if (typeof sessionId !== 'string' || sessionId === '' || name === '') {
+          setState({ recording: false, busy: false, error: undefined, bytes: bytesRef.current })
+          return undefined
+        }
+        try {
+          const result = await apiPost(`sessions/${sessionId}/recording/finish`, { name })
+          const bytes = Number(result?.bytes ?? bytesRef.current)
+          setState({ recording: false, busy: false, error: undefined, bytes })
+          return { name, bytes, empty: bytes === 0 }
+        } catch (error) {
+          setState(previous => ({
+            ...previous,
+            recording: false,
+            busy: false,
+            error: error instanceof Error ? error.message : String(error),
+          }))
+          return { name, bytes: bytesRef.current }
+        }
+      }, [])
+
+      useEffect(() => () => {
+        // 卸载：能停就停（上传的块已经落盘，收尾请求来不及也没关系）。
+        const recorder = recorderRef.current
+        if (recorder !== undefined && !stoppedRef.current) {
+          try { recorder.stop() } catch { /* 已停 */ }
+        }
+      }, [])
+
+      return { ...state, start, stop }
+    }
+
+    /**
      * The best mime type this browser supports for MediaRecorder.
      *
      * **要按流里有没有视频轨来挑。** 只有麦克风的时候还去用

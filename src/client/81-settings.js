@@ -835,14 +835,21 @@ function SettingsView(props) {
     ]),
 
     section('privacy', '录像与录音', [
-      checkbox('recordVideo', '允许录像（关掉 = 面板不出现录像入口）'),
-      checkbox('recordAudio', '允许录音（关掉 = 面板不出现录音入口）'),
+      checkbox('recordVideo', '允许录像（面试开始时自动开，暂停/结束自动收尾保存）'),
+      checkbox('recordAudio', '允许录音（同上；桌面端宿主摄像头出的画面是静音的，声音由这一路录）'),
       actions([
         h('button', {
           key: 'save',
           style: S.btn('primary', busy === 'privacy'),
           onClick: () => save({ recordVideo: form.recordVideo, recordAudio: form.recordAudio }, 'privacy'),
         }, busy === 'privacy' ? '保存中…' : '保存隐私设置'),
+        // 删除 / 重置 / 归档副本都收在「管理面试记录」里，设置页留一个入口。
+        h('button', {
+          key: 'records',
+          style: S.btn(false, false),
+          title: '管理面试记录：勾选删除、重置这一轮、查看留副本的归档',
+          onClick: () => props.onManageRecords?.(),
+        }, '管理面试记录…'),
       ]),
     ]),
 

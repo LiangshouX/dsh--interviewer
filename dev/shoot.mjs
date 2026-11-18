@@ -119,6 +119,10 @@ const PRESETS = [
   // **面试中右栏的四个「？」。** 要宽到右栏真的在右边（窄了会上下堆叠），
   // 否则点开的弹层在首屏之外，截出来什么都看不见。
   { name: 'live-hints', tab: 1, media: 'granted', width: 1600, height: 1000, hints: true },
+  // 继续之后**录制在跑**的样子：REC 灯 + 「● 正在录制 · 自动存进本场卷宗」。
+  // `media: 'none'`：由 `resume` 交互自己点「继续面试」（假设备已由启动参数放行），
+  // 否则 requestMediaPermission 先点一次，第二次就点不到了。
+  { name: 'live-recording', tab: 1, media: 'none', width: 1007, height: 704, resume: true },
   // 已结束的场次：舞台给「续接板」（转录/底稿/计时都还在）。
   // `media: 'none'` = 不点器材按钮（已结束的场次没有「继续面试」可点，
   // 点右栏那个会把滚动容器推歪，截出来的就不是首屏了）。
@@ -131,6 +135,8 @@ const PRESETS = [
   { name: 'records', tab: 0, media: 'granted', width: 1007, height: 704, manager: true },
   { name: 'records-dark', tab: 0, media: 'granted', width: 1007, height: 704, theme: 'dark', manager: true },
   { name: 'reset-dialog', tab: 0, media: 'granted', width: 1007, height: 704, resetDialog: true },
+  // 重置的两种模式：彻底清掉 / 留副本再重置（副本落到工作区 archive/）。
+  { name: 'reset-archive', tab: 0, media: 'granted', width: 1007, height: 704, resetDialog: true, resetArchive: true },
 ]
 
 /**
@@ -161,16 +167,27 @@ async function interact(page, preset, errors) {
       await page.waitForTimeout(400)
     }
     if (preset.manager === true) {
-      // 「记录清理」在左栏场次表头。它是弹层，不依赖当前页签。
-      await page.getByRole('button', { name: '记录清理', exact: true }).first().click({ timeout: 5000 })
+      // 「管理面试记录」现在常驻在左栏底部（整行按钮，不再是表头小字）。
+      await page.getByRole('button', { name: /管理面试记录/ }).first().click({ timeout: 5000 })
       await page.waitForTimeout(500)
     }
+    if (preset.resume === true) {
+      // 恢复板 → 继续面试：走一遍「设备 + 录制 + 朗读」的运行时，
+      // 等第一块录像上传，再把「正在录制」截下来。
+      await page.getByRole('button', { name: '继续面试', exact: true }).first().click({ timeout: 5000 })
+      await page.waitForTimeout(6500)
+    }
     if (preset.resetDialog === true) {
-      // 场次行尾的「⋯」→「重置记录…」。
+      // 场次行尾的「⋯」→「重置这一轮…」。
       await page.getByRole('button', { name: '场次操作', exact: true }).first().click({ timeout: 5000 })
       await page.waitForTimeout(200)
-      await page.getByRole('button', { name: /重置记录/ }).first().click({ timeout: 5000 })
+      await page.getByRole('button', { name: /重置这一轮/ }).first().click({ timeout: 5000 })
       await page.waitForTimeout(400)
+    }
+    if (preset.resetArchive === true) {
+      // 留副本模式：切到第二项再截。
+      await page.getByRole('radio').nth(1).check({ timeout: 5000 })
+      await page.waitForTimeout(300)
     }
     if (preset.toast === true) {
       // 身份区的「保存」是最稳的一次性动作：点完就会出一条 ok 提醒。
