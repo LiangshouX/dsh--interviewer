@@ -106,31 +106,70 @@ export function registerTools(ctx, service) {
     ),
     tool(
       'interview_agent_session',
-      '读（必要时建）面试工作区里的助手会话：返回会话 id 与它所属的工作区路径。用来确认派活不会落到别的项目。',
-      {},
-      async () => service.ensureAgentSession(),
+      '读（必要时建）面试工作区里的助手会话：返回会话 id 与它所属的工作区路径。给 sessionId 时返回**那一场面试专属**的助手会话（派活寻址用的就是它）；省略时返回全局诊断键。',
+      {
+        sessionId: sessionProperty,
+      },
+      async args => service.ensureAgentSession(
+        typeof args.sessionId === 'string' && args.sessionId.trim() !== '' ? args.sessionId.trim() : undefined,
+      ),
     ),
     tool(
       'interview_request_agent',
-      '把一件活派给面试工作区的助手会话：fetch-jd（抓 JD）、checklist（出面试官底稿）或 report（写事后分析报告）。默认在面试工作区里复用/新建会话，不再用"最近会话"。',
+      '把一件活派给面试工作区的助手会话：fetch-jd（抓 JD）、checklist（出面试官底稿）、report（写事后分析报告）、start（开场）、continue（候选人答完继续）、resume（暂停后继续）。start/continue/resume 正常由面板自动联动，这里是诊断与手动兜底入口。',
       {
         sessionId: sessionProperty,
-        task: { type: 'string', description: 'fetch-jd、checklist 或 report' },
+        task: { type: 'string', description: 'fetch-jd / checklist / report / start / continue / resume' },
         url: { type: 'string', description: 'fetch-jd 时的岗位链接。' },
-        hostSessionId: { type: 'string', description: '指定宿主会话（可选；省略则用面试工作区的助手会话）。' },
+        hostSessionId: { type: 'string', description: '指定宿主会话（可选；省略则用这场面试专属的助手会话）。' },
       },
       async args => {
         const task = String(args.task ?? '')
+        const sessionId = String(args.sessionId ?? '')
         if (task === 'fetch-jd') {
-          return service.requestAgentJd(String(args.sessionId ?? ''), String(args.url ?? ''), args.hostSessionId)
+          return service.requestAgentJd(sessionId, String(args.url ?? ''), args.hostSessionId)
         }
         if (task === 'checklist') {
-          return service.requestAgentChecklist(String(args.sessionId ?? ''), args.hostSessionId)
+          return service.requestAgentChecklist(sessionId, args.hostSessionId)
         }
         if (task === 'report') {
-          return service.requestAgentReport(String(args.sessionId ?? ''), args.hostSessionId)
+          return service.requestAgentReport(sessionId, args.hostSessionId)
         }
-        throw new Error('task 只能是 fetch-jd 或 checklist')
+        if (task === 'start') {
+          return service.requestAgentStart(await resolveSession(service, args.sessionId))
+        }
+        if (task === 'continue') {
+          // 不带回答原文时自动取转录里最后一条 candidate 回答。
+          return service.requestAgentContinue(await resolveSession(service, args.sessionId))
+        }
+        if (task === 'resume') {
+          return service.requestAgentResume(await resolveSession(service, args.sessionId))
+        }
+        throw new Error('task 只能是 fetch-jd / checklist / report / start / continue / resume')
+      },
+    ),
+    tool(
+      'interview_pause',
+      '暂停一场进行中的面试：状态置 paused、计时停走（暂停时长不计入 durationMs）、转录记 system 行。面板会释放摄像头/麦克风（指示灯熄灭）。用户在对话里说「先停一下」时用它。',
+      {
+        sessionId: sessionProperty,
+      },
+      async args => {
+        const sessionId = await resolveSession(service, args.sessionId)
+        const session = await service.pauseSession(sessionId)
+        return { sessionId, status: session.status, pausedAt: session.pausedAt }
+      },
+    ),
+    tool(
+      'interview_resume',
+      '继续一场暂停中的面试：累计暂停时长、状态回 running、转录记 system 行，并自动派活让助手带着完整上下文续接提问。',
+      {
+        sessionId: sessionProperty,
+      },
+      async args => {
+        const sessionId = await resolveSession(service, args.sessionId)
+        const session = await service.resumeSession(sessionId)
+        return { sessionId, status: session.status, pausedMs: session.pausedMs }
       },
     ),
     tool(

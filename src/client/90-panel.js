@@ -372,9 +372,15 @@
         if (selected === undefined && rows.length > 0) setSelected(rows[0].id)
       }, [sessionsPoll.data, selected])
 
+      /**
+       * 暂停是**静止态**（docs/TURN-TAKING.md §6.3）：高频轮询降为低频，
+       * 空闲轮询不许引发重渲染（§11 红线）。用 state 而不是 ref——
+       * interval 是渲染期参数，ref 变了不会触发重新注册。
+       */
+      const [livePaused, setLivePaused] = useState(false)
       const sessionPoll = usePoll(
         () => (selected === undefined ? Promise.resolve(undefined) : apiGet(`sessions/${selected}`)),
-        selected === undefined ? null : (tab === 'live' ? POLL_MS : 6000),
+        selected === undefined ? null : (tab === 'live' && !livePaused ? POLL_MS : 6000),
         [selected],
         // **内容没变就不重渲染**——面试中每 1.5 秒轮询一次，
         // 每次都重建整个面板（含几百行转录）就是卡顿的来源。
@@ -382,6 +388,11 @@
       )
 
       const session = sessionPoll.data
+
+      useEffect(() => {
+        const pausedNow = session?.session?.status === 'paused'
+        setLivePaused(previous => (previous === pausedNow ? previous : pausedNow))
+      }, [session])
 
       /** 带保护的跳转：设备开着且没勾「不再提醒」时先弹确认。 */
       const guardRun = useCallback((label, action) => {
@@ -410,7 +421,10 @@
       const refreshAll = useCallback(() => {
         void sessionsPoll.refresh()
         void sessionPoll.refresh()
-      }, [sessionsPoll, sessionPoll])
+        // Live 页的「自动/手动」快捷切换会写 settings，而面板读的是
+        // config 端点的有效值——一并刷新，切换才「即时生效」。
+        void configPoll.refresh()
+      }, [sessionsPoll, sessionPoll, configPoll])
 
       /** 归档/取回一场面试。 */
       const archiveRow = useCallback(async row => {

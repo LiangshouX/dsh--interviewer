@@ -147,7 +147,18 @@ export const SETTING_SPECS = {
   // 面试间保护
   guardEnabled: { kind: 'boolean' },
   guardQuiet: { kind: 'boolean' },
-  // 上一次派活给助手时用的宿主会话（下次复用，避免刷屏）
+  // 话轮（docs/TURN-TAKING.md §4）：
+  //   answerMode        自动/手动总开关。**只管「话轮结束判定 + 自动提交」**，
+  //                     不管派活——manual 下手动发送同样唤醒助手。
+  //                     默认 manual：与升级前行为一致，auto 的判定质量
+  //                     依赖真实房间声学下的 VAD 表现，验证稳定前不默认开。
+  //   turnEndSilenceMs  第二层静音阈值（450ms 的**转写分段**阈值不动，
+  //                     这是**话轮结束**判定，仅 auto 生效）。
+  answerMode: { kind: 'enum', values: ['manual', 'auto'] },
+  turnEndSilenceMs: { kind: 'number', min: 800, max: 6000 },
+  // 最近一次 create 用过的宿主助手会话。**已退役为诊断信息**：
+  // 派活寻址改用 per-session 的 session.json.agentSessionId（§6.2），
+  // 全局键撑不住「精确找回这一场的助手会话」的语义。
   agentSessionId: { kind: 'string' },
 }
 
@@ -269,6 +280,8 @@ export const BUNDLE_DEFAULTS = {
   ttsRate: 1.0,
   recordVideo: true,
   recordAudio: true,
+  answerMode: 'manual',
+  turnEndSilenceMs: 2000,
   ffmpegPath: '',
   chromiumPath: '',
 }
@@ -349,6 +362,10 @@ export function resolveConfig(raw) {
     ttsRate: number(config.ttsRate, 0.5, 2, 1),
     recordVideo: flag(config.recordVideo, true),
     recordAudio: flag(config.recordAudio, true),
+    // 话轮（docs/TURN-TAKING.md §4）：默认 manual——升级不改变任何用户
+    // 已适应的节奏；auto 稳定后翻默认只是一行改动。
+    answerMode: oneOf(config.answerMode, ['manual', 'auto'], 'manual'),
+    turnEndSilenceMs: number(config.turnEndSilenceMs, 800, 6000, 2000),
     // ffmpeg 的位置。留空 = 自动找（DSH_FFMPEG_PATH → PATH → 常见安装位置）。
     //
     // **为什么要有这个。** 摄像头是 Host 侧用 ffmpeg 采的（桌面端的 Electron

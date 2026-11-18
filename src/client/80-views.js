@@ -1512,6 +1512,42 @@
       const [acquireStage, setAcquireStage] = useState(undefined)
       const lastQuestionRef = useRef('')
 
+      // ── 话轮状态机（docs/TURN-TAKING.md §3）─────────────────────────────
+      //
+      // 唯一真源在客户端（它拥有麦克风/VAD/TTS 的实时状态）；Host 只持久化
+      // 粗粒度会话状态（running/paused），不镜像细粒度话轮相态。
+      const sessionId = session?.session?.id
+      const status = session?.session?.status
+      const running = status === 'running'
+      const paused = status === 'paused'
+      /** idle | questioning（播报提问）| listening | submitting（反悔窗口）| thinking */
+      const [turnPhase, setTurnPhase] = useState('idle')
+      const turnPhaseRef = useRef(turnPhase)
+      turnPhaseRef.current = turnPhase
+      // 自动/手动：本地覆盖立即生效（Live 页快捷切换），异步写 settings（§4.3）。
+      const [modeOverride, setModeOverride] = useState(undefined)
+      // 自动链路失败只降级**本会话**、不偷改用户设置（§4.4）；恢复要显式再点「自动」。
+      const [autoDegraded, setAutoDegraded] = useState(false)
+      // 反悔窗口倒计时（§3.2，固定 2s）：{deadline, remaining}。
+      const [countdown, setCountdown] = useState(undefined)
+      const countdownRef = useRef(undefined)
+      countdownRef.current = countdown
+      const countdownTimerRef = useRef(undefined)
+      // 长沉默的提示/派活结果（§3.3）。
+      const [longSilence, setLongSilence] = useState(undefined)
+      const answerRef = useRef(answer)
+      answerRef.current = answer
+      /** 倒计时到点要调「当前这一版」submitAnswer：用 ref，避免定时器拿旧闭包。 */
+      const submitRef = useRef(undefined)
+      const autoStartTriedRef = useRef(false)
+      const spokeRef = useRef(false)
+      const speakingRef = useRef(speaking)
+      speakingRef.current = speaking
+      const ttsRef = useRef(tts)
+      ttsRef.current = tts
+      const configRef = useRef(config)
+      configRef.current = config
+
       const answerSegmentsRef = useRef([])
       /** 识别到的一句追加进草稿（用户可以改，所以只追加不覆盖）。 */
       const appendRecognized = useCallback((text, meta) => {
@@ -1520,14 +1556,103 @@
         if (meta?.segment !== undefined) {
           answerSegmentsRef.current = [...answerSegmentsRef.current, meta.segment]
         }
+        setLongSilence(undefined)
         setAnswer(previous => `${previous}${previous.trim() === '' ? '' : ' '}${text.trim()}`)
       }, [])
 
-      const webAsr = useAsr(appendRecognized)
-      const segmentAsr = useSegmentAsr(appendRecognized, { language: voiceStatus.data?.asr?.language ?? 'zh' })
       const asrMode = voiceStatus.data?.asr?.mode ?? 'browser'
       // 宿主/服务端模式用分段识别（它们只收整段录音）；浏览器模式用 Web Speech。
       const serverAsr = asrMode === 'host' || asrMode === 'server'
+
+      // ── 自动 / 手动（§4）：开关只管「话轮结束判定 + 自动提交」，不管派活 ──
+      //
+      // manual 下手动点「提交回答」同样唤醒助手（P0 联动在 Host 的
+      // appendTurn 里，永远生效）——手动是完整平行主线，不是降级品。
+      const answerModeSetting = modeOverride ?? config?.answerMode ?? 'manual'
+      const autoDetectWanted = answerModeSetting === 'auto' && !autoDegraded
+      // 判定依赖分段识别的 VAD 时间线与「转写完成」信号：浏览器识别下不可用（§4.4）。
+      const autoDetectAvailable = serverAsr
+      const autoDetectActive = running && !paused && autoDetectWanted && autoDetectAvailable
+      const turnEndSilenceMs = Number.isFinite(config?.turnEndSilenceMs) ? config.turnEndSilenceMs : 2000
+
+      /** 取消反悔窗口。reason='edit' = 用户动了草稿：本会话切手动（§3.2）。 */
+      const cancelCountdown = useCallback(reason => {
+        if (countdownRef.current === undefined) return
+        if (countdownTimerRef.current !== undefined && typeof window !== 'undefined') {
+          window.clearInterval(countdownTimerRef.current)
+        }
+        countdownTimerRef.current = undefined
+        setCountdown(undefined)
+        if (reason === 'edit') setModeOverride('manual')
+        if (turnPhaseRef.current === 'submitting') setTurnPhase('listening')
+      }, [])
+
+      /** 卸载清理：不留悬空的倒计时定时器。 */
+      useEffect(() => () => {
+        if (countdownTimerRef.current !== undefined && typeof window !== 'undefined') {
+          window.clearInterval(countdownTimerRef.current)
+        }
+      }, [])
+
+      /** 话轮结束判定 → 进 2 秒反悔窗口（自动提交 ≠ 静默发送，§3.2）。 */
+      const scheduleCountdown = useCallback(() => {
+        if (typeof window === 'undefined') return
+        if (turnPhaseRef.current !== 'listening') return
+        // 空草稿永远不自动提交（那是长沉默的路，不是答完）。
+        if (answerRef.current.trim() === '') return
+        const deadline = Date.now() + 2000
+        setTurnPhase('submitting')
+        setCountdown({ deadline, remaining: 2000 })
+        countdownTimerRef.current = window.setInterval(() => {
+          const remaining = deadline - Date.now()
+          if (remaining <= 0) {
+            if (countdownTimerRef.current !== undefined) window.clearInterval(countdownTimerRef.current)
+            countdownTimerRef.current = undefined
+            setCountdown(undefined)
+            // 走**现有** submitAnswer 同一条路（同一个 service 方法，§6 纪律）。
+            void submitRef.current?.(true)
+            return
+          }
+          setCountdown({ deadline, remaining })
+        }, 100)
+      }, [])
+
+      const webAsr = useAsr(appendRecognized)
+      const segmentAsr = useSegmentAsr(appendRecognized, {
+        language: voiceStatus.data?.asr?.language ?? 'zh',
+        // 双层静音（§3.1）：450ms 转写分段照旧不动；这里是第二层话轮判定，
+        // 共用同一条 VAD 帧时间线。armed/judge 每帧从 ref 读最新值。
+        turnEnd: {
+          // submitting 期间也要听见「重新开口」（取消倒计时），所以 armed 覆盖它；
+          // 与模式无关——长沉默观察在 manual 下也要工作（只提示，不派活）。
+          armed: running && !paused && (turnPhase === 'listening' || turnPhase === 'submitting'),
+          // 半双工门控：播报提问期间不判定（扬声器回声）；thinking 期间不判定
+          // （一次回答只派活一次——新问题到达前，说的话进草稿不自动提交）。
+          judge: autoDetectActive && turnPhase === 'listening' && !tts.speaking,
+          listen: running && !paused && turnPhase === 'listening',
+          silenceMs: turnEndSilenceMs,
+        },
+        onVoiceStart: () => {
+          setLongSilence(undefined)
+          if (turnPhaseRef.current === 'submitting') cancelCountdown()
+        },
+        onTurnEnd: () => { scheduleCountdown() },
+        onLongSilence: info => {
+          // 长沉默 ≠ 答完（§3.3）：auto 派**事实**给助手换小切口重问；
+          // manual 只显示提示，不派活。
+          const seconds = Number(info?.seconds ?? 0)
+          if (!autoDetectActive) {
+            setLongSilence({ seconds, dispatched: false })
+            return
+          }
+          void apiPost(`sessions/${sessionId}/silence`, { seconds })
+            .then(() => { setLongSilence({ seconds, dispatched: true }) })
+            .catch(failure => {
+              setLongSilence({ seconds, dispatched: false })
+              notify('长沉默没派出去', failure instanceof Error ? failure.message : String(failure), 'error')
+            })
+        },
+      })
       const asr = serverAsr ? segmentAsr : webAsr
 
       /** 让宿主开始准备它的语音模型（首次要下载）。 */
@@ -1586,7 +1711,16 @@
         if (config?.ttsProvider !== 'none') void speakLine(lastQuestion.text, { rate: config?.ttsRate ?? 1 })
       }, [lastQuestion, speaking, speakLine, config?.ttsProvider, config?.ttsRate])
 
-      const submitAnswer = useCallback(async () => {
+      /**
+       * 提交回答 —— **手动点按钮与自动倒计时走的是这同一个函数**。
+       *
+       * Host 端 appendTurn 收到 `meta.source:'panel'` 的 candidate 行且会话
+       * running 时，会异步派活唤醒助手出下一题（TURN-TAKING §5.1）——
+       * 派活与自动/手动开关无关，manual 模式下这条链路同样生效。
+       *
+       * @param {boolean} [auto] true = 反悔窗口倒计时到点的自动提交
+       */
+      const submitAnswer = useCallback(async (auto = false) => {
         const text = answer.trim()
         if (text === '') return
         const segments = answerSegmentsRef.current
@@ -1595,16 +1729,35 @@
             role: 'candidate',
             text,
             // 语流只上报**原始测量**：Host 端统一算指标（单一实现）。
-            meta: { source: 'panel', ...(segments.length > 0 ? { fluency: { segments } } : {}) },
+            // 判定与语流测量共用同一条 VAD 时间线，自动提交一点数据不少（§3.1）。
+            meta: {
+              source: 'panel',
+              ...(auto === true ? { auto: true } : {}),
+              ...(segments.length > 0 ? { fluency: { segments } } : {}),
+            },
           })
           answerSegmentsRef.current = []
           setAnswer('')
+          setLongSilence(undefined)
+          // 助手正在生成下一问：进入 thinking（舞台显示状态，§3.4）。
+          setTurnPhase('thinking')
           onChanged()
-          notify('回答已记录', 'ok')
+          if (auto === true) {
+            notify('已自动提交', '有补充或修正？接着说或打字，再手动提交一次即可。', 'ok')
+          } else {
+            notify('回答已记录', undefined, 'ok')
+          }
         } catch (failure) {
           notify('没记上', failure instanceof Error ? failure.message : String(failure), 'error')
+          if (auto === true) {
+            // 自动提交失败：草稿保留 + 本会话降 manual（不写 settings；§4.4）。
+            setAutoDegraded(true)
+            setTurnPhase('listening')
+          }
         }
       }, [answer, session?.session?.id, onChanged, notify])
+      // 倒计时定时器到点时调「当前这一版」submitAnswer。
+      submitRef.current = submitAnswer
 
       const copyAnswer = useCallback(async () => {
         const text = answer.trim()
@@ -1674,7 +1827,11 @@
         // 第一句提问自动播报时才不会被浏览器拦掉。
         unlockAudio()
         try {
+          // Host 端 startSession 置 running 并**异步派活开场**（§5.1）：
+          // 点完这一下，助手自己会开口，不需要再去 DSH 对话区做任何事。
           await apiPost(`sessions/${session.session.id}/start`, {})
+          // 本地先进 thinking：开场白由轮询带回来（新问题 → questioning）。
+          setTurnPhase('thinking')
           onChanged()
         } catch (failure) {
           notify('没能开始', failure instanceof Error ? failure.message : String(failure), 'error')
@@ -1691,7 +1848,7 @@
         }
       }, [session?.session?.id, onChanged, notify])
 
-      const running = session?.session?.status === 'running'
+      // `running` / `paused` / `status` 已在话轮状态机区块里提前定义。
       /**
        * 「有画面」= 流里真的有**视频轨**。
        *
@@ -1753,6 +1910,239 @@
         if (!hostCamera.active) return
         setAcquireStage(previous => (previous === undefined ? previous : { text: '✓ 摄像头已通过宿主接入' }))
       }, [hostCamera.active])
+
+      // ── 话轮状态机编排（docs/TURN-TAKING.md §3/§6）──────────────────────
+
+      const questionSeededRef = useRef(false)
+      const lastSeenQuestionRef = useRef(undefined)
+      const acquireMediaRef = useRef(undefined)
+      acquireMediaRef.current = acquireMedia
+
+      /** 切场次：本地状态全部属于上一场，全量清零（草稿、定时器、相态、识别）。 */
+      const lastSessionIdRef = useRef(sessionId)
+      useEffect(() => {
+        if (lastSessionIdRef.current === sessionId) return
+        lastSessionIdRef.current = sessionId
+        cancelCountdown()
+        setAnswer('')
+        answerSegmentsRef.current = []
+        setLongSilence(undefined)
+        setAutoDegraded(false)
+        setModeOverride(undefined)
+        setTurnPhase('idle')
+        questionSeededRef.current = false
+        lastSeenQuestionRef.current = undefined
+        autoStartTriedRef.current = false
+        spokeRef.current = false
+        ttsRef.current.stop()
+        try { segmentAsr.stop() } catch { /* 没开过 */ }
+        try { webAsr.stop() } catch { /* 没开过 */ }
+      }, [sessionId, cancelCountdown])
+
+      /**
+       * 初始相态推导（§6.6：崩溃/刷新恢复与手动继续走**同一条路**）。
+       *
+       * running 但本地状态机没起步（首次进入 / 页面刷新 / DSH 重启后重开）：
+       * 从转录最后一行推导相态，**不改 Host 状态、不派活**——助手会话没人
+       * 动过，转录停在原地，用户接着答就行。
+       */
+      useEffect(() => {
+        if (status !== 'running') {
+          if (turnPhaseRef.current !== 'idle') setTurnPhase('idle')
+          return
+        }
+        if (turnPhaseRef.current !== 'idle') return
+        const rows = session?.transcript ?? []
+        let lastRow
+        for (let index = rows.length - 1; index >= 0; index -= 1) {
+          if (rows[index].role !== 'system') { lastRow = rows[index]; break }
+        }
+        // 最后一行是 interviewer 提问 → 直接 listening；否则 thinking 等助手。
+        setTurnPhase(lastRow !== undefined && lastRow.role === 'interviewer' ? 'listening' : 'thinking')
+      }, [status, session?.transcript])
+
+      /** 新 interviewer turn 到达（轮询发现）→ questioning（§3 状态机）。 */
+      useEffect(() => {
+        if (!questionSeededRef.current) {
+          // 挂载播种：转录里**已有**的提问不当作「新到达」重播一遍。
+          questionSeededRef.current = true
+          lastSeenQuestionRef.current = lastQuestion?.ts
+          return
+        }
+        const ts = lastQuestion?.ts
+        if (ts === undefined || ts === lastSeenQuestionRef.current) return
+        lastSeenQuestionRef.current = ts
+        if (status !== 'running') return
+        spokeRef.current = false
+        setLongSilence(undefined)
+        setTurnPhase('questioning')
+      }, [lastQuestion, status])
+
+      /**
+       * questioning → listening：**TTS 播报结束才武装判定**（半双工门控）。
+       *
+       * 没开朗读就快速放行；开了朗读等首句合成（最多 8s），播完再切。
+       * 硬上限兜底：speaking 标志卡住（浏览器音色 onend 不回来之类）时
+       * 不能把面试卡死在 questioning——状态机坏了不塌面试（§3 规则 3）。
+       */
+      useEffect(() => {
+        if (turnPhase !== 'questioning' || typeof window === 'undefined') return undefined
+        const startedAt = Date.now()
+        const timer = window.setInterval(() => {
+          if (turnPhaseRef.current !== 'questioning') { window.clearInterval(timer); return }
+          if (ttsRef.current.speaking) { spokeRef.current = true; return }
+          const waited = Date.now() - startedAt
+          if (spokeRef.current) { window.clearInterval(timer); setTurnPhase('listening'); return }
+          const ttsExpected = speakingRef.current && configRef.current?.ttsProvider !== 'none'
+          if (!ttsExpected && waited > 700) { window.clearInterval(timer); setTurnPhase('listening'); return }
+          if (waited > 8000) { window.clearInterval(timer); setTurnPhase('listening') }
+        }, 250)
+        const cap = window.setTimeout(() => {
+          if (turnPhaseRef.current === 'questioning') setTurnPhase('listening')
+        }, 120000)
+        return () => { window.clearInterval(timer); window.clearTimeout(cap) }
+      }, [turnPhase])
+
+      /**
+       * 暂停（不管从哪条路来：面板按钮 / 助手 interview_pause / 轮询发现）。
+       *
+       * **指示灯必须灭**：用户人走了，摄像头麦克风还开着，比功能坏了更
+       * 严重（§6.3/§10.3）。stop 都是幂等的，重复执行无害。
+       */
+      useEffect(() => {
+        if (!paused) return
+        cancelCountdown()
+        setLongSilence(undefined)
+        if (turnPhaseRef.current !== 'idle') setTurnPhase('idle')
+        ttsRef.current.stop()
+        try { segmentAsr.stop() } catch { /* 已停 */ }
+        try { webAsr.stop() } catch { /* 已停 */ }
+        if (media.stream !== undefined) media.stop()
+        if (hostCamera.active) void hostCamera.stop()
+      }, [paused, cancelCountdown])
+
+      /** 面试结束：设备关灯、状态机归零。 */
+      useEffect(() => {
+        if (status !== 'done') return
+        if (turnPhaseRef.current === 'idle' && countdownRef.current === undefined) return
+        cancelCountdown()
+        setTurnPhase('idle')
+        ttsRef.current.stop()
+        if (media.stream !== undefined) media.stop()
+        if (hostCamera.active) void hostCamera.stop()
+      }, [status, cancelCountdown])
+
+      /**
+       * 自动模式下自动开分段识别：判定依赖它，不能让用户开两个开关。
+       * 用户手动停过就不偷偷再开（autoStartTriedRef）；出错时如实显示
+       * 原因、不无限重试——键盘 + 手动发送照常（§6.3 纪律）。
+       */
+      useEffect(() => {
+        if (!autoDetectActive || turnPhase === 'idle') return
+        if (segmentAsr.active) { autoStartTriedRef.current = false; return }
+        if (segmentAsr.error !== undefined) return
+        if (media.stream === undefined) return
+        if (autoStartTriedRef.current) return
+        autoStartTriedRef.current = true
+        void segmentAsr.start()
+      }, [autoDetectActive, turnPhase, segmentAsr.active, segmentAsr.error, media.stream])
+
+      /** 暂停面试：Host 记状态与留痕，客户端**立刻**释放设备（不等轮询）。 */
+      const pauseInterview = useCallback(async () => {
+        try {
+          await apiPost(`sessions/${session.session.id}/pause`, {})
+          ttsRef.current.stop()
+          cancelCountdown()
+          setTurnPhase('idle')
+          setLongSilence(undefined)
+          try { segmentAsr.stop() } catch { /* 已停 */ }
+          try { webAsr.stop() } catch { /* 已停 */ }
+          media.stop()
+          if (hostCamera.active) void hostCamera.stop()
+          onChanged()
+          notify('面试已暂停', '摄像头与麦克风已关闭、计时停走；回来点「继续面试」，助手会带着原上下文接着问。', 'ok')
+        } catch (failure) {
+          notify('没能暂停', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [session?.session?.id, cancelCountdown, media, hostCamera.active, hostCamera.stop, segmentAsr, webAsr, onChanged, notify])
+
+      /**
+       * 继续面试：Host 端 resumeSession 累计暂停时长并**异步派活唤醒助手**
+       * （§6.4）；媒体在用户手势内重新申请，权限路径与 start 相同。
+       * DSH 重启过也不怕：冷会话被 prompt 唤醒时历史完整重建（§6.5）。
+       */
+      const resumeInterview = useCallback(async () => {
+        try {
+          await apiPost(`sessions/${session.session.id}/unpause`, {})
+          onChanged()
+          notify('面试继续', '助手正在重新对齐上下文，下一问马上来。', 'ok')
+        } catch (failure) {
+          notify('没能继续', failure instanceof Error ? failure.message : String(failure), 'error')
+          return
+        }
+        await acquireMediaRef.current?.()
+        // 相态由恢复 effect 从转录推导：最后一行是 interviewer 提问 → listening。
+      }, [session?.session?.id, onChanged, notify])
+
+      /**
+       * 最近一条**没被补发成功**的派活失败（§4.4）。
+       *
+       * 从转录尾部往前扫：ok:true 的 requestId 记入已解决集合，遇到
+       * 不在集合里的 ok:false 就是要显示重发按钮的那条。与 Host 的
+       * retryAgentDispatch 用同一套判定（单一语义，两处实现同构）。
+       */
+      const dispatchFailure = useMemo(() => {
+        const rows = session?.transcript ?? []
+        const resolved = new Set()
+        for (let index = rows.length - 1; index >= 0; index -= 1) {
+          const row = rows[index]
+          const dispatch = row.role === 'system' && row.meta !== undefined && typeof row.meta === 'object'
+            ? row.meta.dispatch
+            : undefined
+          if (dispatch === undefined || typeof dispatch?.requestId !== 'string') continue
+          if (dispatch.ok === true) { resolved.add(dispatch.requestId); continue }
+          if (dispatch.ok === false && !resolved.has(dispatch.requestId)) return dispatch
+        }
+        return undefined
+      }, [session?.transcript])
+
+      const retryDispatch = useCallback(async () => {
+        try {
+          const result = await apiPost(`sessions/${session.session.id}/agent-retry`, {})
+          notify(
+            result?.retried === true ? '已重新发给助手' : '不用重发',
+            result?.reason ?? result?.message,
+            result?.retried === true ? 'ok' : 'info',
+          )
+          onChanged()
+        } catch (failure) {
+          notify('重发失败', failure instanceof Error ? failure.message : String(failure), 'error')
+        }
+      }, [session?.session?.id, notify, onChanged])
+
+      /** Live 页快捷切换（§4.3）：即时生效、写入 settings（下次面试保持）。 */
+      const setAnswerMode = useCallback(mode => {
+        setModeOverride(mode)
+        // 显式切回「自动」= 从降级恢复（恢复自动要用户显式再点，§4.4）。
+        if (mode === 'auto') setAutoDegraded(false)
+        cancelCountdown()
+        void apiPost('settings', { answerMode: mode }).then(() => {
+          onChanged?.()
+        }).catch(failure => {
+          notify('设置没存上', failure instanceof Error ? failure.message : String(failure), 'error')
+        })
+      }, [cancelCountdown, notify, onChanged])
+
+      /** auto 想要但不可用时的**原因**（失败必须给出路，不许静默降级）。 */
+      const autoHint = !autoDetectWanted
+        ? undefined
+        : autoDegraded
+          ? '自动提交失败过一次：本场已降为手动。要恢复就再点一次「自动」。'
+          : !serverAsr
+            ? '浏览器识别没有话轮结束判定：自动不可用，手动发送照常（识别切到宿主/服务端即可启用）。'
+            : segmentAsr.error !== undefined
+              ? `分段识别不可用（${segmentAsr.error}）：自动判定暂停，手动发送照常。`
+              : undefined
 
       const reportReady = (session?.report ?? '') !== ''
       const durationMs = session?.stats?.durationMs ?? 0
@@ -1869,16 +2259,28 @@
         },
       }, [
         h('div', { key: 'body', style: { minWidth: 0 } }, [
+          // 把等待**演出来**（§3.4）：有状态提示的沉默是自然的，
+          // 无提示的沉默是死机。呼吸灯用现有 6s token（iv-breathe）。
           h(Meta, {
             key: 'eyebrow',
-            tone: questionText === undefined ? undefined : 'amber',
+            tone: turnPhase === 'thinking' ? 'jade' : questionText === undefined ? undefined : 'amber',
             style: { display: 'block', marginBottom: 8 },
-          }, questionText === undefined ? '等待提问' : `第 ${questionIndex} 问`),
+          }, turnPhase === 'thinking'
+            ? h('span', { key: 'th', className: 'iv-breathe', style: { display: 'inline-block' } }, '面试官正在思考…')
+            : turnPhase === 'questioning'
+              ? '正在播报提问'
+              : questionText === undefined ? '等待提问' : `第 ${questionIndex} 问`),
           questionText === undefined
             ? h('div', {
               key: 'idle',
               style: { ...TYPE.body, color: C.boneDim },
-            }, '在 DSH 对话区让助手开始这一轮。')
+            }, turnPhase === 'thinking'
+              ? '开场白准备中，请稍候。'
+              : running
+                ? '面试官马上提问。'
+                // 旧文案「在 DSH 对话区让助手开始这一轮」描述的是断链的旧设计：
+                // 现在开始面试会自动派活开场（§5.1），不需要用户去对话区做任何事。
+                : '点「开始面试」，面试官会自动开场。')
             : h('div', {
               key: 'text',
               style: {
@@ -1889,6 +2291,8 @@
                 lineHeight: 1.5, color: C.bone,
                 letterSpacing: '0.006em',
                 maxHeight: hasAnyVideo ? 132 : 200, overflow: 'hidden',
+                // thinking 时上一问压暗一点：主角是「面试官正在思考」。
+                ...(turnPhase === 'thinking' ? { opacity: 0.72 } : {}),
               },
             }, questionText),
         ]),
@@ -1916,6 +2320,170 @@
             borderTop: `1px solid ${C.rule}`,
           },
         }, [questionRule])
+
+      // 宿主画面握手失败的实情要**压过**「已接入」的乐观反馈——
+      // 否则右栏写着「✓ 摄像头已通过宿主接入」，舞台上却是一块未接通板。
+      // （定义在舞台之前：恢复板也要显示这条分步文案。）
+      const acquireText = hostVideoFailed && hostCamera.active
+        ? '宿主画面没出帧——重开一次「用宿主摄像头」，或改用浏览器摄像头。'
+        : (acquireStage === undefined ? undefined : acquireStage.text)
+
+      /**
+       * running 但设备没接 = **恢复态**（§6.6：刷新/崩溃/非意图中断与手动
+       * 继续走同一条路）：舞台给「继续面试」板，而不是冷冰冰的申请板。
+       *
+       * **只在挂载时判定一次**：本次挂载里用户自己点「开始面试」进入
+       * running 的，不算中断恢复——那时该显示的还是常规的申请板。
+       */
+      const resumeArmedRef = useRef(undefined)
+      if (resumeArmedRef.current === undefined && session !== undefined) {
+        resumeArmedRef.current = status === 'running' && media.stream === undefined && !hostCamera.active
+      }
+      const isResumeState = resumeArmedRef.current === true
+        && running && media.stream === undefined && !hasHostVideo
+
+      const plateInnerStyle = {
+        flex: '1 1 auto', margin: 'auto', width: '100%', maxWidth: 540,
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16, padding: '28px 30px 24px', textAlign: 'center',
+      }
+
+      const plateHeader = [
+        h('div', {
+          key: 't',
+          style: {
+            fontFamily: F.display, ...TYPE.title, color: C.bone,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260,
+          },
+        }, title),
+        // 暂停板的计时是**冻结显示**：durationMs 在 Host 端已扣暂停时长。
+        h(ClockBadge, { key: 'clock', ...clockProps(false) }),
+      ]
+
+      /** 错误框（权限被拒/宿主摄像头失败）：常规板与恢复板**共用**——失败必须给出路（§7）。 */
+      const plateErrors = [
+        hostCamera.error !== undefined
+          ? h('div', {
+            key: 'herr',
+            style: {
+              width: '100%', maxWidth: 460,
+              padding: '10px 14px', borderRadius: RADIUS.sm,
+              border: `1px solid ${TONES.amber.edge}`,
+              background: TONES.amber.wash,
+            },
+          }, [
+            h('div', { key: 't', style: { ...TYPE.sub, color: C.amber, marginBottom: 4 } }, hostCamera.error.text),
+            h('div', { key: 'a', style: { ...TYPE.sub, color: C.boneFaint, lineHeight: 1.65 } }, hostCamera.error.action),
+          ])
+          : null,
+        media.error !== undefined
+          ? h('div', {
+            key: 'err',
+            style: {
+              width: '100%', maxWidth: 460,
+              padding: '10px 14px', borderRadius: RADIUS.sm,
+              border: `1px solid ${media.error.kind === 'denied' ? TONES.tally.edge : TONES.amber.edge}`,
+              background: media.error.kind === 'denied' ? TONES.tally.wash : TONES.amber.wash,
+            },
+          }, [
+            h('div', {
+              key: 't',
+              style: { ...TYPE.sub, color: media.error.kind === 'denied' ? C.tally : C.amber, marginBottom: 4 },
+            }, media.error.text),
+            h('div', { key: 'a', style: { ...TYPE.sub, color: C.boneFaint, lineHeight: 1.65 } }, media.error.action),
+          ])
+          : null,
+        acquireText === undefined
+          ? null
+          : h(Quiet, { key: 'stage', tone: acquireText.startsWith('✓') ? 'ok' : 'muted' }, acquireText),
+      ]
+
+      /** 权限被拒时的「重新检测授权状态」：常规板与恢复板共用。 */
+      const permissionRetryButton = media.permission?.camera === 'denied' || media.permission?.microphone === 'denied'
+        ? h('button', {
+          key: 'retry',
+          style: S.btn(false, media.busy),
+          onClick: () => { void media.probe().then(() => media.start()) },
+        }, '重新检测授权状态')
+        : null
+
+      /** 桌面端的第二条路（宿主采集）：常规板与恢复板共用。 */
+      const hostCameraButton = inDesktopHost() && !hasAnyVideo
+        ? h('button', {
+          key: 'host-cam',
+          style: S.btn(false, hostCamera.busy),
+          onClick: () => { void hostCamera.start() },
+        }, hostCamera.busy ? '正在开摄像头…' : (hostCamera.active ? '重连宿主摄像头' : '用宿主摄像头'))
+        : null
+
+      /** 暂停板（§6.3）：REC 灭、计时冻结、大按钮「继续面试」+ 次按钮「结束面试」。 */
+      const pauseBoard = h('div', { key: 'inner', style: plateInnerStyle }, [
+        h(Meta, { key: 'e', tone: 'amber', style: { display: 'block' } }, '面试已暂停'),
+        h('div', {
+          key: 'hdr',
+          style: {
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 12, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%',
+          },
+        }, plateHeader),
+        // 草稿是瞬态物（不做持久化），但**必须说出来**它刷新会丢。
+        answer.trim() !== ''
+          ? h(Quiet, { key: 'draft', tone: 'warn' }, '有未提交的回答草稿：刷新页面会丢，恢复后可重新口述或粘贴。')
+          : null,
+        h(Quiet, { key: 'q' }, '摄像头与麦克风已关闭，计时已停走；助手会话留在原地，上下文不丢。'),
+        h('div', {
+          key: 'act',
+          style: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 2 },
+        }, [
+          h('button', {
+            key: 'resume',
+            style: S.btn('primary', false),
+            onClick: () => { void resumeInterview() },
+          }, '继续面试'),
+          h('button', {
+            key: 'finish',
+            style: S.btn(false, false),
+            onClick: () => { void finishInterview() },
+          }, '结束面试'),
+        ]),
+      ])
+
+      /**
+       * 恢复板（§6.6）：这场面试还在进行——继续 / 结束。
+       *
+       * 权限错误框、宿主摄像头按钮、重新检测授权**一个不少**：恢复板在
+       * 权限被拒时同样是唯一出口（AGENTS §7），不能因为换了主角就丢出路。
+       */
+      const resumeBoard = h('div', { key: 'inner', style: plateInnerStyle }, [
+        h(Meta, { key: 'e', tone: 'amber', style: { display: 'block' } }, '这场面试还在进行'),
+        h('div', {
+          key: 'hdr',
+          style: {
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 12, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%',
+          },
+        }, plateHeader),
+        h(Quiet, { key: 'q' }, '离开页面时设备已被释放——点「继续面试」重新接通麦克风与摄像头；转录停在原地，键盘输入始终可用。'),
+        ...plateErrors,
+        h('div', {
+          key: 'act',
+          style: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 2 },
+        }, [
+          h('button', {
+            key: 'go',
+            style: S.btn('primary', media.busy),
+            onClick: () => { void acquireMedia() },
+          }, media.busy || hostCamera.busy ? '正在申请…' : '继续面试'),
+          hostCameraButton,
+          permissionRetryButton,
+          h('button', {
+            key: 'finish',
+            style: S.btn(false, false),
+            onClick: () => { void finishInterview() },
+          }, '结束面试'),
+        ]),
+      ])
 
       /**
        * The stage: video when we have it, a designed "standby" plate when we don't.
@@ -1979,7 +2547,11 @@
               display: 'flex', flexDirection: 'column',
               background: 'radial-gradient(circle at 50% 36%, ' + C.plateTop + ' 0%, ' + C.plateMid + ' 62%, ' + C.plateLow + ' 100%)',
             },
-          }, [
+          // 暂停板 / 恢复板优先于通用「未接通」板（§6.3/§6.6）：同一个
+          // 舞台位、同一套设计语言，只是主角从「申请设备」换成「继续面试」。
+          }, paused || isResumeState
+            ? [paused ? pauseBoard : resumeBoard]
+            : [
             // 板子随舞台长高，内容整体居中；错误说明和按钮在同一列里——
             // 它们就是「权限被拒」唯一的出口，任何高度下都得点得到。
             h('div', {
@@ -2181,11 +2753,7 @@
         h('div', { key: 'k', style: { color: C.boneFaint } }, '播不出来时，问题仍以文字显示。'),
       ]
 
-      // 宿主画面握手失败的实情要**压过**「已接入」的乐观反馈——
-      // 否则右栏写着「✓ 摄像头已通过宿主接入」，舞台上却是一块未接通板。
-      const acquireText = hostVideoFailed && hostCamera.active
-        ? '宿主画面没出帧——重开一次「用宿主摄像头」，或改用浏览器摄像头。'
-        : (acquireStage === undefined ? undefined : acquireStage.text)
+      // `acquireText`（分步反馈文案）已上移到舞台之前定义——恢复板也要用它。
 
       const statusRows = [
         { key: 'mic', tone: micOn ? 'jade' : 'faint', label: `${micOn ? '●' : '○'} 麦克风`, title: '麦克风状态与出路', detail: micDetail },
@@ -2318,6 +2886,37 @@
           h(Meta, { key: 'l', style: { display: 'block', marginBottom: 6 } }, '声音'),
           voiceButtons,
         ]),
+        // 自动/手动总开关（§4.3）：「我现在就想切」是面试进行中的即时需求，
+        // 不该去设置页翻三层。开关只管自动判定，不管派活——手动发送同样
+        // 唤醒面试官。切换即时生效并写入 settings（下次面试保持）。
+        h('div', { key: 'g-mode' }, [
+          h(Meta, { key: 'l', style: { display: 'block', marginBottom: 6 } }, '回答节奏'),
+          h('div', { key: 'r', style: { ...S.row } }, [
+            h('button', {
+              key: 'auto',
+              'aria-pressed': answerModeSetting === 'auto',
+              title: '自动：说完约 2 秒静音后自动提交并唤醒面试官；倒计时内重新开口即取消',
+              style: S.btn(answerModeSetting === 'auto' ? 'primary' : false, false),
+              onClick: () => setAnswerMode('auto'),
+            }, '自动'),
+            h('button', {
+              key: 'manual',
+              'aria-pressed': answerModeSetting === 'manual',
+              title: '手动：答完自己点「提交回答」——手动发送同样会唤醒面试官',
+              style: S.btn(answerModeSetting === 'manual' ? 'primary' : false, false),
+              onClick: () => setAnswerMode('manual'),
+            }, '手动'),
+            // 判定武装状态一眼可见：armed 才有「说完自动交」。
+            autoDetectActive
+              ? h(Meta, {
+                key: 's',
+                tone: segmentAsr.active ? 'jade' : 'amber',
+              }, segmentAsr.active
+                ? (turnPhase === 'listening' ? '判定武装' : '判定挂起')
+                : '识别未开')
+              : null,
+          ]),
+        ]),
         h('div', { key: 'hair2', style: { height: 1, background: C.ruleSoft } }),
         h('div', {
           key: 'meter',
@@ -2335,6 +2934,14 @@
           }, acquireText),
         fluencyLine,
         asr.error !== undefined ? h(Quiet, { key: 'ae', tone: 'warn' }, asr.error) : null,
+        // 自动不可用/降级必须**说出来**（§4.4：不许静默换链路，同理不许静默降级）。
+        autoHint === undefined ? null : h(Quiet, { key: 'ah', tone: 'warn' }, autoHint),
+        // 长沉默（§3.3）：auto 已把事实派给助手；manual 只提示、不派活。
+        longSilence === undefined
+          ? null
+          : h(Quiet, { key: 'ls', tone: 'muted' }, longSilence.dispatched === true
+            ? `已沉默约 ${longSilence.seconds} 秒：面试官正在换更小的切口重问。`
+            : `已沉默约 ${longSilence.seconds} 秒——可以直接打字说想法，或开口请面试官换个问法。`),
         // 播报回落**说出来**：不静默换链路，也不让人以为听到的是模型。
         tts.notice !== undefined ? h(Quiet, { key: 'tn', tone: 'warn' }, tts.notice) : null,
         asr.interim !== ''
@@ -2402,23 +3009,113 @@
           style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
         }, [
           h(Meta, { key: 'l' }, '我的回答'),
-          h(Meta, { key: 's', tone: running ? 'jade' : undefined }, running ? '进行中' : '未开始'),
+          // 状态 chip 跟着话轮相态走：舞台演出来的等待，这里给出名字。
+          h(Meta, {
+            key: 's',
+            tone: paused ? 'amber' : running ? (turnPhase === 'listening' ? 'jade' : 'amber') : undefined,
+          }, paused
+            ? '已暂停'
+            : !running
+              ? '未开始'
+              : turnPhase === 'questioning'
+                ? '正在播报提问'
+                : turnPhase === 'listening'
+                  ? '请作答'
+                  : turnPhase === 'submitting'
+                    ? '即将自动提交'
+                    : turnPhase === 'thinking'
+                      ? '面试官思考中'
+                      : '进行中'),
         ]),
+        // 反悔窗口（§3.2）：草稿区上沿一条窄倒计时进度条。重新开口自动
+        // 取消；点「取消并修改」= 用户意图优先，本会话切手动。
+        countdown === undefined
+          ? null
+          : h('div', { key: 'cd', style: { display: 'flex', flexDirection: 'column', gap: 5 } }, [
+            h('div', {
+              key: 'bar',
+              style: { height: 3, borderRadius: 2, background: C.ruleSoft, overflow: 'hidden' },
+            }, h('div', {
+              key: 'fill',
+              style: {
+                height: '100%',
+                width: `${Math.max(0, Math.min(100, (countdown.remaining / 2000) * 100))}%`,
+                background: C.jade,
+                transition: 'width 120ms linear',
+              },
+            })),
+            h('div', { key: 't', style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } }, [
+              h(Meta, { key: 'm', tone: 'jade' }, `回答完成，${(Math.max(0, countdown.remaining) / 1000).toFixed(1)} 秒后自动提交`),
+              h(Meta, { key: 'h', tone: 'faint' }, '重新开口即取消'),
+              h('button', {
+                key: 'x',
+                style: { ...S.btn(false, false), padding: '3px 10px', marginLeft: 'auto' },
+                onClick: () => cancelCountdown('edit'),
+              }, '取消并修改'),
+            ]),
+          ]),
         h('textarea', {
           key: 't',
           style: { ...S.textarea, minHeight: 92 },
           value: answer,
           placeholder: '说话或打字…',
-          onChange: event => setAnswer(event.target.value),
+          onChange: event => {
+            // 倒计时内打字 = 要修改：取消并本会话切手动（§3.2）。
+            if (countdownRef.current !== undefined) cancelCountdown('edit')
+            setAnswer(event.target.value)
+          },
+          onFocus: () => {
+            if (countdownRef.current !== undefined) cancelCountdown('edit')
+          },
         }),
+        // 派活失败必须可见、可重发（§4.4）：回答已落盘不回滚，
+        // 重发用原 requestId——宿主幂等去重，不会让助手跑两遍。
+        dispatchFailure === undefined
+          ? null
+          : h('div', {
+            key: 'df',
+            style: {
+              display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+              padding: '8px 12px', borderRadius: RADIUS.sm,
+              border: `1px solid ${TONES.amber.edge}`,
+              background: TONES.amber.wash,
+            },
+          }, [
+            h('div', {
+              key: 't',
+              style: { ...TYPE.sub, color: C.amber, minWidth: 0, flex: '1 1 auto', lineHeight: 1.6 },
+            }, `助手没收到这一轮：${dispatchFailure.error ?? ''}`),
+            h('button', {
+              key: 'r',
+              style: { ...S.btn(false, false), flex: '0 0 auto' },
+              title: dispatchFailure.hint ?? '重新发给助手',
+              onClick: () => { void retryDispatch() },
+            }, '重新发给助手'),
+          ]),
         h('div', { key: 'a', style: { ...S.row } }, [
-          h('button', { key: 's', style: S.btn('primary', answer.trim() === ''), onClick: submitAnswer }, '提交回答'),
+          // **手动发送永远在**（§7 纪律：键盘兜底是硬纪律，自动只是叠加）。
+          h('button', {
+            key: 's',
+            style: S.btn('primary', answer.trim() === ''),
+            onClick: () => { void submitAnswer(false) },
+          }, '提交回答'),
           h('button', { key: 'c', style: S.btn(false, answer.trim() === ''), onClick: copyAnswer }, '复制'),
           h('div', { key: 'sp', style: { marginLeft: 'auto', display: 'flex', gap: 8 } }, [
+            // 面板永远保留「暂停」「手动发送」与「结束面试」的物理出口（§3 规则 3）。
             running
-              ? h('button', { key: 'f', style: S.btn(false, false), onClick: finishInterview }, '结束面试')
-              : h('button', { key: 's', style: S.btn('primary', false), onClick: startInterview }, '开始面试'),
-            !running && !reportReady
+              ? h('button', {
+                key: 'p',
+                style: S.btn(false, false),
+                title: '暂停：设备关灯、计时停走；助手会话留在原地，继续时上下文不丢',
+                onClick: () => { void pauseInterview() },
+              }, '暂停面试')
+              : null,
+            running
+              ? h('button', { key: 'f', style: S.btn(false, false), onClick: () => { void finishInterview() } }, '结束面试')
+              : paused
+                ? h('button', { key: 'rs', style: S.btn('primary', false), onClick: () => { void resumeInterview() } }, '继续面试')
+                : h('button', { key: 'st', style: S.btn('primary', false), onClick: () => { void startInterview() } }, '开始面试'),
+            !running && !paused && !reportReady
               ? h('button', {
                 key: 'report',
                 style: S.btn(tooShortForReport ? false : 'primary', false),

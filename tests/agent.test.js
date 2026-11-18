@@ -36,7 +36,7 @@ function fakeController(log) {
   }
 }
 
-test('派活默认在面试工作区建会话，并且复用记住的会话 id', async () => {
+test('派活默认在面试工作区建会话；第二次 prompt 直达，不再 create', async () => {
   await withEnv(async ({ root }) => {
     const log = []
     const controller = fakeController(log)
@@ -53,9 +53,12 @@ test('派活默认在面试工作区建会话，并且复用记住的会话 id',
     assert.equal(log[0].request.sessionId, undefined)
     assert.equal((await readSettings()).agentSessionId, 'host-session-1')
 
+    // **不再把已存在的 id 塞给 create**：宿主对非空白会话会「保持不变，
+    // 改为新建 Session」——旧实现每次派活都在漂移新会话（TURN-TAKING §1.3-2）。
     const second = await service.ensureAgentSession()
     assert.equal(second.sessionId, 'host-session-1')
-    assert.equal(log[1].request.sessionId, 'host-session-1', '第二次要复用记住的会话')
+    assert.equal(second.reused, true)
+    assert.equal(log.length, 1, '第二次不许再 create：prompt 直达，宿主自会恢复冷会话')
   })
 })
 
@@ -101,11 +104,12 @@ test('requestAgentChecklist：派活内容让助手用工具写回这一场', as
       config: { workspaceRoot: root },
       ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
     })
-    const result = await service.requestAgentChecklist('iv-check')
+    const session = await service.createSession({ title: '底稿场' })
+    const result = await service.requestAgentChecklist(session.id)
     assert.equal(result.dispatched, true)
     const prompt = log.find(item => item.type === 'prompt')
     assert.match(prompt.request.content[0].text, /interview_save_checklist/)
-    assert.match(prompt.request.content[0].text, /iv-check/)
+    assert.match(prompt.request.content[0].text, new RegExp(session.id))
   })
 })
 
@@ -161,10 +165,11 @@ test('requestAgentReport：让助手写报告并调 interview_finish 落盘', as
       config: { workspaceRoot: root },
       ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
     })
-    const result = await service.requestAgentReport('iv-report')
+    const session = await service.createSession({ title: '报告场' })
+    const result = await service.requestAgentReport(session.id)
     assert.equal(result.dispatched, true)
     const prompt = log.find(item => item.type === 'prompt')
-    assert.match(prompt.request.content[0].text, /iv-report/)
+    assert.match(prompt.request.content[0].text, new RegExp(session.id))
     assert.match(prompt.request.content[0].text, /interview_finish/)
     assert.match(prompt.request.content[0].text, /interview_get_context/)
   })

@@ -45,6 +45,10 @@ export const SESSION_STATUS = {
   DRAFT: 'draft',
   READY: 'ready',
   RUNNING: 'running',
+  // 暂停（docs/TURN-TAKING.md §6）：设备释放、计时停走，助手会话原地保留。
+  // resume 时累计进 pausedMs——面试时长必须扣掉它，否则「暂停两小时」
+  // 全算进 durationMs，报告与 tooShortForReport 判断全歪。
+  PAUSED: 'paused',
   DONE: 'done',
 }
 
@@ -537,6 +541,10 @@ export class InterviewService {
       updatedAt: now,
       jdUrl: typeof input.jdUrl === 'string' ? input.jdUrl : '',
       profileId: typeof input.profileId === 'string' ? input.profileId : '',
+      // 这一场专属的宿主助手会话（派活寻址用，TURN-TAKING §6.2）。
+      // 新建即带空串字段：**区别于老场次**（老场次没有这个字段，
+      // 才走「从全局设置继承」的一次性迁移）。
+      agentSessionId: '',
     }
     await writeJsonAtomic(join(dir, 'session.json'), meta)
     await writeJsonAtomic(join(dir, 'checklist.json'), { version: 1, items: [], adjustments: [] })
@@ -588,6 +596,8 @@ export class InterviewService {
     const allowed = [
       'title', 'role', 'status', 'jdUrl', 'startedAt', 'endedAt', 'notes',
       'position', 'company', 'archived', 'archivedAt', 'resumeId',
+      // 暂停/继续（docs/TURN-TAKING.md §6.2）与 per-session 助手会话。
+      'pausedAt', 'pausedMs', 'agentSessionId',
     ]
     for (const key of allowed) {
       if (patch[key] !== undefined) meta[key] = patch[key]
@@ -598,6 +608,143 @@ export class InterviewService {
     meta.updatedAt = Date.now()
     await writeJsonAtomic(join(dir, 'session.json'), meta)
     return { ...meta, dir }
+  }
+
+  // ── 面试进行：开始 / 暂停 / 继续 / 结束（docs/TURN-TAKING.md §5–§6） ────
+
+  /**
+   * 开始面试，并**唤醒助手开场**（G1：点「开始面试」后不需要用户再去
+   * 对话区做任何事）。
+   *
+   * 状态机：`draft|ready|done → running`；`paused` 拒绝（该走 resume）；
+   * 已经 running = **no-op**——双击/重试不会重复派开场。done 的场次重新
+   * 开始会拿到新的 `startedAt`，requestId 带上它，重新开始也能重新开场
+   * （宿主按 requestId 幂等去重，同一次 start 的重试仍然只派一次）。
+   *
+   * 派活**异步**发出：HTTP 先返回（面板立刻进入面试态），开场白随后
+   * 由轮询带回；失败走 system 行 + 面板「重新发给助手」（§4.4）。
+   *
+   * @param {string} sessionId
+   */
+  async startSession(sessionId) {
+    const meta = await this.getSession(sessionId)
+    if (meta.status === SESSION_STATUS.PAUSED) {
+      throw new Error('面试在暂停中：请用「继续面试」恢复，而不是重新开始。')
+    }
+    if (meta.status === SESSION_STATUS.RUNNING) {
+      return { ...meta, dir: await this.sessionDir(sessionId), restarted: false }
+    }
+    const now = Date.now()
+    // 重开一场**已结束**的面试 = 新的一轮：旧一轮的暂停时长清零
+    // （否则上一轮暂停两小时会把新一轮的 durationMs 扣成负数）。
+    // 暂停/继续的留痕仍在转录的 system 行里，复盘不受影响。
+    const freshRun = meta.status === SESSION_STATUS.DONE
+    const session = await this.updateSession(sessionId, {
+      status: SESSION_STATUS.RUNNING,
+      startedAt: now,
+      // 重开场次：结束标记清零。
+      endedAt: 0,
+      ...(freshRun ? { pausedAt: 0, pausedMs: 0 } : {}),
+    })
+    this.fireAgentDispatch(sessionId, {
+      kind: 'start',
+      requestId: `start-${sessionId}-${now}`,
+      text: agentStartPrompt(sessionId),
+    })
+    return { ...session, restarted: true }
+  }
+
+  /**
+   * 暂停面试（G4）。
+   *
+   * Host 只做三件事：状态 + 时间戳、system 行留痕、**不 cancel 进行中的
+   * 助手 turn**——它多半正在生成下一问，生成完落盘无害，恢复时那一问
+   * 就在转录里等着；cancel 反而制造「半截问题」（§6.3，P2 再考虑配置）。
+   *
+   * 设备释放是**客户端**的责任（指示灯必须灭，§10.3 隐私纪律）。
+   *
+   * @param {string} sessionId
+   */
+  async pauseSession(sessionId) {
+    const meta = await this.getSession(sessionId)
+    if (meta.status !== SESSION_STATUS.RUNNING) {
+      throw new Error(`只有进行中的面试能暂停（当前：${meta.status}）`)
+    }
+    const session = await this.updateSession(sessionId, {
+      status: SESSION_STATUS.PAUSED,
+      pausedAt: Date.now(),
+    })
+    // system 行本就被 turns 统计过滤排除：报告时间线自然可见，语流不受影响。
+    await this.appendTurn(sessionId, {
+      role: 'system',
+      text: '面试暂停',
+      meta: { event: 'pause' },
+    })
+    return session
+  }
+
+  /**
+   * 继续面试：累计暂停时长、system 行留痕、**异步派活唤醒助手**。
+   *
+   * 助手会话的恢复是宿主免费送的（§6.5）：prompt 直达存好的会话 id，
+   * 冷会话被唤醒时历史完整重建——DSH 重启过也一样。双保险是 resume
+   * prompt 要求助手先 interview_get_context 重新对齐：即使助手会话丢了，
+   * 卷宗（transcript + checklist + 简历/JD）才是唯一真源。
+   *
+   * @param {string} sessionId
+   */
+  async resumeSession(sessionId) {
+    const meta = await this.getSession(sessionId)
+    if (meta.status !== SESSION_STATUS.PAUSED) {
+      throw new Error(`只有暂停中的面试能继续（当前：${meta.status}）`)
+    }
+    const now = Date.now()
+    const pausedAt = Number.isFinite(meta.pausedAt) && meta.pausedAt > 0 ? meta.pausedAt : now
+    const pausedSegment = Math.max(0, now - pausedAt)
+    const pausedMs = (Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0) + pausedSegment
+    const session = await this.updateSession(sessionId, {
+      status: SESSION_STATUS.RUNNING,
+      pausedAt: 0,
+      pausedMs,
+    })
+    const minutes = Math.max(1, Math.round(pausedSegment / 60000))
+    await this.appendTurn(sessionId, {
+      role: 'system',
+      text: `面试继续（本次暂停 ${minutes} 分钟）`,
+      meta: { event: 'resume', pausedSegmentMs: pausedSegment },
+    })
+    this.fireAgentDispatch(sessionId, {
+      kind: 'resume',
+      requestId: `resume-${sessionId}-${pausedAt}`,
+      text: agentResumePrompt(sessionId, minutes),
+    })
+    return session
+  }
+
+  /**
+   * 结束面试（不带报告的状态收尾；写报告走 `saveReport`/interview_finish）。
+   *
+   * `running|paused → done`；暂停中直接结束也认——那一段暂停同样计入
+   * `pausedMs`，计时口径与 resume 一致（§6.2）。
+   *
+   * @param {string} sessionId
+   */
+  async finishSession(sessionId) {
+    const meta = await this.getSession(sessionId)
+    if (meta.status !== SESSION_STATUS.RUNNING && meta.status !== SESSION_STATUS.PAUSED) {
+      throw new Error(`面试只能在进行中或暂停中结束（当前：${meta.status}）`)
+    }
+    const now = Date.now()
+    const pausedMs = meta.status === SESSION_STATUS.PAUSED
+      ? (Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0)
+        + Math.max(0, now - (Number.isFinite(meta.pausedAt) && meta.pausedAt > 0 ? meta.pausedAt : now))
+      : (Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0)
+    return this.updateSession(sessionId, {
+      status: SESSION_STATUS.DONE,
+      endedAt: now,
+      pausedAt: 0,
+      pausedMs,
+    })
   }
 
   // ── 简历库 ──────────────────────────────────────────────────────────────
@@ -895,33 +1042,329 @@ export class InterviewService {
     return info
   }
 
-  async ensureAgentSession() {
+  /**
+   * 确保有一个**落在面试工作区**的宿主助手会话，并且是**这一场面试专属**的。
+   *
+   * **为什么 per-session 而不是全局设置。** 全局 `agentSessionId` 多场面试
+   * 共用 → 上下文串场；暂停/继续要求「精确找回**这一场**的助手会话」，
+   * 全局键撑不住这个语义（docs/TURN-TAKING.md §6.2）。现在存进
+   * `session.json.agentSessionId`；老场次读时从全局键**一次性迁移**。
+   *
+   * **为什么不再把已存在的 id 塞给 create。** 宿主语义（装机包 README 读实）：
+   * `create` 只复用**空白**（未开始任何轮次）的会话；对非空白的指定 id
+   * 「保持不变，改为新建 Session」。旧实现每次派活都 create(savedId)——
+   * 第一次派活之后每次都在漂移新会话，「复用会话避免刷屏」的意图落空。
+   * 正确姿势：**有 id 就直接返回**（prompt 时宿主自会恢复冷会话，历史在
+   * 持久日志里完整重建）；create 只在完全没有会话时用一次。
+   *
+   * @param {string} [interviewSessionId] 面试会话 id；省略时只读/建全局诊断键
+   */
+  async ensureAgentSession(interviewSessionId = undefined) {
+    const workspacePath = await this.effectiveRoot()
+    const describe = (sessionId, extra) => ({
+      sessionId,
+      workspace: this.workspaceRegistration?.path ?? workspacePath,
+      workspaceId: this.workspaceRegistration?.workspaceId ?? '',
+      registered: this.workspaceRegistration?.registered === true,
+      ...extra,
+    })
+
+    const id = typeof interviewSessionId === 'string' ? interviewSessionId.trim() : ''
+    if (id !== '') {
+      // 会话不存在就抛——派活落错地方比失败更糟。
+      const meta = await this.getSession(id)
+      const stored = typeof meta.agentSessionId === 'string' ? meta.agentSessionId.trim() : ''
+      if (stored !== '') return describe(stored, { reused: true })
+
+      // 一次性迁移：**只认老场次**（session.json 里还没有这个字段）。
+      // 新建场次从 createSession 起就带着 agentSessionId:''——全局键是
+      // 「最近一次 create」的面包屑，不能让新场次去继承它，否则两场
+      // 面试又共用同一个助手（串场，TURN-TAKING §1.3-1 要消灭的正是它）。
+      if (meta.agentSessionId === undefined) {
+        const settings = await readSettings()
+        const inherited = typeof settings.agentSessionId === 'string' ? settings.agentSessionId.trim() : ''
+        if (inherited !== '') {
+          await this.updateSession(id, { agentSessionId: inherited })
+          return describe(inherited, { reused: true, inherited: true })
+        }
+      }
+    } else {
+      // 没给面试 id（interview_agent_session 的诊断路径）：全局键只读不寻址。
+      const settings = await readSettings()
+      const stored = typeof settings.agentSessionId === 'string' ? settings.agentSessionId.trim() : ''
+      if (stored !== '') return describe(stored, { reused: true })
+    }
+
+    // 完全没有会话，才 create 一次。
     const controller = this.ctx?.get?.('sessionController')
     if (controller === undefined || controller === null || typeof controller.create !== 'function') {
       throw new Error('这个宿主没有提供建会话接口，不能把请求派给助手')
     }
     const workspace = await this.ensureAgentWorkspace()
-    const settings = await readSettings()
     // 优先用 **已登记的工作区 id** 绑定；宿主没有工作区接口时才退回 cwd。
     const request = workspace.workspaceId !== ''
       ? { workspaceId: workspace.workspaceId }
       : { cwd: workspace.path }
-    if (typeof settings.agentSessionId === 'string' && settings.agentSessionId !== '') {
-      request.sessionId = settings.agentSessionId
-    }
     const created = await controller.create(request)
     const agentSessionId = String(created?.sessionId ?? '')
     if (agentSessionId === '') throw new Error('宿主没有返回会话 id')
-    if (agentSessionId !== settings.agentSessionId) {
+    if (id !== '') await this.updateSession(id, { agentSessionId })
+    // 全局键留作「最近一次 create 用过的会话」的面包屑（诊断用，不再参与寻址）。
+    try {
       await writeSettings({ agentSessionId })
-    }
-    return {
-      sessionId: agentSessionId,
+    } catch { /* 面包屑丢了不影响派活 */ }
+    return describe(agentSessionId, {
+      reused: false,
+      created: true,
       workspace: workspace.path,
       workspaceId: workspace.workspaceId,
       registered: workspace.registered,
       workspaceCreated: workspace.created === true,
+    })
+  }
+
+  /**
+   * 清掉这一场存着的助手会话 id（会话被宿主删除后重建用）。
+   *
+   * **置空串而不是删字段**：字段缺失 = 「老场次」，会触发从全局面包屑
+   * 继承的迁移——而那个面包屑正是刚死掉的会话 id，删字段等于把死的
+   * 继承回来。空串 = 「明确没有」，直接走 create 重建。
+   *
+   * @param {string} interviewSessionId
+   */
+  async clearAgentSession(interviewSessionId) {
+    const dir = await this.sessionDir(interviewSessionId)
+    const meta = await readJsonIfExists(join(dir, 'session.json'))
+    if (meta === undefined) return
+    meta.agentSessionId = ''
+    meta.updatedAt = Date.now()
+    await writeJsonAtomic(join(dir, 'session.json'), meta)
+  }
+
+  /**
+   * 向助手发一条派活 prompt —— **唯一通道**（docs/TURN-TAKING.md §5）。
+   *
+   * 三条宿主机制都用上：
+   *  - `mode:'queue'`：助手忙时进 inbox 排队，不打断当前 turn；
+   *  - `requestId` 幂等：客户端重试、轮询竞态都不会重复派活；
+   *  - 冷会话由 prompt 自动唤醒（历史在持久日志里），DSH 重启也不丢。
+   *
+   * 存的会话已被删除（session/not-found）→ 清 id、重建、**同一 requestId**
+   * 重发一次，并在转录记 system 行「助手会话已重建」——卷宗才是唯一真源，
+   * 助手会话只是工作记忆，重建无损（§5.2）。
+   *
+   * @param {string} sessionId 面试会话 id
+   * @param {{kind: string, requestId: string, text: string}} dispatch
+   */
+  async dispatchAgentPrompt(sessionId, dispatch) {
+    const controller = this.ctx?.get?.('sessionController')
+    if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
+      throw new Error('这个宿主没有提供会话接口，不能把请求派给助手')
     }
+    const hostSession = await this.ensureAgentSession(sessionId)
+    // **signal 是必填的第二个参数。** 宿主实现的第一句就是
+    // `signal.throwIfAborted()`——不传就炸。
+    const send = target => controller.prompt({
+      requestId: dispatch.requestId,
+      sessionId: target,
+      mode: 'queue',
+      content: [{ type: 'text', text: dispatch.text }],
+    }, new AbortController().signal)
+    try {
+      await send(hostSession.sessionId)
+    } catch (error) {
+      if (!isAgentSessionGone(error)) throw error
+      await this.clearAgentSession(sessionId)
+      const rebuilt = await this.ensureAgentSession(sessionId)
+      await send(rebuilt.sessionId)
+      await this.appendTurn(sessionId, {
+        role: 'system',
+        text: '助手会话已重建，上下文从卷宗恢复。',
+        meta: { agent: { rebuilt: true, kind: dispatch.kind, requestId: dispatch.requestId } },
+      }).catch(() => { /* 留痕失败不挡派活 */ })
+      return {
+        dispatched: true,
+        rebuilt: true,
+        kind: dispatch.kind,
+        requestId: dispatch.requestId,
+        hostSession: { id: rebuilt.sessionId, workspace: rebuilt.workspace, explicit: false },
+      }
+    }
+    return {
+      dispatched: true,
+      kind: dispatch.kind,
+      requestId: dispatch.requestId,
+      hostSession: { id: hostSession.sessionId, workspace: hostSession.workspace, explicit: false },
+      message: `请求已发到面试工作区里的助手会话：${hostSession.workspace}`,
+    }
+  }
+
+  /**
+   * 派活失败必须**留痕 + 给出路**（AGENTS §7 / TURN-TAKING §4.4）。
+   *
+   * 回答已落盘不回滚；transcript 记一条 system 行「派活失败：原因」，
+   * meta.dispatch 带上原始 kind/requestId/text——面板轮询到就显示
+   * 「重新发给助手」按钮，重发用**原 requestId**（宿主幂等去重兜底）。
+   */
+  async noteAgentDispatchFailure(sessionId, dispatch, error) {
+    const reason = error && error.message ? error.message : String(error ?? '')
+    const hint = /writer-held|被占用|占用/.test(reason)
+      ? '助手会话被别的写者占用：回 DSH 关掉那个占用者，再点重发。'
+      : /archiv|归档/i.test(reason)
+        ? '助手会话已归档，归档会话拒跑模型：在 DSH 里取消归档后重发。'
+        : '点「重新发给助手」重试；也可以在 DSH 对话区手动让助手继续这场面试。'
+    try {
+      await this.appendTurn(sessionId, {
+        role: 'system',
+        text: `派活失败：${reason}`,
+        meta: { dispatch: { ...dispatch, ok: false, error: reason, hint, at: Date.now() } },
+      })
+    } catch { /* 连留痕都失败时只能吞下——绝不把二次错误抛回主流程 */ }
+    return { ok: false, error: reason, hint }
+  }
+
+  /**
+   * 异步派活：**HTTP 响应先返回，prompt 后发**（TURN-TAKING §5.1）。
+   *
+   * 面板点「开始面试」/提交回答要立刻得到响应，不能等宿主排队；
+   * 派活失败走 system 行 + 重发按钮，不影响主流程。
+   */
+  fireAgentDispatch(sessionId, dispatch) {
+    const promise = Promise.resolve()
+      .then(() => this.dispatchAgentPrompt(sessionId, dispatch))
+      .catch(error => this.noteAgentDispatchFailure(sessionId, dispatch, error))
+    // 测试与诊断可以等这条 promise；业务调用方永远不等它。
+    this.lastDispatch = promise
+    return promise
+  }
+
+  /**
+   * 把最近一次**没被补发成功**的派活重新发给助手（面板「重新发给助手」）。
+   *
+   * 用原 requestId 重发：宿主按 requestId 去重——上一次若其实已入队，
+   * 这次直接返回原接受结果，不会让助手跑两遍。
+   *
+   * @param {string} sessionId
+   */
+  async retryAgentDispatch(sessionId) {
+    const transcript = await this.getTranscript(sessionId)
+    const resolved = new Set()
+    let pending
+    for (let index = transcript.length - 1; index >= 0; index -= 1) {
+      const row = transcript[index]
+      const dispatch = row.role === 'system' && row.meta !== undefined && typeof row.meta === 'object'
+        ? row.meta.dispatch
+        : undefined
+      if (dispatch === undefined || typeof dispatch?.requestId !== 'string') continue
+      if (dispatch.ok === true) {
+        resolved.add(dispatch.requestId)
+        continue
+      }
+      if (dispatch.ok === false && pending === undefined && !resolved.has(dispatch.requestId)) {
+        pending = dispatch
+      }
+    }
+    if (pending === undefined) return { retried: false, reason: '没有待重发的派活。' }
+    const dispatch = {
+      kind: typeof pending.kind === 'string' ? pending.kind : 'continue',
+      requestId: pending.requestId,
+      text: String(pending.text ?? ''),
+    }
+    if (dispatch.text === '') {
+      return { retried: false, reason: '这条失败留痕没带原文，无法重发；请在 DSH 对话区手动让助手继续。' }
+    }
+    // 这里让错误直接抛给调用方（HTTP 400 带原因）——用户显式点的按钮，
+    // 要同步看到结果，而不是又一条慢慢轮询出来的 system 行。
+    const result = await this.dispatchAgentPrompt(sessionId, dispatch)
+    await this.appendTurn(sessionId, {
+      role: 'system',
+      text: '已重新发给助手。',
+      meta: { dispatch: { kind: dispatch.kind, requestId: dispatch.requestId, ok: true, at: Date.now() } },
+    })
+    return { retried: true, ...result }
+  }
+
+  /**
+   * 开场派活（TURN-TAKING §5.1）：`startSession` 成功后联动。
+   *
+   * @param {string} sessionId
+   * @param {{requestId?: string}} [options]
+   */
+  async requestAgentStart(sessionId, options = {}) {
+    return this.dispatchAgentPrompt(sessionId, {
+      kind: 'start',
+      requestId: typeof options.requestId === 'string' ? options.requestId : `start-${sessionId}`,
+      text: agentStartPrompt(sessionId),
+    })
+  }
+
+  /**
+   * 「候选人答完了，请继续」派活：`appendTurn`（面板提交）联动，
+   * 也可由 interview_request_agent task=continue 手动触发。
+   *
+   * **回答原文直接内联进 prompt**：助手不用先跑一趟 interview_get_context
+   * 才知道候选人说了什么——省一个工具往返 ≈ 省 2–5s 首响。context 对齐
+   * 仍然要做（技能纪律），但那是为了清单/语流，不是为了「听见回答」。
+   *
+   * @param {string} sessionId
+   * @param {{ts?: number, text?: string}} [turn] 省略时取转录里最后一条 candidate
+   * @param {{requestId?: string}} [options]
+   */
+  async requestAgentContinue(sessionId, turn = undefined, options = {}) {
+    let row = turn !== undefined && turn !== null ? turn : undefined
+    if (row === undefined) {
+      const transcript = await this.getTranscript(sessionId)
+      for (let index = transcript.length - 1; index >= 0; index -= 1) {
+        if (transcript[index].role === 'candidate') {
+          row = transcript[index]
+          break
+        }
+      }
+    }
+    if (row === undefined) throw new Error('转录里还没有候选人回答，没有可「继续」的一轮')
+    return this.dispatchAgentPrompt(sessionId, {
+      kind: 'continue',
+      requestId: typeof options.requestId === 'string'
+        ? options.requestId
+        : `continue-${sessionId}-${Number.isFinite(row.ts) ? row.ts : Date.now()}`,
+      text: agentContinuePrompt(sessionId, String(row.text ?? '')),
+    })
+  }
+
+  /**
+   * 暂停后继续的派活：`resumeSession` 成功后联动。
+   *
+   * 宿主会话持久化把最难的一半免费送掉了：冷会话被 prompt 唤醒时历史
+   * 完整重建（§6.5）——恢复 = 向存好的会话发一条 resume prompt，
+   * 不存在「导出/导入会话」这种伪需求。
+   *
+   * @param {string} sessionId
+   * @param {{pausedMinutes?: number, pausedAt?: number, requestId?: string}} [options]
+   */
+  async requestAgentResume(sessionId, options = {}) {
+    const at = Number.isFinite(options.pausedAt) ? options.pausedAt : Date.now()
+    return this.dispatchAgentPrompt(sessionId, {
+      kind: 'resume',
+      requestId: typeof options.requestId === 'string' ? options.requestId : `resume-${sessionId}-${at}`,
+      text: agentResumePrompt(sessionId, options.pausedMinutes),
+    })
+  }
+
+  /**
+   * 长沉默派活（§3.3）：插件只**报告事实**（沉默了约 N 秒），
+   * 说什么、怎么换切口由模型按 interview-conduct 的既有策略决定——
+   * 这不违反「插件不写话术」。
+   *
+   * @param {string} sessionId
+   * @param {number} seconds
+   */
+  async requestAgentSilence(sessionId, seconds = 0) {
+    const secs = Number.isFinite(seconds) ? Math.max(0, Math.round(seconds)) : 0
+    return this.dispatchAgentPrompt(sessionId, {
+      kind: 'silence',
+      requestId: `silence-${sessionId}-${Date.now()}`,
+      text: agentSilencePrompt(sessionId, secs),
+    })
   }
 
   /**
@@ -945,7 +1388,7 @@ export class InterviewService {
     if (typeof hostSessionId === 'string' && hostSessionId.trim() !== '') {
       hostSession = { sessionId: hostSessionId.trim(), workspace: undefined, explicit: true }
     } else {
-      hostSession = { ...(await this.ensureAgentSession()), explicit: false }
+      hostSession = { ...(await this.ensureAgentSession(sessionId)), explicit: false }
     }
     const text = [
       `请帮我抓取这个岗位 JD：${target}`,
@@ -986,7 +1429,7 @@ export class InterviewService {
     }
     const hostSession = typeof hostSessionId === 'string' && hostSessionId.trim() !== ''
       ? { sessionId: hostSessionId.trim(), workspace: undefined, explicit: true }
-      : { ...(await this.ensureAgentSession()), explicit: false }
+      : { ...(await this.ensureAgentSession(sessionId)), explicit: false }
     const text = [
       `请为面试会话 ${sessionId} 出一份「面试官底稿」（考点清单）。`,
       '1. 先调用 interview_get_context 读简历、JD 与已有清单；',
@@ -1023,7 +1466,7 @@ export class InterviewService {
     }
     const hostSession = typeof hostSessionId === 'string' && hostSessionId.trim() !== ''
       ? { sessionId: hostSessionId.trim(), workspace: undefined, explicit: true }
-      : { ...(await this.ensureAgentSession()), explicit: false }
+      : { ...(await this.ensureAgentSession(sessionId)), explicit: false }
     const text = [
       `请为面试会话 ${sessionId} 写一份事后分析报告。`,
       '1. 先调用 interview_get_context 读简历、JD、考点清单、转录与统计；',
@@ -1238,6 +1681,27 @@ export class InterviewService {
     }
     await appendJsonl(join(dir, 'transcript.jsonl'), row)
     await this.touch(sessionId)
+
+    // ── 联动：候选人答完 → 唤醒助手出下一题（docs/TURN-TAKING.md §5.1）──
+    //
+    // **只认 `meta.source === 'panel'` 的 candidate 行。** 助手自己调
+    // interview_record_turn 记录的回答不能再触发「请继续」派活——它正在
+    // 自己的 turn 里往下走，再排一条队等于自己给自己派活，甚至自触发成环。
+    // 面板提交（手动点发送或自动提交）是唯一的「候选人答完了」事件源；
+    // 且**开关只管自动判定，不管派活**：manual 模式下手动发送同样走到这里。
+    //
+    // 派活异步发出：HTTP 先返回（面板立刻「回答已记录」），失败走
+    // system 行 + 「重新发给助手」按钮（§4.4），不影响本次响应。
+    if (role === 'candidate' && meta.source === 'panel') {
+      const current = await readJsonIfExists(join(dir, 'session.json'))
+      if (current !== undefined && current.status === SESSION_STATUS.RUNNING) {
+        this.fireAgentDispatch(sessionId, {
+          kind: 'continue',
+          requestId: `continue-${sessionId}-${row.ts}`,
+          text: agentContinuePrompt(sessionId, text),
+        })
+      }
+    }
     return row
   }
 
@@ -1855,6 +2319,12 @@ export class InterviewService {
         company: meta.company ?? '',
         // 这场面试的简历是从库里哪一份拿来的（卷内存的是快照）。
         resumeId: meta.resumeId ?? '',
+        // 暂停/继续（docs/TURN-TAKING.md §6.2）：pausedAt>0 = 正在暂停中；
+        // pausedMs 是累计暂停时长（计时公式要扣掉它）。
+        pausedAt: Number.isFinite(meta.pausedAt) ? meta.pausedAt : 0,
+        pausedMs: Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0,
+        // 这一场专属的宿主助手会话（派活寻址用；空 = 还没建过）。
+        agentSessionId: typeof meta.agentSessionId === 'string' ? meta.agentSessionId : '',
         // 归档标记：主区要能告诉用户「这场已经收起来了」。
         archived: meta.archived === true,
         dir: meta.dir,
@@ -1883,7 +2353,15 @@ export class InterviewService {
       stats: {
         asked,
         answered,
-        durationMs: (meta.endedAt ?? meta.updatedAt ?? 0) - (meta.startedAt ?? meta.createdAt ?? 0),
+        // 计时公式**必须扣 pausedMs**（docs/TURN-TAKING.md §6.2）：不扣就会把
+        // 「暂停两小时」算进面试时长，报告与 tooShortForReport(<3min) 判断全歪。
+        // `||` 而不是 `??`：重开场次会把 endedAt 清成 0，0 是「没有值」。
+        durationMs: Math.max(
+          0,
+          (meta.endedAt || meta.updatedAt || 0)
+          - (meta.startedAt || meta.createdAt || 0)
+          - (Number.isFinite(meta.pausedMs) ? meta.pausedMs : 0),
+        ),
         checklistTotal: checklist.items.length,
         checklistProbed: checklist.items.filter(item => item.probed === true).length,
         adjustments: checklist.adjustments.length,
@@ -2284,6 +2762,75 @@ function sanitizeName(name) {
     .replace(/[/\\?%*:|"<>\u0000-\u001f]/g, '_')
     .replace(/\s+/g, '_')
     .slice(0, 120)
+}
+
+// ── 派活 prompt（docs/TURN-TAKING.md §5.1） ────────────────────────────────
+//
+// 这些是**系统级调度指令**，不是话术：插件不写面试题、不写开场白（§5 硬
+// 边界）——说什么由模型按 interview-conduct 技能生成。每条都以「[系统派活]」
+// 开头并明令不要朗读，避免助手把调度指令念给候选人。
+
+/** 开场派活的 prompt 正文。 */
+function agentStartPrompt(sessionId) {
+  return [
+    `[系统派活] 面试会话 ${sessionId} 已开始，你现在是面试官。`,
+    '1. 调用 interview_get_context 读简历、JD 与考点清单；',
+    '2. 按 interview-conduct 技能「阶段 0」开场：说明这是模拟面试，然后请候选人自我介绍；',
+    '3. 开场白与第一问各用 interview_record_turn(role:interviewer) 记录；',
+    '4. 一次只问一个问题，等候选人回答完再继续。',
+    '本条是调度指令：不要把这条消息或本指令朗读给候选人。',
+  ].join('\n')
+}
+
+/** 「候选人答完了，请继续」派活的 prompt 正文（回答原文内联，省一次 context 往返）。 */
+function agentContinuePrompt(sessionId, answer) {
+  const quoted = answer.length > 4000 ? `${answer.slice(0, 4000)}……（已截断，全文在转录里）` : answer
+  return [
+    `[系统派活] 面试会话 ${sessionId}：候选人刚回答完（已写入转录）：`,
+    `「「${quoted}」」`,
+    '1. 调用 interview_get_context 对齐清单进度与转录；',
+    '2. 先用一句话自然承接这个回答，再决定追问还是下一题——一次只问一个；',
+    '3. 用 interview_record_turn(role:interviewer) 记录你这一问；',
+    '4. 回答暴露出清单要调整时，用 interview_mutate_checklist 并写 reason。',
+    '本条是调度指令：不要把这条消息或本指令朗读给候选人。',
+  ].join('\n')
+}
+
+/** 暂停后继续派活的 prompt 正文。 */
+function agentResumePrompt(sessionId, pausedMinutes) {
+  const minutes = Number.isFinite(pausedMinutes) ? Math.max(0, Math.round(pausedMinutes)) : 0
+  return [
+    `[系统派活] 面试会话 ${sessionId} 在暂停约 ${minutes} 分钟后继续。`,
+    '1. 调用 interview_get_context 重新对齐（清单进度与转录最后几轮）；',
+    '2. 依据转录续接：上一问还没答完就复述或换个更清楚的说法；已经答完就自然过渡到下一轮；',
+    '3. 一次只问一个问题，用 interview_record_turn(role:interviewer) 记录。',
+    '本条是调度指令：不要把这条消息或本指令朗读给候选人。',
+  ].join('\n')
+}
+
+/** 长沉默派活的 prompt 正文（只报告事实，怎么重问由模型决定）。 */
+function agentSilencePrompt(sessionId, seconds) {
+  return [
+    `[系统派活] 面试会话 ${sessionId}：候选人已沉默约 ${seconds} 秒。`,
+    '这是系统观察到的事实，不是候选人输入，不要把它记成回答。',
+    '调用 interview_get_context 看最后一问，按 interview-conduct 的沉默策略处理：',
+    '换一个更小的切口或把问题说得更清楚，一次只问一个，并用 interview_record_turn(role:interviewer) 记录。',
+  ].join('\n')
+}
+
+/**
+ * prompt 失败是不是「存的助手会话已经没了」（被删/不存在）。
+ *
+ * 只有这一种失败值得**自动重建重试**；writer-held / 归档等属于「会话还在
+ * 但跑不了」，重建只会制造第二个会话——那些走留痕 + 重发按钮的出路。
+ *
+ * @param {unknown} error
+ */
+function isAgentSessionGone(error) {
+  const code = String(error?.code ?? '')
+  if (/not-?found/i.test(code)) return true
+  const message = error && error.message ? error.message : String(error ?? '')
+  return /session\/not-?found|session not found|会话不存在|找不到会话|no such session/i.test(message)
 }
 
 /** The absolute workspace root in force, for display. */

@@ -192,6 +192,10 @@ async function readResource(service, segments, query) {
       recordAudio: effective.recordAudio,
       guardEnabled: effective.guardEnabled,
       cameraBackend: effective.cameraBackend,
+      // 话轮（docs/TURN-TAKING.md §4）：自动/手动开关与静音阈值。
+      // 面板 Live 页的快捷切换读写同一份 settings。
+      answerMode: effective.answerMode ?? 'manual',
+      turnEndSilenceMs: effective.turnEndSilenceMs ?? 2000,
       // 工作区根：界面要能回答「数据存到哪儿了、为什么是这个目录」。
       workspaceRoot: await service.location(),
       jdFetchTimeoutMs: effective.jdFetchTimeoutMs,
@@ -343,15 +347,36 @@ async function runAction(service, segments, body) {
         case 'checklist-mutate':
           return await service.mutateChecklist(sessionId, body)
         case 'turn':
+          // appendTurn 内部联动「候选人答完 → 唤醒助手」的派活（异步，
+          // 不阻塞这条响应）——见 service.appendTurn 与 TURN-TAKING §5.1。
           return { turn: await service.appendTurn(sessionId, body) }
         case 'recording':
           return await service.saveRecording(sessionId, body)
         case 'report':
           return await service.saveReport(sessionId, body.markdown)
         case 'start':
-          return { session: await service.updateSession(sessionId, { status: 'running', startedAt: Date.now() }) }
+          // startSession：置 running + **异步派活开场**（TURN-TAKING §5.1）。
+          // 联动放在 service 里而不是这条路由里——「一个操作，两个调用者」，
+          // 工具 interview_request_agent(task=start) 走的是同一个方法。
+          return { session: await service.startSession(sessionId) }
         case 'finish':
-          return { session: await service.updateSession(sessionId, { status: 'done', endedAt: Date.now() }) }
+          return { session: await service.finishSession(sessionId) }
+        // 暂停 / 继续（TURN-TAKING §6）。
+        //
+        // **路由名是 `unpause` 而不是 `resume`**：`sessions/<id>/resume`
+        // 已经是「存简历正文」的老路由（resume = 简历），语义撞车。
+        // service 方法仍叫 resumeSession（与文档一致），只有 HTTP 名字避让。
+        case 'pause':
+          return { session: await service.pauseSession(sessionId) }
+        case 'unpause':
+          return { session: await service.resumeSession(sessionId) }
+        case 'silence':
+          // 长沉默（TURN-TAKING §3.3）：客户端在 auto 模式下报告事实，
+          // 派活同步做——这是显式事件，调用方要立刻知道成败。
+          return await service.requestAgentSilence(sessionId, Number(body.seconds ?? 0))
+        case 'agent-retry':
+          // 派活失败的重发按钮（TURN-TAKING §4.4）：用原 requestId 幂等重发。
+          return await service.retryAgentDispatch(sessionId)
         case 'archive':
           return { session: await service.setArchived(sessionId, body.archived === true) }
         case 'delete':
@@ -389,8 +414,23 @@ async function runAction(service, segments, body) {
           body.hostSessionId,
         )
       }
+      // 面试主循环的手动兜底/诊断入口（TURN-TAKING §7）：正常流程由
+      // start/turn/unpause 自动联动，这里是「重发一次」的显式按钮路径。
+      if (rest[0] === 'start') {
+        return await service.requestAgentStart(String(body.sessionId ?? ''))
+      }
+      if (rest[0] === 'continue') {
+        return await service.requestAgentContinue(String(body.sessionId ?? ''))
+      }
+      if (rest[0] === 'resume') {
+        return await service.requestAgentResume(String(body.sessionId ?? ''), {
+          pausedMinutes: Number(body.pausedMinutes ?? 0),
+        })
+      }
       if (rest[0] === 'session') {
-        return await service.ensureAgentSession()
+        return await service.ensureAgentSession(
+          typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : undefined,
+        )
       }
       throw new Error(`未知的助手操作：${rest.join('/')}`)
     }

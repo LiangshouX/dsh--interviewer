@@ -229,7 +229,10 @@ export async function openPreview(browser, { port, preset }) {
  * @returns {Promise<boolean>} 是否成功点到那个按钮
  */
 export async function requestMediaPermission(page, timeout = 5000) {
-  const ask = page.getByRole('button', { name: /申请摄像头与麦克风|开摄像头/ }).first()
+  // 舞台上的主按钮有三个名字：准备态「申请摄像头与麦克风」、恢复板
+  // 「继续面试」（docs/TURN-TAKING.md §6.6）、右栏的「开摄像头与麦克风」。
+  // 优先点舞台上的那个（DOM 顺序在前），别把滚动容器推歪。
+  const ask = page.getByRole('button', { name: /申请摄像头与麦克风|继续面试|开摄像头/ }).first()
   if (await ask.count() === 0) return false
   try {
     await ask.click({ timeout })

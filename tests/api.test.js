@@ -305,3 +305,76 @@ test('卷宗库：配置文件写死了的时候，面板里的选择不生效�
     await rm(chosenRoot, { recursive: true, force: true })
   }
 })
+
+test('话轮路由：config 带 answerMode；start 派开场；pause/unpause/silence/agent-retry；resume 仍是存简历', async () => {
+  const workspaceRoot = join(ROOT, '.tmp-test', `turn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`)
+  const prompts = []
+  const controller = {
+    async create() { return { sessionId: 'host-turn-1' } },
+    async prompt(request) { prompts.push(request); return { accepted: true } },
+  }
+  const service = new InterviewService({
+    config: { workspaceRoot },
+    ctx: { get: name => (name === 'sessionController' ? controller : undefined) },
+  })
+  try {
+    const call = await makeApi(service)
+
+    // config 端点带话轮设置（Live 页快捷切换与判定阈值读它）。
+    const cfg = await call('GET', '/interviewer/api/config')
+    assert.equal(cfg.body.data.answerMode, 'manual', '默认 manual：升级不改变已适应的节奏')
+    assert.equal(cfg.body.data.turnEndSilenceMs, 2000)
+
+    const created = await call('POST', '/interviewer/api/sessions', { title: '路由场' })
+    const id = created.body.data.session.id
+
+    // start：HTTP 立刻返回（派活异步，不阻塞响应），开场派活随后到。
+    const started = await call('POST', `/interviewer/api/sessions/${id}/start`, {})
+    assert.equal(started.status, 200)
+    assert.equal(started.body.data.session.status, 'running')
+    await service.lastDispatch
+    assert.equal(prompts.length, 1)
+    assert.match(prompts[0].content[0].text, /\[系统派活\]/)
+
+    // 面板提交回答（meta.source=panel）→ continue 派活，回答原文内联。
+    const turn = await call('POST', `/interviewer/api/sessions/${id}/turn`, {
+      role: 'candidate', text: '这是我的回答', meta: { source: 'panel' },
+    })
+    assert.equal(turn.status, 200)
+    await service.lastDispatch
+    assert.equal(prompts.length, 2)
+    assert.match(prompts[1].content[0].text, /这是我的回答/)
+
+    // pause → unpause（路由名避让 resume=存简历的老语义；service 方法叫 resumeSession）。
+    const paused = await call('POST', `/interviewer/api/sessions/${id}/pause`, {})
+    assert.equal(paused.body.data.session.status, 'paused')
+    const badPause = await call('POST', `/interviewer/api/sessions/${id}/pause`, {})
+    assert.equal(badPause.status, 400, '非法迁移要返回明确错误')
+    const resumed = await call('POST', `/interviewer/api/sessions/${id}/unpause`, {})
+    assert.equal(resumed.body.data.session.status, 'running')
+    await service.lastDispatch
+    assert.match(prompts[prompts.length - 1].content[0].text, /暂停约 \d+ 分钟后继续/)
+
+    // resume 路由仍然是「存简历正文」，没有被生命周期抢占。
+    const resumeDoc = await call('POST', `/interviewer/api/sessions/${id}/resume`, { text: '简历正文' })
+    assert.equal(resumeDoc.status, 200)
+    assert.equal(resumeDoc.body.data.chars, 4)
+
+    // silence：长沉默报告事实；agent-retry：没有失败时如实说「不用重发」。
+    const silence = await call('POST', `/interviewer/api/sessions/${id}/silence`, { seconds: 21 })
+    assert.equal(silence.status, 200)
+    assert.equal(silence.body.data.dispatched, true)
+    const retry = await call('POST', `/interviewer/api/sessions/${id}/agent-retry`, {})
+    assert.equal(retry.status, 200)
+    assert.equal(retry.body.data.retried, false)
+
+    // agent/session 带 sessionId：返回这一场专属的助手会话。
+    const agentSession = await call('POST', '/interviewer/api/agent/session', { sessionId: id })
+    assert.equal(agentSession.body.data.sessionId, 'host-turn-1')
+
+    const finished = await call('POST', `/interviewer/api/sessions/${id}/finish`, {})
+    assert.equal(finished.body.data.session.status, 'done')
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
+})

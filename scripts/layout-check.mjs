@@ -120,36 +120,53 @@ const ASSERT = () => {
     if (box.x < -1) problems.push(`舞台跑到面板外：left=${Math.round(box.x)}`)
 
     // 3. 权限按钮点得到：真的做一次命中测试。
-    for (const label of ['申请摄像头与麦克风', '重新检测授权状态']) {
-      const button = byText(label)
-      if (button === undefined) {
-        problems.push(`找不到按钮「${label}」`)
-        continue
-      }
-      button.scrollIntoView({ block: 'center', inline: 'nearest' })
-      const box2 = rect(button)
+    //    舞台主按钮有两个名字：准备态「申请摄像头与麦克风」，
+    //    running 恢复板「继续面试」（docs/TURN-TAKING.md §6.6）——认任一。
+    //    **按 button 匹配，不按文本包含**：恢复板的说明文字里也写着
+    //    「点『继续面试』」，用包含匹配会命中那段话而不是按钮。
+    const buttonByText = text => Array.from(document.querySelectorAll('button'))
+      .find(element => (element.textContent ?? '').trim() === text)
+    const hitTest = (element, label) => {
+      element.scrollIntoView({ block: 'center', inline: 'nearest' })
+      const box2 = rect(element)
       if (box2.w < 40 || box2.h < 20) {
         problems.push(`按钮「${label}」被压成 ${Math.round(box2.w)}×${Math.round(box2.h)}，点不到`)
-        continue
+        return
       }
       const x = box2.x + box2.w / 2
       const y = box2.y + box2.h / 2
       const hit = document.elementFromPoint(x, y)
-      if (hit === null || !(hit === button || button.contains(hit) || hit.contains(button))) {
+      if (hit === null || !(hit === element || element.contains(hit) || hit.contains(element))) {
         const who = hit === null ? '（视口外）' : `被「${(hit.textContent ?? '').trim().slice(0, 12)}」盖住`
         problems.push(`按钮「${label}」点不到：${who}`)
       }
+    }
+    const acquire = ['申请摄像头与麦克风', '继续面试']
+      .map(label => [label, buttonByText(label)])
+      .find(([, element]) => element !== undefined)
+    if (acquire === undefined) {
+      problems.push('找不到按钮「申请摄像头与麦克风 / 继续面试」')
+    } else {
+      hitTest(acquire[1], acquire[0])
+    }
+    for (const label of ['重新检测授权状态']) {
+      const button = buttonByText(label)
+      if (button === undefined) {
+        problems.push(`找不到按钮「${label}」`)
+        continue
+      }
+      hitTest(button, label)
     }
 
     // 4. 提问条不许压住权限按钮。
     const rule = byText('等待提问')
     if (rule !== undefined) {
       const ruleBox = rect(rule)
-      for (const label of ['申请摄像头与麦克风', '重新检测授权状态']) {
-        const button = byText(label)
+      const buttons = [acquire === undefined ? undefined : acquire[1], buttonByText('重新检测授权状态')]
+      for (const button of buttons) {
         if (button === undefined) continue
         const area = overlap(ruleBox, rect(button))
-        if (area > 0) problems.push(`提问条压住按钮「${label}」：重叠 ${area}px²`)
+        if (area > 0) problems.push(`提问条压住按钮：重叠 ${area}px²`)
       }
     }
   }
@@ -186,7 +203,7 @@ async function main() {
       try {
         // 权限被拒的真实态：错误框和两个按钮都在，才谈得上「点得到」。
         const asked = await requestMediaPermission(page)
-        if (!asked) failures.push(`${width}px：点不到「申请摄像头与麦克风」——它被别的东西盖住了`)
+        if (!asked) failures.push(`${width}px：点不到「申请摄像头与麦克风 / 继续面试」——它被别的东西盖住了`)
         // 四个页签都点一遍：**设置也是页签**，不是第四个没人点的按钮。
         // 每点一次都验证根节点上的 `data-iv-tab` 真的变了——
         // 「点了但没换页」正是截图闸门把设置页截成准备页的那类缺陷。
@@ -265,10 +282,13 @@ async function main() {
           if (retry === undefined) {
             found.push('没有「补上摄像头」按钮')
           } else {
+            // 与 ASSERT 的 hitTest 一致：先滚进视口再命中测试；
+            // 报出「被谁盖住」——只知道「盖住了」定位不了问题。
+            retry.scrollIntoView({ block: 'center', inline: 'nearest' })
             const rect = retry.getBoundingClientRect()
             const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
             if (hit !== retry && !(hit !== null && retry.contains(hit))) {
-              found.push('「补上摄像头」按钮被别的元素盖住了')
+              found.push(`「补上摄像头」按钮被别的元素盖住了：${hit === null ? '（视口外）' : (hit.textContent || '').trim().slice(0, 12)}`)
             }
           }
           if (!text.includes('麦克风已接上')) found.push('错误框没说清「麦克风已接上」')

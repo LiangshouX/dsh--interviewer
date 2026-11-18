@@ -65,6 +65,9 @@ function SettingsView(props) {
       recordVideo: settings.recordVideo,
       recordAudio: settings.recordAudio,
       guardEnabled: settings.guardEnabled,
+      // 回答节奏（docs/TURN-TAKING.md §4.2）：默认 manual——与升级前行为一致。
+      answerMode: settings.answerMode ?? 'manual',
+      turnEndSilenceMs: settings.turnEndSilenceMs === undefined ? '' : String(settings.turnEndSilenceMs),
     })
   }, [data, form])
 
@@ -74,10 +77,13 @@ function SettingsView(props) {
     const cleaned = {}
     for (const [key, value] of Object.entries(patch)) {
       if (value === undefined) continue
-      if (key === 'ttsRate') {
+      if (key === 'ttsRate' || key === 'turnEndSilenceMs') {
         if (value === '') continue
         const number = Number(value)
-        if (!Number.isFinite(number)) { notify('没保存', '语速必须是数字', 'error'); return }
+        if (!Number.isFinite(number)) {
+          notify('没保存', key === 'ttsRate' ? '语速必须是数字' : '静音阈值必须是数字（毫秒）', 'error')
+          return
+        }
         cleaned[key] = number
         continue
       }
@@ -780,6 +786,36 @@ function SettingsView(props) {
           onClick: () => save({ recordVideo: form.recordVideo, recordAudio: form.recordAudio }, 'privacy'),
         }, busy === 'privacy' ? '保存中…' : '保存隐私设置'),
       ]),
+    ]),
+
+    // 回答节奏（docs/TURN-TAKING.md §4）：自动/手动是**用户拥有的开关**。
+    // 面试中随时可在「面试中」页快捷切换，这里是正式条目。
+    section('turn', '回答节奏', [
+      h('div', { key: 'g', style: grid }, [
+        field('answerMode', '模式', h('select', {
+          key: 's',
+          style: S.input,
+          value: form.answerMode,
+          onChange: event => set('answerMode', event.target.value),
+        }, [
+          h('option', { key: 'm', value: 'manual' }, '手动（答完自己点「提交回答」）'),
+          h('option', { key: 'a', value: 'auto' }, '自动（说完静音约 2 秒自动提交）'),
+        ])),
+        field('turnEndSilenceMs', '话轮结束静音（毫秒，800–6000）',
+          input('turnEndSilenceMs', String(effective.turnEndSilenceMs ?? 2000))),
+      ]),
+      actions([
+        h('button', {
+          key: 'save',
+          style: S.btn('primary', busy === 'turn'),
+          onClick: () => save({ answerMode: form.answerMode, turnEndSilenceMs: form.turnEndSilenceMs }, 'turn'),
+        }, busy === 'turn' ? '保存中…' : '保存回答节奏'),
+      ]),
+      h(Quiet, {
+        key: 'q',
+        tone: 'muted',
+        style: { marginTop: 6, alignItems: 'flex-start' },
+      }, '开关只管「自动判定与提交」：手动提交同样会唤醒面试官。自动判定需要宿主/服务端识别；提交前有 2 秒反悔窗口，重新开口即取消。'),
     ]),
 
     section('guard', '面试间保护', [

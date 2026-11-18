@@ -1,4 +1,4 @@
-﻿# dsh-realtime-interview bundle patch
+# dsh-realtime-interview bundle patch
 #
 # One Host row. The row id is the plugin id the Plugin Manager shows;
 # `name` must equal the package name so the client-modules scan resolves this
@@ -50,6 +50,14 @@
 #                   ffmpeg，失败自动回落浏览器采集。
 #   recordVideo     是否默认开启摄像头录像（true/false）。
 #   recordAudio     是否默认开启录音（true/false）。
+#   answerMode      话轮模式：manual | auto（docs/TURN-TAKING.md §4）。
+#                   manual = 回答手动点发送（默认，与旧行为一致）；
+#                   auto = 答完静音约 turnEndSilenceMs 后自动提交。
+#                   **只管判定与自动提交，不管派活**——manual 下手动发送
+#                   同样会唤醒助手出下一题。面板「面试中」页可随时切换。
+#   turnEndSilenceMs 话轮结束的静音阈值（毫秒，800–6000，默认 2000）。
+#                   与 450ms 的转写分段阈值是两回事：分段管字幕准实时，
+#                   这个管「他答完了没有」。仅 auto 模式生效。
 #   ffmpegPath      ffmpeg 的可执行文件路径。
 #                   **摄像头是 Host 侧用 ffmpeg 采的**——DSH 桌面端的 Electron
 #                   权限处理器只放行纯音频请求，摄像头在主进程就被拒了，改
@@ -86,5 +94,7 @@
         ttsRate: 1.0
         recordVideo: true
         recordAudio: true
+        answerMode: 'manual'
+        turnEndSilenceMs: 2000
         ffmpegPath: ''
         chromiumPath: ''

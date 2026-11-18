@@ -234,11 +234,35 @@
      *
      * VAD 用 RMS 阈值 + 静音时长；碎片丢弃（<350ms），避免咳嗽、键盘声
      * 变成一条转录。
+     *
+     * **第二层：话轮结束判定（docs/TURN-TAKING.md §3.1）。** 450ms 是
+     * *转写分段*阈值——人喘口气就切，不能当*话轮结束*用。判定"这一轮
+     * 答完了"要另一条更长的静音线（默认 2s，可配），且必须等
+     * `pending === 0`（所有段都转写完，不丢尾句）。两层**共用同一条 VAD
+     * 帧时间线**：分段照旧切，判定只是读同一条时间线上的空档——语流
+     * 测量（gapBeforeMs 等）一点不受影响。
+     *
+     * options 形状（每帧从 ref 读最新值，回调不进依赖数组）：
+     *   {
+     *     language?: string,
+     *     turnEnd?: {
+     *       armed: boolean,        // 话轮窗口开着（listening/submitting）
+     *       judge: boolean,        // 允许**判定答完**（仅 auto + listening；半双工门控）
+     *       listen: boolean,       // 长沉默观察窗（listening，与模式无关）
+     *       silenceMs?: number,    // 第二层静音阈值，默认 2000
+     *       longSilenceMs?: number // 长沉默阈值，默认 20000
+     *     },
+     *     onVoiceStart?: () => void,             // 窗口内重新开口（反悔窗口取消）
+     *     onTurnEnd?: (info) => void,            // 判定答完（进倒计时）
+     *     onLongSilence?: (info) => void,        // 一直没开口（派事实/给提示）
+     *   }
      */
     const ASR_SILENCE_MS = 450
     const ASR_MAX_SEGMENT_MS = 6000
     const ASR_MIN_SEGMENT_MS = 350
     const ASR_RMS_THRESHOLD = 0.012
+    const TURN_END_SILENCE_MS = 2000
+    const LONG_SILENCE_MS = 20000
 
     /** 合并 Float32 分片。 */
     function mergeChunks(chunks) {
@@ -281,6 +305,12 @@
       const sessionRef = useRef(undefined)
       const onTextRef = useRef(onText)
       onTextRef.current = onText
+      // 话轮判定配置与回调走 ref：音频帧回调（每 ~256ms 一次）读最新值，
+      // 不进 useCallback 依赖——否则每次渲染都会重建整条音频管线。
+      const turnOptionsRef = useRef(options)
+      turnOptionsRef.current = options
+      /** `pending` 的 ref 镜像：帧回调里要同步读，state 读不到最新值。 */
+      const pendingRef = useRef(0)
 
       const supported = typeof window !== 'undefined'
         && typeof navigator !== 'undefined'
@@ -296,6 +326,7 @@
       const flush = useCallback(async (samples, sampleRate, stats) => {
         const wav = encodeWav(resampleTo16k(samples, sampleRate), 16000)
         const dataBase64 = bufferToBase64(wav)
+        pendingRef.current += 1
         setPending(count => count + 1)
         try {
           const result = await apiPost('asr/transcribe', { dataBase64, mimeType: 'audio/wav', language })
@@ -309,6 +340,7 @@
         } catch (failure) {
           setError(`识别请求失败：${failure instanceof Error ? failure.message : String(failure)}`)
         } finally {
+          pendingRef.current = Math.max(0, pendingRef.current - 1)
           setPending(count => Math.max(0, count - 1))
         }
       }, [language])
@@ -375,6 +407,14 @@
             chunks: [], speech: false,
             speechMs: 0, silenceMs: 0, pendingGapMs: 0, lastEndAt: undefined,
             energySum: 0, energySq: 0, energyCount: 0,
+            // ── 话轮结束判定（第二层静音，与分段共用这条帧时间线）──
+            lastVoiceAt: 0,        // 最近一个「有声帧」的时刻（全局，不分窗口）
+            armed: false,          // 上一个武装窗口（false→true 沿=窗口开启）
+            armedAt: 0,            // 本次窗口开启时刻
+            voiceNow: false,       // 窗口内的有声/无声沿检测
+            sawVoice: false,       // 本次窗口内开过口（没开过口≠答完）
+            turnEndFired: false,   // 本次窗口已判定过答完（一次回答只判一次）
+            longSilenceFired: false,
           }
 
           processor.onaudioprocess = event => {
@@ -384,6 +424,64 @@
             const rms = Math.sqrt(sum / input.length)
             const frameMs = (input.length / context.sampleRate) * 1000
             const speaking = rms >= ASR_RMS_THRESHOLD
+
+            // ── 第二层：话轮结束判定 ────────────────────────────────
+            //
+            // 三条硬规则（TURN-TAKING §3）：
+            //  1. 半双工门控：`judge` 只在 listening 相态为真——questioning
+            //     期间扬声器回声会被 RMS 误判为说话，判定必须挂起（分段
+            //     照跑，字幕/语流不丢）；
+            //  2. `pending === 0` 才判：所有段都转写完，不丢尾句；
+            //  3. 窗口内没开过口不判「答完」：一直没说话是**长沉默**，
+            //     报告事实让助手换小切口，而不是提交一个空回答。
+            const turn = turnOptionsRef.current?.turnEnd
+            const now = performance.now()
+            if (speaking) state.lastVoiceAt = now
+            const armed = turn?.armed === true
+            if (armed && !state.armed) {
+              // 窗口开启：以开启时刻为基线，窗口前的静音不算数。
+              state.armed = true
+              state.armedAt = now
+              state.voiceNow = speaking
+              // 开窗那一刻正在说话（抢话/重叠回答）也算「窗口内开过口」——
+              // 否则这段语音没有 false→true 沿，答完判定永远不武装。
+              state.sawVoice = speaking
+              state.turnEndFired = false
+              state.longSilenceFired = false
+            } else if (!armed && state.armed) {
+              state.armed = false
+            }
+            if (armed) {
+              if (speaking && !state.voiceNow) {
+                state.voiceNow = true
+                // 重新开口：本轮判定重新武装（「说完又补一句」必须支持），
+                // 并通知上层取消倒计时（反悔窗口，§3.2）。
+                state.sawVoice = true
+                state.turnEndFired = false
+                turnOptionsRef.current?.onVoiceStart?.()
+              } else if (!speaking && state.voiceNow) {
+                state.voiceNow = false
+              }
+              const silenceStart = Math.max(state.armedAt, state.lastVoiceAt > state.armedAt ? state.lastVoiceAt : 0)
+              const silentFor = now - silenceStart
+              const silenceMs = Number.isFinite(turn?.silenceMs) ? turn.silenceMs : TURN_END_SILENCE_MS
+              const longSilenceMs = Number.isFinite(turn?.longSilenceMs) ? turn.longSilenceMs : LONG_SILENCE_MS
+              // 判定答完：仅 auto（judge），且要等转写落定、窗口内开过口。
+              if (turn?.judge === true) {
+                if (!state.turnEndFired && state.sawVoice && pendingRef.current === 0 && silentFor >= silenceMs) {
+                  state.turnEndFired = true
+                  turnOptionsRef.current?.onTurnEnd?.({ silentFor: Math.round(silentFor) })
+                }
+              }
+              // 长沉默观察与模式无关（listen）：auto 派事实、manual 只提示，
+              // 由上层回调决定（§3.3）。
+              if (turn?.listen === true) {
+                if (!state.longSilenceFired && !state.sawVoice && silentFor >= longSilenceMs) {
+                  state.longSilenceFired = true
+                  turnOptionsRef.current?.onLongSilence?.({ seconds: Math.round(silentFor / 1000) })
+                }
+              }
+            }
 
             if (speaking && !state.speech) {
               // 新的一段开始。与上一段结束之间的空档 = 一次真实的"停住"。
