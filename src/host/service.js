@@ -34,6 +34,7 @@ import { fetchJobDescription } from './jd.js'
 import { extractTextFromUpload } from './extract.js'
 import { CameraService, locateFfmpeg } from './camera.js'
 import { locateChromium } from './camera-browser.js'
+import { createAvatarService } from './avatar.js'
 import { VoiceService } from './voice/index.js'
 import { clearSecret, discoverCredentials, setSecret } from './voice/credentials.js'
 import { voicePresets } from './voice/presets.js'
@@ -209,6 +210,14 @@ export class InterviewService {
      * 桌面端是通的，没必要重造。
      */
     this.camera = new CameraService({ ffmpegPath: this.config.ffmpegPath, chromiumPath: this.config.chromiumPath })
+    /**
+     * 预置面试官形象（只读资源）。
+     *
+     * **它不是摄像头那种会失败的设备。** 形象就躺在包里：
+     * 有字节就发，没有就 404。面试本身从不依赖它——
+     * 客户端拿不到形象只是「舞台上没那张脸」，不是面试失败。
+     */
+    this.avatar = createAvatarService()
     /**
      * 语音能力的门面（识别链路 + 合成链路）。
      *

@@ -68,6 +68,8 @@ function SettingsView(props) {
       // 回答节奏（docs/TURN-TAKING.md §4.2）：默认 manual——与升级前行为一致。
       answerMode: settings.answerMode ?? 'manual',
       turnEndSilenceMs: settings.turnEndSilenceMs === undefined ? '' : String(settings.turnEndSilenceMs),
+      // 虚拟面试官：有效值优先（配置文件写 off 时，面板不该显示成开）。
+      interviewerAvatar: (data.effective?.interviewerAvatar ?? settings.interviewerAvatar) !== 'off',
     })
   }, [data, form])
 
@@ -872,6 +874,27 @@ function SettingsView(props) {
         tone: 'muted',
         style: { marginTop: 6, alignItems: 'flex-start' },
       }, '开关只管「自动判定与提交」：手动提交同样会唤醒面试官。自动判定需要宿主/服务端识别；提交前有 2 秒反悔窗口，重新开口即取消。'),
+    ]),
+
+    // 虚拟面试官：舞台右上角那个会说话的形象。
+    //
+    // **为什么值得一个开关。** 有人就是不喜欢屏幕里有张脸；出问题时这也
+    // 是最快的止血开关（关掉 = 舞台上不挂，其他一律不变）。
+    section('avatar', '面试官形象', [
+      checkbox('interviewerAvatar', '在舞台上显示预置面试官（会跟着提问开口、听你说话时看着你）'),
+      actions([
+        h('button', {
+          key: 'save',
+          style: S.btn('primary', busy === 'avatar'),
+          onClick: () => save(
+            { interviewerAvatar: form.interviewerAvatar === true ? 'on' : 'off' },
+            'avatar',
+          ),
+        }, busy === 'avatar' ? '保存中…' : '保存形象设置'),
+      ]),
+      // 一条出路，不是说明书：外放时面试官的声音会进麦克风。
+      h(Quiet, { key: 'q', tone: 'muted', style: { marginTop: 6, alignItems: 'flex-start' } },
+        '外放时建议戴耳机：扬声器里的提问会被麦克风收进去。'),
     ]),
 
     section('guard', '面试间保护', [

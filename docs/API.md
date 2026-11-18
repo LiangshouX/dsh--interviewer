@@ -622,6 +622,29 @@ ffmpeg -version          # 能出版本号就说明在 PATH 里
 "D:\ProgramFils\ffmpeg\bin\ffmpeg.exe" -version
 ```
 
+## 2.8 虚拟面试官形象（不是 JSON，也是只读）
+
+```
+GET /interviewer/avatar/asset/vendor/mesh-avatar.js                      → 渲染运行时（MIT，187KB）
+GET /interviewer/avatar/asset/vendor/LICENSE-mesh-avatar.txt              → 上游许可
+GET /interviewer/avatar/asset/avatar/interviewer/rig.json                 → 绑定（眼部曲线、嘴、网格）
+GET /interviewer/avatar/asset/avatar/interviewer/avatar.json              → 清单（含 lipSync 口型参数）
+GET /interviewer/avatar/asset/avatar/interviewer/built/*.png|layers.json  → 图层与底图
+```
+
+- **从包内读**（`PACKAGE_DIR/assets`），不进用户的数据根：形象是程序资源，
+  随版本升级，不是用户材料。
+- **白名单两个目录**：`avatar/` 与 `vendor/`。包里其它东西（源码、测试、docs）
+  不经过这条路由；`..`、百分号编码、反斜杠一律拒绝，解析后再复核一次
+  `startsWith(base + sep)`。
+- `content-type` 按扩展名；**`cache-control: no-cache` + `ETag`**——
+  包升级后 URL 不变、内容变了，用 ETag 重新校验而不是让旧脸留到缓存过期。
+- 只允许 `GET`（其余 405）；信任围栏与其它 API 同一条（loopback + 非同站 + 同源）。
+- **拿不到也只是没有那张脸。** 404 / 脚本报错 / 没有 WebGL2 时，客户端在
+  同一位置显示一块「形象不可用 · 面试照常进行」的小牌，面试本身不受影响。
+- 开关在设置项 `interviewerAvatar`（`on` / `off`，默认 `on`），
+  经 `GET /interviewer/api/config` 下发给面板。
+
 ---
 
 ## 3. Agent 工具

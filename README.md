@@ -88,6 +88,12 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
   **不会无限转圈**（状态由 Host 判定，客户端不自己计时）。
 - 语流观察（停顿、语速、填充词、重复、自我修正）由 Host 统一计算；
   只用于调整追问方式与报告「表达」一节，**不打分**。
+- **虚拟面试官（预置形象）**：舞台右上角一个 2D 面试官——她提问时**嘴跟着自己的
+  TTS 音频动**（WebAudio 包络驱动，不是猜的），听你说话时视线跟着你的指针，
+  思考时侧头、平时呼吸与眨眼。**全部素材随包分发**：零下载、零联网、不用 WebGL2
+  以外的任何东西；加载失败只显示一块「形象不可用 · 面试照常进行」的小牌，
+  面试本身不受影响。设置页「面试官形象」可一键关掉。
+  外放会串音，**建议戴耳机**（麦克风已开回声消除，播放期间该段也不送转写）。
 - 录像/录音可关（设置页隐私开关）；录像由 Host 直接写进卷宗目录。
 
 ### 4. 报告
@@ -108,6 +114,7 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 | 摄像头 | 采集后端（auto / 仅 ffmpeg / Chromium 优先）、ffmpeg 路径、Chrome/Edge 路径 |
 | 隐私 | 允许录像、允许录音 |
 | 回答节奏 | 模式（手动 / 自动）、话轮结束静音阈值（800–6000 ms）；「面试中」页有两态快捷切换 |
+| 面试官形象 | 舞台上挂不挂预置面试官（默认挂）；关掉后其余一律不变 |
 | 面试间保护 | 离开确认总开关、恢复「以后不再提醒」 |
 | 环境（只读） | 数据根与理由、面试/档案目录、设置文件、宿主工作区、DSH 工作区登记状态、宿主模型目录与体积、空场次清理 |
 
@@ -171,10 +178,11 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 
 ```bash
 node scripts/build.mjs             # 构建 + 校验 + SSR + 性能 + 布局
-node --test tests/*.test.js        # 单测（约 100+）
+node --test tests/*.test.js        # 单测（约 200）
 node scripts/render-probe.mjs --check
 node scripts/layout-check.mjs --check
 node dev/shoot.mjs                 # 截图到 dev/shots/
+node scripts/check-plan-anchors.mjs  # 复核代码锚点（方案里引用的 file:line 还准不准）
 ```
 
 - `src/client/` 是浏览器半边源码，`client.js` 是 `scripts/build-client.mjs` 拼出来的生成物，**不许手改**。
@@ -187,10 +195,16 @@ node dev/shoot.mjs                 # 截图到 dev/shots/
 - **语音模型速查**：[docs/VOICE-TTS.md](docs/VOICE-TTS.md)（TTS 模型 ID / 音色含简介 / 快速对接）、
   [docs/VOICE-ASR.md](docs/VOICE-ASR.md)（ASR 模型 ID / 快速对接）——接入不用再去翻官方文档。
 - **未来计划**：[ROADMAP.md](ROADMAP.md)（音色克隆 / 音色设计 / 实时语音 / 配置注入等未实现与待优化项）。
+- **虚拟面试官素材**（自制原画 + 绑定 + 出处与复现步骤）：[`assets/avatar/interviewer/NOTICE.txt`](assets/avatar/interviewer/NOTICE.txt)。
+  运行时是 mesh-avatar（MIT，`assets/vendor/`）；作者工具链用 RuiC-2D（MIT），**运行时不依赖它**。
 
 ## 已知边界
 
 - 摄像头画面只能由 Host 采：DSH 桌面端渲染进程的权限处理只放行纯音频。
+- **虚拟面试官依赖 WebGL2**：少数远程桌面 / 显卡被屏蔽的环境里跑步起来，
+  这时舞台上那块小窗显示「形象不可用 · 面试照常进行」。走浏览器音色播报时
+  **没有口型**（`speechSynthesis` 的输出进不了 WebAudio，做不了真同步）——
+  只做说话姿态，不假装在对口型。
 - 侧栏离开拦截依赖 DSH 侧栏以 click 触发导航（实测如此）；非 click 的程序化跳转拦不住，
   但卸载时一定会释放设备。
 - 语音识别不支持流式：宿主的 `speechToText` 只有整段转写，准实时靠客户端分段。

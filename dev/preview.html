@@ -18,6 +18,8 @@
     // ── 桩宿主：只提供插件真正用到的那几个能力 ──────────────────────────
     window.__CAPTURED__ = {}
     window.__PREVIEW__ = { mode: 'prepare', media: 'granted' }
+    // 形象素材走的是**真字节**（不是 JSON 假数据）：它必须由静态服务器发。
+    const nativeFetch = window.fetch.bind(window)
 
     // 预设要指定主题时，先把用户的选择写进去——
     // 面板启动时读的就是这个键，这样截图和断言跑的是用户真的看到的那一套。
@@ -35,6 +37,12 @@
     }
 
     window.fetch = async function (url, options) {
+      // 形象素材（rig.json / avatar.json / PNG / 运行时）是**静态字节**，
+      // 不是 API：原样交给静态服务器（scripts/browser.mjs 的 serve 已把
+      // /interviewer/avatar/asset/* 映射到包内 assets/，照抄 Host 那条路由）。
+      if (String(url).indexOf('/interviewer/avatar/asset/') === 0) {
+        return nativeFetch(url, options)
+      }
       const path = String(url).replace('/interviewer/api', '')
       // 预览里的写操作也要**落到同一份假数据**上：保存完再刷新，
       // 看到的不该还是保存前那一段（截图/探针会因此假装保存失败）。

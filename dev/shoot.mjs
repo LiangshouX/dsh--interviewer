@@ -282,6 +282,10 @@ async function main() {
           const live = document.querySelector('[data-iv-live]')
           if (live !== null) live.scrollTop = 0
         })
+        // 面试官画中画：15 张 PNG + 一次 WebGL 初始化，截早了就是一块空框
+        // （"看不出渲染有没有成功"和"渲染失败了"在截图里长得一样）。
+        await page.waitForSelector('[data-iv-avatar]', { timeout: 2000 }).catch(() => {})
+        await page.waitForTimeout(600)
       }
       await interact(page, preset, errors)
       const file = join(SHOTS, `${preset.name}.png`)

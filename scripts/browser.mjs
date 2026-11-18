@@ -129,10 +129,17 @@ export function launchOptions() {
  * @returns {Promise<{server: any, port: number}>}
  */
 export async function serve(root) {
-  const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' }
+  const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.json': 'application/json; charset=utf-8' }
+  /** Host 那条只读路由（docs/API.md §2.8）：预览里照抄一份，否则看不到形象的实图。 */
+  const ASSET_ROUTE = '/interviewer/avatar/asset/'
   const server = createServer(async (req, res) => {
     const requested = decodeURIComponent((req.url ?? '/').split('?')[0])
-    const path = join(root, requested)
+    // 预览服务器是**仓库根**，而运行时/形象素材在包内 `assets/` 下——
+    // 这条前缀映射就是 Host `src/host/avatar.js` 的白名单（只有这两个目录）。
+    const relative = requested.startsWith(ASSET_ROUTE)
+      ? join('assets', requested.slice(ASSET_ROUTE.length))
+      : requested
+    const path = join(root, relative)
     if (!path.startsWith(root)) {
       res.writeHead(403)
       res.end('forbidden')

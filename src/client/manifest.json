@@ -7,6 +7,7 @@
     "40-api.js",
     "50-hooks.js",
     "60-voice.js",
+    "61-avatar.js",
     "70-primitives.js",
     "80-views.js",
     "81-settings.js",

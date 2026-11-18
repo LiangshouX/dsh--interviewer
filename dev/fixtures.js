@@ -54,7 +54,7 @@
   // 出现上一问的文本，看着像 bug。
   const dialogue = [
     ['先做个自我介绍吧，讲一段你认为最能代表你的经历。',
-      '好的。我在招商银行做了两年半后端，主要负责交易核心链路，包括订单、账务和清结算三个子系统。其中清结算的日终批处理是我从零搭起来的。'],
+      '好的。我在恒信银行做了两年半后端，主要负责交易核心链路，包括订单、账务和清结算三个子系统。其中清结算的日终批处理是我从零搭起来的。'],
     ['你刚才提到日终批处理，峰值流量大概是多少？当时的瓶颈在哪里？',
       '日终大概两百万笔，集中在晚上十一点到凌晨一点。最初的瓶颈是数据库的批量更新，单条提交跑了四十分钟，后来改成了批量合并提交加临时表，降到大概二十分钟。'],
     ['为什么选择临时表而不是直接用 MySQL 的批量插入？两者在你这个场景下的差别是什么？',
@@ -87,13 +87,13 @@
   const presetStatus = presetAll === undefined || presetAll === null ? undefined : presetAll.status
   const session = {
     id: 'iv-20261116-a3f1',
-    title: '字节 · 高级后端工程师',
+    title: '远星 · 高级后端工程师',
     role: 'candidate',
     // 预设可以改状态（`status: 'done'` 用来截「续接板」，`paused` 截暂停板）。
     status: typeof presetStatus === 'string' ? presetStatus : 'running',
     // 左栏按公司分组：没有这两项，截图里所有场次都会掉进「未整理」，
     // 分组、折叠、行内岗位名三件事就全看不见了。
-    company: '字节跳动',
+    company: '远星科技',
     position: '高级后端工程师',
     createdAt: now - 5400000,
     startedAt: now - 3600000,
@@ -123,7 +123,7 @@
     documents: {
       resumeChars: 4820,
       jdChars: 2130,
-      jdUrl: 'https://jobs.bytedance.com/position/123456/detail',
+      jdUrl: 'https://jobs.example.com/position/123456/detail',
       jdSections: { overview: '高级后端工程师', responsibilities: '…', requirements: '…', bonus: '…' },
       jdWarnings: [],
     },
@@ -189,13 +189,13 @@
 2. 分布式事务先问"你们线上出过一致性问题吗"，从故事进
 `
 
-  const resumeText = `梁守 / 男 / 2.5 年后端 / 招商银行
+  const resumeText = `陈屿 / 男 / 2.5 年后端 / 恒信银行
 
 教育
-2018.09 - 2022.06  华中科技大学  软件工程  本科
+2018.09 - 2022.06  南岭大学  软件工程  本科
 
 工作经历
-2022.07 - 至今  招商银行  总行信息技术部  后端开发工程师
+2022.07 - 至今  恒信银行  总行信息技术部  后端开发工程师
 
 2023.03 - 2024.09  交易核心链路（订单、账务、清结算）
 - 负责订单中心与账务系统的接口开发与治理，日订单峰值 320 万笔。
@@ -375,7 +375,7 @@ Nginx、Prometheus / Grafana、Kubernetes`
       chromium: { found: true, path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', source: 'system' },
     },
     speechModel: {
-      exists: true, dir: 'C:\\Users\\31770\\.dsh\\models\\sensevoice',
+      exists: true, dir: 'C:\\Users\\example\\.dsh\\models\\sensevoice',
       bytes: 268435456, files: 12, provider: 'sherpa-onnx',
     },
     dataRoot: {
@@ -386,7 +386,7 @@ Nginx、Prometheus / Grafana、Kubernetes`
     },
     sessionsDir: 'D:\\DSH-REALTIME-INTERVIEW-ROOT\\workspaces',
     profilesDir: 'D:\\DSH-REALTIME-INTERVIEW-ROOT\\profiles',
-    settingsFile: 'C:\\Users\\31770\\.dsh\\profiles\\desktop\\dsh-realtime-interview.json',
+    settingsFile: 'C:\\Users\\example\\.dsh\\profiles\\desktop\\dsh-realtime-interview.json',
     hostWorkspace: { path: 'D:\\Code\\Node\\DSH-INTERVIEWER-ROOT' },
     workspaceRegistration: {
       registered: true,
@@ -401,13 +401,66 @@ Nginx、Prometheus / Grafana、Kubernetes`
   // 否则「保存后刷新还是旧正文」——截图和探针都会被假数据骗。
   const docs = { resume: resumeText, jd: jdText }
   const library = [
-    { id: 'rs-20261116-a91c', title: '字节跳动 · 高级后端工程师', text: resumeText, chars: resumeText.length, createdAt: now - 5400000, updatedAt: now - 3600000 },
-    { id: 'rs-20261110-b72d', title: '阿里巴巴 · 金融科技开发（Java）', text: '阿里巴巴 · 金融科技开发\n\n3 年 Java 后端，做过支付清结算与账务系统。', chars: 42, createdAt: now - 700000000, updatedAt: now - 690000000 },
-    { id: 'rs-20261028-c18e', title: '小红书 · 后端开发工程师（社区方向 · 推荐与内容安全）', text: '小红书 · 后端开发\n\n内容安全与推荐链路的服务端开发。', chars: 28, createdAt: now - 1800000000, updatedAt: now - 1790000000 },
+    { id: 'rs-20261116-a91c', title: '远星科技 · 高级后端工程师', text: resumeText, chars: resumeText.length, createdAt: now - 5400000, updatedAt: now - 3600000 },
+    { id: 'rs-20261110-b72d', title: '云澜科技 · 金融科技开发（Java）', text: '云澜科技 · 金融科技开发\n\n3 年 Java 后端，做过支付清结算与账务系统。', chars: 42, createdAt: now - 700000000, updatedAt: now - 690000000 },
+    { id: 'rs-20261028-c18e', title: '青柚社区 · 后端开发工程师（社区方向 · 推荐与内容安全）', text: '青柚社区 · 后端开发\n\n内容安全与推荐链路的服务端开发。', chars: 28, createdAt: now - 1800000000, updatedAt: now - 1790000000 },
   ]
+
+  /**
+   * 一段假播报音频：220Hz 正弦 + 音节包络（16kHz 单声道 WAV，base64）。
+   *
+   * 它存在的唯一理由：**让"TTS 字节 → 分析器 → 音量 → 口型"这条链在预览里真的跑一遍。**
+   * 静态假数据（回一个 `{}`）只会走到浏览器音色兜底，而兜底按设计就没有口型。
+   */
+  const demoSpeechWav = () => {
+    const sampleRate = 16000
+    const seconds = 2.2
+    const count = Math.floor(sampleRate * seconds)
+    const buffer = new ArrayBuffer(44 + count * 2)
+    const view = new DataView(buffer)
+    const text = (offset, value) => {
+      for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index))
+    }
+    text(0, 'RIFF')
+    view.setUint32(4, 36 + count * 2, true)
+    text(8, 'WAVE')
+    text(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, 1, true)
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, sampleRate * 2, true)
+    view.setUint16(32, 2, true)
+    view.setUint16(34, 16, true)
+    text(36, 'data')
+    view.setUint32(40, count * 2, true)
+    for (let index = 0; index < count; index += 1) {
+      const t = index / sampleRate
+      // 每 0.28s 一个音节：振幅 0.62 × 半正弦包络 → 听起来像"在说话"，RMS 也在响。
+      const syllable = Math.abs(Math.sin((Math.PI * t) / 0.28))
+      const rise = Math.min(1, t * 8)
+      const sample = Math.sin(2 * Math.PI * 220 * t) * 0.62 * syllable * rise
+      view.setInt16(44 + index * 2, Math.round(sample * 32767), true)
+    }
+    let binary = ''
+    const bytes = new Uint8Array(buffer)
+    for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index])
+    return btoa(binary)
+  }
 
   window.__FIXTURES__ = {
     route(path, preview, method = 'GET', body = {}) {
+      // 播报：**给一段真音频**。
+      //
+      // **为什么预览也要真字节。** 口型是"TTS 音频 → 分析器 → 音量 → 嘴"这条链，
+      // 只回 `{}`（假的失败）就永远只能看到浏览器音色兜底——而兜底**本来就没有
+      // 口型**。要验证「说话时嘴在动」，就得真的有一段能被 WebAudio 分析的波形。
+      //
+      // **必须在 POST 分支之前。** POST 分支对认不出的写操作会兜底回 `{ok:true}`，
+      // 放到后面就永远轮不到这里（踩过一次：截图里嘴一动不动，以为口型坏了）。
+      if (path === '/tts/speak') {
+        return { ok: true, audioBase64: demoSpeechWav(), mimeType: 'audio/wav' }
+      }
       if (method === 'POST') {
         const parts = path.split('/').filter(part => part !== '')
         if (parts[0] === 'resume' && parts[1] === 'extract') {
@@ -545,7 +598,7 @@ Nginx、Prometheus / Grafana、Kubernetes`
           return {
             resume: docs.resume,
             jd: docs.jd,
-            jdMeta: { url: 'https://jobs.bytedance.com/position/123456/detail', sections: {}, warnings: [] },
+            jdMeta: { url: 'https://jobs.example.com/position/123456/detail', sections: {}, warnings: [] },
           }
         }
         if (path === '/sessions/records') {
@@ -559,7 +612,7 @@ Nginx、Prometheus / Grafana、Kubernetes`
                 checklistCount: 14, recordings: 2, bytes: 12582912, running: session.status === 'running',
               },
               {
-                id: 'iv-20261115-9d2e', title: '阿里 · 金融科技开发', company: '阿里巴巴', position: '金融科技开发',
+                id: 'iv-20261115-9d2e', title: '云澜 · 金融科技开发', company: '云澜科技', position: '金融科技开发',
                 status: 'done', createdAt: now - 86400000, updatedAt: now - 80000000,
                 archived: false, turns: 42, hasResume: true, hasJd: true, hasReport: true,
                 checklistCount: 11, recordings: 0, bytes: 3145728, running: false,
@@ -586,23 +639,23 @@ Nginx、Prometheus / Grafana、Kubernetes`
             sessions: [
               { ...session, checklistCount: 14, probedCount: 5, hasResume: true, hasJd: true, hasReport: false },
               {
-                id: 'iv-20261115-9d2e', title: '阿里 · 金融科技开发', role: 'candidate', status: 'done',
-                company: '阿里巴巴', position: '金融科技开发',
+                id: 'iv-20261115-9d2e', title: '云澜 · 金融科技开发', role: 'candidate', status: 'done',
+                company: '云澜科技', position: '金融科技开发',
                 createdAt: now - 86400000, updatedAt: now - 80000000, hasResume: true, hasJd: true,
                 checklistCount: 11, probedCount: 11, hasReport: true,
               },
               {
-                id: 'iv-20261114-7b1c', title: '美团 · 后端开发（自测）', role: 'candidate', status: 'done',
-                company: '美团', position: '后端开发（自测）',
+                id: 'iv-20261114-7b1c', title: '拾光网络 · 后端开发（自测）', role: 'candidate', status: 'done',
+                company: '拾光网络', position: '后端开发（自测）',
                 createdAt: now - 172800000, updatedAt: now - 170000000, hasResume: true, hasJd: false,
                 checklistCount: 8, probedCount: 8, hasReport: true,
               },
               {
                 // 同公司第二场 + 一个明显过长的标题：用来目检「组里有几场」
                 // 和「被截断的标题悬停能看全」。
-                id: 'iv-20261112-4e8a', title: '字节跳动 · 高级后端工程师（三面 · 数据库与高并发场景设计）',
+                id: 'iv-20261112-4e8a', title: '远星科技 · 高级后端工程师（三面 · 数据库与高并发场景设计）',
                 role: 'candidate', status: 'done',
-                company: '字节跳动', position: '高级后端工程师',
+                company: '远星科技', position: '高级后端工程师',
                 createdAt: now - 300000000, updatedAt: now - 200000000, hasResume: true, hasJd: true,
                 checklistCount: 12, probedCount: 12, hasReport: true,
               },
@@ -621,8 +674,8 @@ Nginx、Prometheus / Grafana、Kubernetes`
       if (path.startsWith('/profiles')) {
         return {
           profiles: [
-            { id: 'pf-2026111-a2c9', title: '字节 · 高级后端工程师', company: '字节跳动', jdUrl: 'https://jobs.bytedance.com/…', jdChars: 2130, checklistCount: 14, sessions: ['iv-20261116-a3f1'], createdAt: now - 86400000, updatedAt: now - 3600000 },
-            { id: 'pf-2026103-c8b4', title: '阿里 · 金融科技开发', company: '阿里巴巴', jdUrl: '', jdChars: 1980, checklistCount: 11, sessions: ['iv-20261115-9d2e'], createdAt: now - 172800000, updatedAt: now - 80000000 },
+            { id: 'pf-2026111-a2c9', title: '远星 · 高级后端工程师', company: '远星科技', jdUrl: 'https://jobs.example.com/…', jdChars: 2130, checklistCount: 14, sessions: ['iv-20261116-a3f1'], createdAt: now - 86400000, updatedAt: now - 3600000 },
+            { id: 'pf-2026103-c8b4', title: '云澜 · 金融科技开发', company: '云澜科技', jdUrl: '', jdChars: 1980, checklistCount: 11, sessions: ['iv-20261115-9d2e'], createdAt: now - 172800000, updatedAt: now - 80000000 },
           ],
         }
       }

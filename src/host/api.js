@@ -17,6 +17,7 @@
  */
 import { API_PREFIX } from './paths.js'
 import { FRAME_BOUNDARY } from './camera.js'
+import { AVATAR_ASSET_PATH } from './avatar.js'
 
 /** Largest JSON body the plugin accepts (resume + JD + a few fields). */
 const MAX_BODY_BYTES = 8 * 1024 * 1024
@@ -143,6 +144,24 @@ export function registerApi(ctx, service) {
         return
       }
 
+      // 预置面试官形象：**只读、非 JSON**，同样在 JSON 前缀判断之前拦下。
+      //
+      // 路径形如 /interviewer/avatar/asset/vendor/mesh-avatar.js 与
+      // /interviewer/avatar/asset/avatar/interviewer/rig.json，相对于包内
+      // assets/ 目录（见 avatar.js）。白名单与目录穿越校验都在 avatar.js 里。
+      //
+      // 信任围栏已经在上面统一检查过（loopback host + 非同站 + 同源 Origin），
+      // 这条分支在同一个 handler 里 → 不需要第二套校验。
+      if (url.pathname.startsWith(AVATAR_ASSET_PATH)) {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('method not allowed')
+          return
+        }
+        await service.avatar.serveAsset(res, url.pathname.slice(AVATAR_ASSET_PATH.length), req)
+        return
+      }
+
       const prefix = `${API_PREFIX}/api/`
       if (!url.pathname.startsWith(prefix)) {
         sendJson(res, 404, { ok: false, error: '未知接口' })
@@ -196,6 +215,8 @@ async function readResource(service, segments, query) {
       // 面板 Live 页的快捷切换读写同一份 settings。
       answerMode: effective.answerMode ?? 'manual',
       turnEndSilenceMs: effective.turnEndSilenceMs ?? 2000,
+      // 虚拟面试官：'on' | 'off'。面板据此决定舞台上挂不挂形象。
+      interviewerAvatar: effective.interviewerAvatar ?? 'on',
       // 工作区根：界面要能回答「数据存到哪儿了、为什么是这个目录」。
       workspaceRoot: await service.location(),
       jdFetchTimeoutMs: effective.jdFetchTimeoutMs,

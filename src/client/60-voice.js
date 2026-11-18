@@ -37,6 +37,34 @@
     }
 
     /**
+     * 共用的 AudioContext。
+     *
+     * **为什么是共用的。** 浏览器的规则是「没有用户手势就没有跑起来的音频上下文」：
+     * 手势里建的那个是 `running`，之后（比如助手的回复到了才播报）再建一个只会
+     * 是 `suspended`。
+     *
+     * 这对口型是**要害**：`createMediaElementSource` 会把这个 `<audio>` 的输出
+     * **接管**进音频图——上下文没跑起来，声音就没有了。所以：
+     *
+     *   1. 只在 `unlockAudio()`（第一次用户手势）里建它；
+     *   2. 接分析器之前先看 `state === 'running'`；
+     *   3. 不 running 就**不接**（降级成无口型），绝不为了口型把声音弄没。
+     */
+    let sharedAudioContext
+    function audioGraphContext() {
+      if (typeof window === 'undefined') return undefined
+      if (sharedAudioContext !== undefined) return sharedAudioContext
+      const Ctor = window.AudioContext ?? window.webkitAudioContext
+      if (Ctor === undefined) return undefined
+      try {
+        sharedAudioContext = new Ctor()
+      } catch {
+        return undefined
+      }
+      return sharedAudioContext
+    }
+
+    /**
      * 在第一次用户手势里解锁音频。
      *
      * **为什么必须做。** 服务端合成返回的是音频字节，播放走 `new Audio()`；
@@ -48,9 +76,9 @@
       if (audioUnlocked || typeof window === 'undefined') return
       audioUnlocked = true
       try {
-        const Ctor = window.AudioContext ?? window.webkitAudioContext
-        if (Ctor !== undefined) {
-          const context = new Ctor()
+        // 共用同一个上下文：解锁掉的那一个，就是之后量音量用的那一个。
+        const context = audioGraphContext()
+        if (context !== undefined) {
           context.resume?.()
           const oscillator = context.createOscillator()
           const gain = context.createGain()
@@ -59,7 +87,6 @@
           gain.connect(context.destination)
           oscillator.start()
           oscillator.stop(context.currentTime + 0.01)
-          setTimeout(() => { context.close?.() }, 200)
         }
       } catch {
         // 解锁失败不影响功能：播放时会再试一次，失败就回落浏览器音色。
@@ -85,8 +112,74 @@
       /** 每次新的朗读 +1；旧的请求回来时看到代际不对就丢弃。 */
       const generationRef = useRef(0)
 
+      // ── 播报音量通道（给口型用）───────────────────────────────────────
+      //
+      // **为什么不放 state。** 口型每帧都在变；放进 useState 就是每帧重渲染整个
+      // 面板，直接踩穿 AGENTS §11 的红线（「空闲轮询引发的重渲染 = 0 次」）。
+      // 所以：值只活在 ref 里，读取函数用 useCallback 固定身份，形象层的 rAF
+      // 循环直接读——全程不触发任何 React 更新。
+      //
+      // 两条硬约束（错了不报错，只是「没声音」，最难查）：
+      //   1. `createMediaElementSource` 对同一个元素**只能调一次**；
+      //   2. 接管之后**必须**再接回 `destination`，否则声音直接消失。
+      const levelRef = useRef(0)
+      const analyserRef = useRef(undefined)
+
+      /** 把播报用的 `<audio>` 接进音频图，用来量音量。失败返回 undefined（降级无口型）。 */
+      const attachAnalyser = useCallback(audio => {
+        if (analyserRef.current !== undefined) return analyserRef.current
+        const context = audioGraphContext()
+        if (context === undefined) return undefined
+        // 上下文必须已经在跑（= 用户手势后 unlockAudio 建的那一个）。
+        // 不 running 就**不接**：接了却没跑，面试官会没有声音。
+        if (context.state !== 'running') {
+          try { void context.resume() } catch { /* 还是静音，那就放弃口型 */ }
+          return undefined
+        }
+        try {
+          const source = context.createMediaElementSource(audio)
+          const analyser = context.createAnalyser()
+          analyser.fftSize = 1024
+          analyser.smoothingTimeConstant = 0
+          source.connect(analyser)
+          // ★ 少了这一行，面试官就没有声音。
+          source.connect(context.destination)
+          analyserRef.current = { context, source, analyser, buffer: new Float32Array(analyser.fftSize) }
+          return analyserRef.current
+        } catch {
+          // 同一个元素只能接一次：第二次调用抛错 → 放弃分析，播放照旧。
+          return undefined
+        }
+      }, [])
+
+      /**
+       * 当前播报音量 0..1。**恒定身份**，调用方可以直接放进 rAF 循环。
+       *
+       * 口径：与 ASR 侧同一条静音线（0.012），但**满刻度更宽**（0.18 而不是
+       * 0.08）—— 口型要的是"张合有层次"，不是"过阈值就是 1"。平方根做感知
+       * 校正：小声也要看得见嘴动。
+       */
+      const readLevel = useCallback(() => {
+        const entry = analyserRef.current
+        if (entry === undefined) return 0
+        const { analyser, buffer } = entry
+        analyser.getFloatTimeDomainData(buffer)
+        let sum = 0
+        for (let index = 0; index < buffer.length; index += 1) sum += buffer[index] * buffer[index]
+        const rms = Math.sqrt(sum / buffer.length)
+        const level = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, (rms - 0.012) / 0.18))))
+        levelRef.current = level
+        return level
+      }, [])
+
+      /** 停止/播完：嘴必须立刻闭上（别半张着）。 */
+      const quieten = useCallback(() => {
+        levelRef.current = 0
+      }, [])
+
       const stop = useCallback(() => {
         generationRef.current += 1
+        quieten()
         const audio = audioRef.current
         if (audio !== undefined) {
           try {
@@ -98,7 +191,7 @@
           try { window.speechSynthesis.cancel() } catch { /* 没有在播 */ }
         }
         setSpeaking(false)
-      }, [])
+      }, [quieten])
 
       useEffect(() => () => stop(), [stop])
 
@@ -126,6 +219,8 @@
       /** 浏览器音色（最后一步）：中文优先、按名称挑最自然的。 */
       const speakBrowser = useCallback((text, rate) => {
         if (typeof window === 'undefined' || window.speechSynthesis === undefined) return false
+        // 系统音色进不了音频图 → 这一段没有口型，音量通道归零。
+        quieten()
         const sentences = splitSentences(text)
         if (sentences.length === 0) return false
         try {
@@ -143,7 +238,7 @@
         }
         setSpeaking(true)
         return true
-      }, [])
+      }, [quieten])
 
       /**
        * 播报：**逐句流水线**。
@@ -170,6 +265,8 @@
         /** 按句序存放 objectURL；undefined = 还没好，null = 这句失败。 */
         const parts = new Array(chunks.length)
         const audio = audioRef.current ?? (audioRef.current = new Audio())
+        // 接一次就够（同一个元素只能接一次）；接不上就只是没有口型。
+        attachAnalyser(audio)
         let cursor = 0
         let pumping = false
 
@@ -201,7 +298,11 @@
             try { URL.revokeObjectURL(part) } catch { /* 已回收 */ }
           }
           pumping = false
-          if (generation === generationRef.current && cursor >= chunks.length) setSpeaking(false)
+          if (generation === generationRef.current && cursor >= chunks.length) {
+            // 播完立刻闭嘴：口型读的是音量，残余包络会让嘴继续动一下。
+            quieten()
+            setSpeaking(false)
+          }
         }
 
         for (let index = 0; index < chunks.length; index += 1) {
@@ -220,9 +321,11 @@
           })
         }
         return true
-      }, [status?.mode, config?.ttsRate, fetchClip, speakBrowser, stop])
+      }, [status?.mode, config?.ttsRate, fetchClip, speakBrowser, stop, attachAnalyser, quieten])
 
-      return { speak, stop, speaking, notice, supported: typeof window !== 'undefined' }
+      // 浏览器音色兜底：`speechSynthesis` 的输出**进不了音频图**（拿不到波形），
+      // 所以这条路径没有口型——只可能有说话姿态。如实降级，不假装同步。
+      return { speak, stop, speaking, notice, readLevel, supported: typeof window !== 'undefined' }
     }
 
     /**
@@ -249,6 +352,7 @@
      *       armed: boolean,        // 话轮窗口开着（listening/submitting）
      *       judge: boolean,        // 允许**判定答完**（仅 auto + listening；半双工门控）
      *       listen: boolean,       // 长沉默观察窗（listening，与模式无关）
+     *       echoGuard?: boolean,   // 面试官正在说：这一段**不送转写**（回声）
      *       silenceMs?: number,    // 第二层静音阈值，默认 2000
      *       longSilenceMs?: number // 长沉默阈值，默认 20000
      *     },
@@ -390,7 +494,13 @@
           return false
         }
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+          // **回声消除必须开。** 面试官是外放的：他的声音从扬声器出来会被
+          // 麦克风收进去，RMS 判定"有人在说话"，然后被转写成候选人的回答。
+          // 摄像头那条路早就开了（50-hooks.js），这里以前漏了——装上虚拟面试官
+          // 之后这条缝会被放大（每轮都在说、还更响）。与摄像头路径对齐。
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true },
+          })
           const Ctor = window.AudioContext ?? window.webkitAudioContext
           let context
           try {
@@ -514,7 +624,16 @@
             state.chunks = []
             state.speech = false
             state.lastEndAt = performance.now()
-            if (stats.speechMs >= ASR_MIN_SEGMENT_MS) void flush(merged, context.sampleRate, stats)
+            // **面试官说话期间（echoGuard）不送转写。** 半双工门控只挡住了
+            // 「判定答完」（judge 只在 listening 为真），分段**照跑**——于是
+            // 扬声器的回声会被转写成"候选人的回答"。
+            //
+            // 这里只丢**这一段的字节**，不动 VAD/时间线：能量统计、静音账本、
+            // 长沉默观察全都照旧（那条逻辑已经是对的，不要顺手改它）。
+            const echoGuard = turnOptionsRef.current?.turnEnd?.echoGuard === true
+            if (!echoGuard && stats.speechMs >= ASR_MIN_SEGMENT_MS) {
+              void flush(merged, context.sampleRate, stats)
+            }
           }
 
           source.connect(processor)

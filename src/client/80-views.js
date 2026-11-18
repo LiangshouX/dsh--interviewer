@@ -2033,6 +2033,10 @@
           // （一次回答只派活一次——新问题到达前，说的话进草稿不自动提交）。
           judge: autoDetectActive && turnPhase === 'listening' && !tts.speaking,
           listen: running && !paused && turnPhase === 'listening',
+          // 回声治理：面试官正在说（questioning 相位）时，麦克风分段的字节
+          // **不送去转写**——否则扬声器里的问题会被写成"候选人的回答"。
+          // 只丢字节，不动 VAD 时间线与判定（那条已经是对的，别顺手改）。
+          echoGuard: running && !paused && turnPhase === 'questioning',
           silenceMs: turnEndSilenceMs,
         },
         onVoiceStart: () => {
@@ -3068,6 +3072,21 @@
               width: '100%', height: '100%', objectFit: 'cover',
               transform: 'scaleX(-1)', display: 'block',
             },
+          })
+          : null,
+        // 面试官：画中画，贴右上角（不改主布局，绝对定位天然被舞台裁切）。
+        //
+        // 只在**舞台有画面**时出现：未接通板/暂停板/续接板是那个时刻的主角，
+        // 一张脸浮在报错板上会读成"坏了还叠一层"（AGENTS §7 的降级纪律）。
+        hasAnyVideo && !paused && !isDone && config?.interviewerAvatar !== 'off'
+          ? h(AvatarPiP, {
+            key: 'avatar',
+            phase: turnPhase,
+            // 嘴只跟**音频**走：这是 `useSpeech` 的真实播放状态（浏览器音色时
+            // 也是 true，但那时音量恒为 0 → 嘴不动，诚实降级）。
+            speaking: tts.speaking === true,
+            // **非响应式**音量通道：每帧读，不进 state（AGENTS §11）。
+            readLevel: tts.readLevel,
           })
           : null,
         hasAnyVideo

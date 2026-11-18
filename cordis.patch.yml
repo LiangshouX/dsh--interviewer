@@ -74,6 +74,10 @@
 #   turnEndSilenceMs 话轮结束的静音阈值（毫秒，800–6000，默认 2000）。
 #                   与 450ms 的转写分段阈值是两回事：分段管字幕准实时，
 #                   这个管「他答完了没有」。仅 auto 模式生效。
+#   interviewerAvatar 虚拟面试官形象：on | off（默认 on）。
+#                   on  = 面试中舞台右上角挂一个会说话、会看你的预置面试官；
+#                   off = 不挂。形象是**增强**不是前提：加载失败也只是没那张脸，
+#                   面试照常进行。素材随包分发（assets/），不用联网、不用下载模型。
 #   ffmpegPath      ffmpeg 的可执行文件路径。
 #                   **摄像头是 Host 侧用 ffmpeg 采的**——DSH 桌面端的 Electron
 #                   权限处理器只放行纯音频请求，摄像头在主进程就被拒了，改
@@ -112,5 +116,6 @@
         recordAudio: true
         answerMode: 'manual'
         turnEndSilenceMs: 2000
+        interviewerAvatar: 'on'
         ffmpegPath: ''
         chromiumPath: ''

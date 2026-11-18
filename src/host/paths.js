@@ -37,6 +37,18 @@ export const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..'
 /** Release-state skill directory (`build/skills`) — the only skill root the runtime serves. */
 export const SKILL_DIR = join(PACKAGE_DIR, 'build', 'skills')
 
+/**
+ * 只读的**程序资源**目录（预置面试官形象与它的渲染运行时）。
+ *
+ * **为什么放在包内、不放工作区根。** 这些字节是随版本走的素材，不是用户数据：
+ * 升级插件时形象一起升级，删掉工作区也不会把「面试官」一起删掉。
+ * 与 `build/skills` 从包目录服务的先例一致（AGENTS §3 管的是用户数据）。
+ *
+ * 分发前提：`package.json` 的 `files` 里必须有 `"assets"`，否则 tarball
+ * 里没有这个目录，路由只会 404（`tests/avatar.test.js` 盯住这个契约）。
+ */
+export const ASSET_DIR = join(PACKAGE_DIR, 'assets')
+
 /** The route prefix the plugin owns. */
 export const API_PREFIX = '/interviewer'
 
@@ -164,6 +176,10 @@ export const SETTING_SPECS = {
   // 派活寻址改用 per-session 的 session.json.agentSessionId（§6.2），
   // 全局键撑不住「精确找回这一场的助手会话」的语义。
   agentSessionId: { kind: 'string' },
+  // 虚拟面试官：舞台右上角那个会说话的形象。
+  //   on  预置形象挂在面试中舞台上（默认）
+  //   off 不挂——有人不喜欢屏幕里有张脸，也方便出问题时一键关掉
+  interviewerAvatar: { kind: 'enum', values: ['on', 'off'] },
 }
 
 export const SETTING_KEYS = Object.keys(SETTING_SPECS)
@@ -359,6 +375,7 @@ export const BUNDLE_DEFAULTS = {
   recordAudio: true,
   answerMode: 'manual',
   turnEndSilenceMs: 2000,
+  interviewerAvatar: 'on',
   ffmpegPath: '',
   chromiumPath: '',
 }
@@ -444,6 +461,8 @@ export function resolveConfig(raw) {
     // 已适应的节奏；auto 稳定后翻默认只是一行改动。
     answerMode: oneOf(config.answerMode, ['manual', 'auto'], 'manual'),
     turnEndSilenceMs: number(config.turnEndSilenceMs, 800, 6000, 2000),
+    // 虚拟面试官：默认开（装上就有，零配置）；关掉 = 舞台上不挂形象。
+    interviewerAvatar: oneOf(config.interviewerAvatar, ['on', 'off'], 'on'),
     // ffmpeg 的位置。留空 = 自动找（DSH_FFMPEG_PATH → PATH → 常见安装位置）。
     //
     // **为什么要有这个。** 摄像头是 Host 侧用 ffmpeg 采的（桌面端的 Electron
