@@ -101,8 +101,10 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
   `built/layers.json` / `built/base.png`）就是一份形象，装一份，设置页下拉里多一项。
   加载失败只显示一块「形象不可用 · 面试照常进行」的小牌，面试本身不受影响。
   设置页「面试官形象」可一键关掉。
-  > 本包带一份形象：**面试官 · 紫纱**（`assets/avatar/interviewer/`）。它是用户提供的
-  > AI 生成插画经本地流水线做出的绑定，出处与复现步骤见该目录的 `NOTICE.txt`。
+  > 本包带两份形象：**面试官 · 紫纱**（`assets/avatar/interviewer/`）与
+  > **DeepSeek-Q**（`assets/avatar/DeepSeek-Q/`）。两份都是用户提供的 AI 生成插画
+  > 经本地流水线做出的绑定，出处与复现步骤见各目录的 `NOTICE.txt`；
+  > 设置页「面试官形象」可以随时切换。
   外放会串音，**建议戴耳机**（麦克风已开回声消除，播放期间该段也不送转写）。
 - 录像/录音可关（设置页隐私开关）；面试一开始就自动录，文件直接写进本场卷宗目录。
 

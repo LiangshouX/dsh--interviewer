@@ -340,7 +340,8 @@ Nginx、Prometheus / Grafana、Kubernetes`
 
   /** 包的 `assets/avatar/` 里有哪些形象（Host 扫目录得到，面板只渲染）。 */
   const avatarCatalog = [
-    { id: 'interviewer', name: 'DeepSeek Q版', default: true },
+    { id: 'interviewer', name: '面试官 · 紫纱', default: true },
+    { id: 'DeepSeek-Q', name: 'DeepSeek-Q', default: false },
   ]
 
   const settingsSnapshot = (configured) => ({    settings: {
@@ -389,7 +390,7 @@ Nginx、Prometheus / Grafana、Kubernetes`
     camera: { backend: 'ffmpeg', running: false },
     // 形象：清单来自包内 assets/avatar/。预览里多演一份不存在的形象，
     // 用来检查下拉的排版；真的选中它时客户端会**回落默认那份**（不是空脸）。
-    avatar: { avatars: avatarCatalog, selected: 'interviewer' },
+    avatar: { avatars: avatarCatalog, selected: 'DeepSeek-Q' },
     backends: {
       ffmpeg: { found: true, path: 'D:\\tools\\ffmpeg\\bin\\ffmpeg.exe', source: 'config' },
       chromium: { found: true, path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', source: 'system' },
@@ -764,7 +765,7 @@ Nginx、Prometheus / Grafana、Kubernetes`
           recordVideo: true, recordAudio: true, jdFetchTimeoutMs: 15000,
           // 形象：开关 + 生效的那一份 + 可选清单（LiveView 用前两个）。
           interviewerAvatar: 'on',
-          interviewerStyle: 'interviewer',
+          interviewerStyle: 'DeepSeek-Q',
           interviewerAvatars: avatarCatalog,
           workspaceRoot: { path: 'D:\\DSH-REALTIME-INTERVIEW-ROOT', source: 'config', reason: '配置里指定的工作区根', exists: true },
         }
