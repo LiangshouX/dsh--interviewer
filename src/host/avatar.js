@@ -16,7 +16,9 @@
  * 只有**这个目录里真的有一份完整形象**的 id 才算数：`assets/avatar/<id>/`
  * 必须同时有 `avatar.json`、`rig.json`、`built/layers.json`、`built/base.png`。
  * 少任何一样都只是「没装这份形象」，不是错误——面板的下拉里不出现它，
- * 设置里写了个不存在的 id 就回落到默认那份。
+ * 设置里写了个不存在的 id 就回落到真实存在的那份。
+ * **一份都没装也是合法状态**：清单为空、解析出空 id、舞台显示「形象不可用」，
+ * 面试照常（形象是增强，不是前提）。
  *
  * **加一份新形象 = 放一个目录。** 不需要改代码、不需要改配置：
  * `assets/avatar/<id>/` 一出现，它就自动出现在面板的下拉里
@@ -41,7 +43,13 @@ const ALLOWED_ROOTS = ['avatar', 'vendor']
 /** 形象根目录：每个子目录 = 一份可选形象。 */
 export const AVATAR_DIR = join(ASSET_DIR, 'avatar')
 
-/** 默认形象（包里一定带着的那一份）。设置里没选、或选了一个不存在的 id 时用它。 */
+/**
+ * 默认形象的 id。
+ *
+ * **它是一个约定名，不是一份保证存在的文件。** 包里装了 `interviewer` 就用它；
+ * 一份都没装时 `resolveAvatar` 返回空串——面板不下拉、舞台显示「形象不可用」，
+ * 面试照常（形象是增强，不是前提）。
+ */
 export const DEFAULT_AVATAR_ID = 'interviewer'
 
 /** 形象 id 的形状：它就是目录名，也是 URL 的一段。 */

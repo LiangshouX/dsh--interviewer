@@ -94,12 +94,15 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
   **不会无限转圈**（状态由 Host 判定，客户端不自己计时）。
 - 语流观察（停顿、语速、填充词、重复、自我修正）由 Host 统一计算；
   只用于调整追问方式与报告「表达」一节，**不打分**。
-- **虚拟面试官（预置形象）**：舞台右上角一个 2D 面试官——她提问时**嘴跟着自己的
+- **虚拟面试官（可插拔形象）**：舞台右上角一个 2D 面试官——她提问时**嘴跟着自己的
   TTS 音频动**（WebAudio 包络驱动，不是猜的），听你说话时视线跟着你的指针，
-  思考时侧头、平时呼吸与眨眼。**全部素材随包分发**：零下载、零联网、不用 WebGL2
-  以外的任何东西；加载失败只显示一块「形象不可用 · 面试照常进行」的小牌，
-  面试本身不受影响。设置页「面试官形象」可一键关掉；包里放第二份形象
-  （`assets/avatar/<id>/`）时，那里会多出一个「形象」下拉让你挑。
+  思考时侧头、平时呼吸与眨眼。**运行时**（mesh-avatar，MIT）随包分发：零下载、零联网；
+  **形象本体按目录装**：`assets/avatar/<id>/` 凑齐四样文件（`avatar.json` / `rig.json` /
+  `built/layers.json` / `built/base.png`）就是一份形象，装一份，设置页下拉里多一项。
+  加载失败只显示一块「形象不可用 · 面试照常进行」的小牌，面试本身不受影响。
+  设置页「面试官形象」可一键关掉。
+  > 当前发布包**不带任何形象**（历史形象已清空，等下一份新形象）：舞台右上角会显示
+  > 「形象不可用」，其余功能照常。
   外放会串音，**建议戴耳机**（麦克风已开回声消除，播放期间该段也不送转写）。
 - 录像/录音可关（设置页隐私开关）；面试一开始就自动录，文件直接写进本场卷宗目录。
 
@@ -206,8 +209,9 @@ node scripts/check-plan-anchors.mjs  # 复核代码锚点（方案里引用的 f
 - **语音模型速查**：[docs/VOICE-TTS.md](docs/VOICE-TTS.md)（TTS 模型 ID / 音色含简介 / 快速对接）、
   [docs/VOICE-ASR.md](docs/VOICE-ASR.md)（ASR 模型 ID / 快速对接）——接入不用再去翻官方文档。
 - **未来计划**：[ROADMAP.md](ROADMAP.md)（音色克隆 / 音色设计 / 实时语音 / 配置注入等未实现与待优化项）。
-- **虚拟面试官素材**（自制原画 + 绑定 + 出处与复现步骤）：[`assets/avatar/interviewer/NOTICE.txt`](assets/avatar/interviewer/NOTICE.txt)。
-  运行时是 mesh-avatar（MIT，`assets/vendor/`）；作者工具链用 RuiC-2D（MIT），**运行时不依赖它**。
+- **虚拟面试官素材**：运行时是 mesh-avatar（MIT，`assets/vendor/`）；形象本体按目录装，
+  每一份形象自带 `NOTICE.txt`（原画出处、授权与复现步骤），见 `assets/avatar/<id>/NOTICE.txt`。
+  作者工具链用 RuiC-2D（MIT），**运行时不依赖它**。
   另做一份形象：`node dev/make-avatar.mjs <图.png> <id> --left x,y --right x,y --mouth x,y`
   （需要本地有 RuiC-2D 与 Python；产物进 `assets/avatar/<id>/`，设置页下拉自动多一项）。
 

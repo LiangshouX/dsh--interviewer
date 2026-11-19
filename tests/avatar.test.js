@@ -68,31 +68,8 @@ async function withApi(run) {
   }
 }
 
-test('包里真的带着形象素材：rig / 图层 / 运行时 / 许可', async () => {
-  const rig = JSON.parse(await readFile(join(ASSET_DIR, 'avatar', 'interviewer', 'rig.json'), 'utf8'))
-  // 运行时真正吃的其实就这几样：rig 的几何 + built/ 的图 + layers.json 的矩形。
-  assert.equal(rig.eyes.length, 2, '绑定里必须有两颗眼')
-  for (const eye of rig.eyes) {
-    assert.ok(eye.x0 < eye.x1, '眼部曲线必须给出 x0 < x1')
-    assert.equal(eye.top.length, 24)
-    assert.equal(eye.bot.length, 24)
-  }
-  assert.ok(rig.mouth.halfLen > 0 && rig.mouth.bow >= 0, '嘴部区域必须可画')
-
-  const layers = JSON.parse(await readFile(join(ASSET_DIR, 'avatar', 'interviewer', 'built', 'layers.json'), 'utf8'))
-  for (const name of ['eye0_ball', 'eye0_lash', 'eye0_low', 'eye0_crease', 'eye1_ball', 'eye1_lash', 'eye1_low', 'eye1_crease']) {
-    assert.ok(layers.layers[name] !== undefined, `缺图层矩形：${name}`)
-  }
-  for (const name of ['base', 'hairmask']) {
-    const bytes = await readFile(join(ASSET_DIR, 'avatar', 'interviewer', 'built', `${name}.png`))
-    assert.ok(bytes.length > 0, `缺图：${name}.png`)
-  }
-
-  const manifest = JSON.parse(await readFile(join(ASSET_DIR, 'avatar', 'interviewer', 'avatar.json'), 'utf8'))
-  assert.equal(manifest.format, 'mesh-avatar')
-  // 口型参数随形象走：运行时直接吃这三个数，不给用户调。
-  assert.equal(typeof manifest.lipSync.openness, 'number')
-
+test('包里带的每一份形象都必须完整可跑（一份没带也合法）', async () => {
+  // 渲染运行时与许可**必须**在包里：它们是渲染器，不是形象本体。
   const runtime = await readFile(join(ASSET_DIR, 'vendor', 'mesh-avatar.js'), 'utf8')
   // 三个外部驱动口型的接口是上游原生的——方案的地基。
   assert.ok(runtime.includes('setVoiceLevel'), '运行时没有 setVoiceLevel')
@@ -102,26 +79,61 @@ test('包里真的带着形象素材：rig / 图层 / 运行时 / 许可', async
   const license = await readFile(join(ASSET_DIR, 'vendor', 'LICENSE-mesh-avatar.txt'), 'utf8')
   assert.match(license, /MIT License/)
   assert.match(license, /Yuki Shindo/)
+
+  // 形象本体：**有一份就必须完整**，一份都没有也是合法状态（还没生成新形象）。
+  // 这条断言盯的是「装进去的那份能不能真跑起来」，不是「必须已经装了几份」——
+  // 形象是增强：没有它只是舞台上没那张脸，面试照常（AGENTS §5）。
+  const avatars = await listAvatars()
+  for (const avatar of avatars) {
+    const dir = join(AVATAR_DIR, avatar.id)
+    // 运行时真正吃的其实就这几样：rig 的几何 + built/ 的图 + layers.json 的矩形。
+    const rig = JSON.parse(await readFile(join(dir, 'rig.json'), 'utf8'))
+    assert.equal(rig.eyes.length, 2, `${avatar.id}: 绑定里必须有两颗眼`)
+    for (const eye of rig.eyes) {
+      assert.ok(eye.x0 < eye.x1, `${avatar.id}: 眼部曲线必须给出 x0 < x1`)
+      assert.equal(eye.top.length, 24)
+      assert.equal(eye.bot.length, 24)
+    }
+    assert.ok(rig.mouth.halfLen > 0 && rig.mouth.bow >= 0, `${avatar.id}: 嘴部区域必须可画`)
+
+    const layers = JSON.parse(await readFile(join(dir, 'built', 'layers.json'), 'utf8'))
+    for (const name of ['eye0_ball', 'eye0_lash', 'eye0_low', 'eye0_crease', 'eye1_ball', 'eye1_lash', 'eye1_low', 'eye1_crease']) {
+      assert.ok(layers.layers[name] !== undefined, `${avatar.id}: 缺图层矩形：${name}`)
+    }
+    for (const name of ['base', 'hairmask']) {
+      const bytes = await readFile(join(dir, 'built', `${name}.png`))
+      assert.ok(bytes.length > 0, `${avatar.id}: 缺图：${name}.png`)
+    }
+
+    const manifest = JSON.parse(await readFile(join(dir, 'avatar.json'), 'utf8'))
+    assert.equal(manifest.format, 'mesh-avatar')
+    // 口型参数随形象走：运行时直接吃这三个数，不给用户调。
+    assert.equal(typeof manifest.lipSync.openness, 'number')
+  }
 })
 
 test('GET 形象资源：正确的类型与字节', async () => {
   await withApi(async ({ get }) => {
-    const rig = await get('/interviewer/avatar/asset/avatar/interviewer/rig.json')
-    assert.equal(rig.status, 200)
-    assert.match(rig.type, /application\/json/)
-    assert.equal(rig.cache, 'no-cache')
-    const parsed = JSON.parse(rig.body.toString('utf8'))
-    // 尺寸不写死（换形象就会变）：只要有个正数，且与 layers.json 的 size 一致。
-    const layers = JSON.parse((await get('/interviewer/avatar/asset/avatar/interviewer/built/layers.json')).body.toString('utf8'))
-    assert.ok(parsed.image.width > 0 && parsed.image.height > 0)
-    assert.deepEqual(layers.size, [parsed.image.width, parsed.image.height])
-
     const runtime = await get('/interviewer/avatar/asset/vendor/mesh-avatar.js')
     assert.equal(runtime.status, 200)
     assert.match(runtime.type, /text\/javascript/)
     assert.ok(runtime.body.length > 100_000, '运行时应该是那个 187KB 的文件')
 
-    const png = await get('/interviewer/avatar/asset/avatar/interviewer/built/base.png')
+    // 形象本体：包里带了才测它。没带就是「没装」，不是「装坏了」。
+    const avatars = await listAvatars()
+    if (avatars.length === 0) return
+    const id = avatars[0].id
+    const rig = await get(`/interviewer/avatar/asset/avatar/${id}/rig.json`)
+    assert.equal(rig.status, 200)
+    assert.match(rig.type, /application\/json/)
+    assert.equal(rig.cache, 'no-cache')
+    const parsed = JSON.parse(rig.body.toString('utf8'))
+    // 尺寸不写死（换形象就会变）：只要有个正数，且与 layers.json 的 size 一致。
+    const layers = JSON.parse((await get(`/interviewer/avatar/asset/avatar/${id}/built/layers.json`)).body.toString('utf8'))
+    assert.ok(parsed.image.width > 0 && parsed.image.height > 0)
+    assert.deepEqual(layers.size, [parsed.image.width, parsed.image.height])
+
+    const png = await get(`/interviewer/avatar/asset/avatar/${id}/built/base.png`)
     assert.equal(png.status, 200)
     assert.match(png.type, /image\/png/)
     assert.ok(png.body.length > 0)
@@ -130,15 +142,18 @@ test('GET 形象资源：正确的类型与字节', async () => {
 
 test('静态资源带 ETag，同一份再问一次回 304', async () => {
   await withApi(async ({ get, request }) => {
-    const first = await get('/interviewer/avatar/asset/avatar/interviewer/rig.json')
+    const avatars = await listAvatars()
+    if (avatars.length === 0) return
+    const path = `/interviewer/avatar/asset/avatar/${avatars[0].id}/rig.json`
+    const first = await get(path)
     assert.match(first.etag, /^".+"$/, '必须带 ETag')
-    const again = await request('GET', '/interviewer/avatar/asset/avatar/interviewer/rig.json', {
+    const again = await request('GET', path, {
       'if-none-match': first.etag,
     })
     assert.equal(again.status, 304, 'ETag 命中应该是 304（省一次 187KB 的下发）')
     assert.equal(again.body.length, 0)
     // 换了内容（模拟包升级）就必须重新给整份。
-    const stale = await request('GET', '/interviewer/avatar/asset/avatar/interviewer/rig.json', {
+    const stale = await request('GET', path, {
       'if-none-match': '"stale"',
     })
     assert.equal(stale.status, 200)
@@ -201,7 +216,15 @@ test('发版补丁与 BUNDLE_DEFAULTS 保持一致（漏一处 = 配置写了不
 
 test('形象清单由目录发现：默认那份排第一，每份都真有四样文件', async () => {
   const avatars = await listAvatars()
-  assert.ok(avatars.length >= 1, '至少要有默认那份形象')
+  // 一份都没有 = 还没生成新形象：合法状态，清单为空，不许抛错、不许编 id。
+  if (avatars.length === 0) {
+    const resolved = await resolveAvatar('')
+    assert.deepEqual(resolved.avatars, [])
+    assert.equal(resolved.selected, '', '没有形象时不要编一个 id 出来')
+    return
+  }
+
+  assert.ok(avatars.some(item => item.id === DEFAULT_AVATAR_ID), '带了形象就必须带默认那份（id 固定为 interviewer）')
   assert.equal(avatars[0].id, DEFAULT_AVATAR_ID, '默认形象必须排第一（下拉默认项别随字母序漂）')
   assert.equal(avatars[0].default, true)
   assert.ok(avatars[0].name.length > 0, '清单里要有能认出来的名字')
@@ -222,20 +245,27 @@ test('形象清单由目录发现：默认那份排第一，每份都真有四�
 })
 
 test('设置里写了个不存在的形象：拒绝并说明，且不会把舞台搞成没脸', async () => {
-  // 解析层回落：空 / 未知 id 都解析成默认那份。
-  assert.equal((await resolveAvatar('')).selected, DEFAULT_AVATAR_ID)
-  assert.equal((await resolveAvatar('nope')).selected, DEFAULT_AVATAR_ID)
-  assert.equal((await resolveAvatar(DEFAULT_AVATAR_ID)).selected, DEFAULT_AVATAR_ID)
+  const installed = (await listAvatars()).map(item => item.id)
+
+  // 解析层回落：空 / 未知 id 都解析成**真实存在**的那份；
+  // 一份都没装时就是空——不猜、不硬编码。
+  const resolved = (await resolveAvatar('')).selected
+  assert.ok(resolved === '' || installed.includes(resolved), '回落必须落到真实存在的那份')
+  assert.equal((await resolveAvatar('nope')).selected, resolved, '未知 id 必须回落到同一份')
+  if (installed.includes(DEFAULT_AVATAR_ID)) {
+    assert.equal(resolved, DEFAULT_AVATAR_ID)
+    assert.equal((await resolveAvatar(DEFAULT_AVATAR_ID)).selected, DEFAULT_AVATAR_ID)
+  }
 
   await withApi(async ({ service }) => {
     const bad = await service.updateSettings({ interviewerStyle: 'nope' })
     assert.equal(bad.invalid.some(item => item.key === 'interviewerStyle'), true, '未知 id 必须被拒绝')
     assert.match(bad.invalid.find(item => item.key === 'interviewerStyle').reason, /nope/)
 
-    const good = await service.updateSettings({ interviewerStyle: DEFAULT_AVATAR_ID })
+    const good = await service.updateSettings({ interviewerStyle: installed[0] ?? '' })
     assert.deepEqual(good.invalid, [])
     const options = await service.avatarOptions()
-    assert.equal(options.selected, DEFAULT_AVATAR_ID)
+    assert.equal(options.selected, installed[0] ?? '')
   })
 })
 
@@ -246,10 +276,15 @@ test('GET /config 把形象开关带给面板', async () => {
     const body = JSON.parse(response.body.toString('utf8'))
     assert.equal(body.ok, true)
     assert.equal(body.data.interviewerAvatar, 'on')
-    // 面板要知道「有哪几份、现在用哪一份」——默认那份是解析过的 id。
-    assert.equal(body.data.interviewerStyle, DEFAULT_AVATAR_ID)
+    // 面板要知道「有哪几份、现在用哪一份」——那一份是解析过的 id。
+    const avatars = await listAvatars()
+    const selected = (await service.avatarOptions()).selected
+    assert.equal(body.data.interviewerStyle, selected)
     assert.ok(Array.isArray(body.data.interviewerAvatars))
-    assert.equal(body.data.interviewerAvatars[0].id, DEFAULT_AVATAR_ID)
+    assert.equal(body.data.interviewerAvatars.length, avatars.length)
+    if (avatars.length > 0) {
+      assert.equal(body.data.interviewerAvatars[0].id, DEFAULT_AVATAR_ID)
+    }
     // 关掉之后要如实回报（面板据此不挂形象）。
     await service.updateSettings({ interviewerAvatar: 'off' })
     const next = await get('/interviewer/api/config')

@@ -650,6 +650,8 @@ GET /interviewer/avatar/asset/avatar/<id>/built/*.png|layers.json         → �
 - **`<id>` 就是包内 `assets/avatar/<id>/` 的目录名。** 默认那份是 `interviewer`；
   同层再放一个凑齐 `avatar.json` / `rig.json` / `built/layers.json` /
   `built/base.png` 的目录，就多一份可选形象——**目录即清单**，Host 不做注册表。
+- **一份都没装也是合法状态**：清单为空、设置里的 `interviewerStyle` 解析成空串、
+  设置页不出下拉、舞台显示「形象不可用」——面试照常（形象是增强，不是前提）。
 - **从包内读**（`PACKAGE_DIR/assets`），不进用户的数据根：形象是程序资源，
   随版本升级，不是用户材料。
 - **白名单两个目录**：`avatar/` 与 `vendor/`。包里其它东西（源码、测试、docs）
@@ -665,8 +667,8 @@ GET /interviewer/avatar/asset/avatar/<id>/built/*.png|layers.json         → �
   | 字段 | 语义 |
   |---|---|
   | `interviewerAvatar` | `on` / `off`：挂不挂（设置项同名） |
-  | `interviewerStyle` | 真正生效的形象 id；设置里写了个不存在的 id 时这里是默认那份 |
-  | `interviewerAvatars` | `[{ id, name, default }]`：包里可选的清单，默认那份排第一 |
+  | `interviewerStyle` | 真正生效的形象 id；设置里写了个不存在的 id 时这里是默认那份；一份都没装时是空串 |
+  | `interviewerAvatars` | `[{ id, name, default }]`：包里可选的清单，默认那份排第一；没装任何形象时是空数组 |
 
 - 设置项 `interviewerStyle` 的值白名单**就是真实目录**：存一个不存在的 id 会被
   `updateSettings` 拒绝并说明（`invalid[].reason`），不会「存了但不生效」。
