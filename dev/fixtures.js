@@ -341,6 +341,7 @@ Nginx、Prometheus / Grafana、Kubernetes`
   /** 包的 `assets/avatar/` 里有哪些形象（Host 扫目录得到，面板只渲染）。 */
   const avatarCatalog = [
     { id: 'interviewer', name: '面试官 · 蓝', default: true },
+    { id: 'interviewer-cream', name: '奶油Q版DeepSeek', default: false },
     { id: 'interviewer-classic', name: '面试官 · 沈知远', default: false },
   ]
 
