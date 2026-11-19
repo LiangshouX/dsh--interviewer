@@ -1,6 +1,6 @@
 {
   "name": "dsh-realtime-interview",
-  "version": "0.7.5",
+  "version": "0.8.0",
   "description": "DSH 实时模拟面试插件：简历 + JD → 有准备的面试 → 逐轮追问 → 实时摄像与语音 → 事后分析报告",
   "type": "module",
   "main": "index.js",
