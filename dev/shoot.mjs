@@ -76,6 +76,10 @@ const PRESETS = [
   // 强调色浓度都要重新看一遍。亮色必须进预设，
   // 否则「切了主题之后哪块看不清了」只能靠用户先撞上。
   { name: 'live-dark', tab: 1, media: 'denied', width: 1007, height: 704, theme: 'dark' },
+  // **暗色 + 设备已接上。** 上面那档是「被拒」，舞台是未接通板——**形象不出现**
+  // （右上角那块画中画只在接通状态下挂）。所以暗色下要单独留一档「接通的」，
+  // 否则暗色这一屏里永远看不见那张脸。
+  { name: 'live-dark-granted', tab: 1, media: 'granted', width: 1007, height: 704, theme: 'dark' },
   { name: 'prepare-dark', tab: 0, media: 'granted', width: 1007, height: 704, theme: 'dark' },
   // **设置页的三张补充截图。**
   //
