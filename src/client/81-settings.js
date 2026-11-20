@@ -16,7 +16,7 @@
  *   / 一个真跑的测试按钮（失败给具体原因与下一步）。
  */
 function SettingsView(props) {
-  const { session, notify, theme, themeFollow, hostScheme, onChangeTheme, onChangeThemeFollow } = props
+  const { session, notify, theme, themeFollow, hostScheme, onChangeTheme, onChangeThemeFollow, onChanged } = props
   const sessionId = session?.session?.id
   const snapshot = usePoll(
     () => apiGet('settings', sessionId === undefined ? undefined : { session: sessionId }),
@@ -107,12 +107,18 @@ function SettingsView(props) {
         problems.length === 0 ? 'ok' : 'error',
       )
       snapshot.refresh()
+      // **设置落盘了，面板手里那份有效配置要跟上。**
+      //
+      // 面板读的是 `config` 端点的有效值（面试官形象、播报服务、录像开关都在
+      // 那儿），而它启动时只取一次。不喊这一声，面板就一直拿着旧的：
+      // 「设置页改了，面试间里没变」——面试官形象换不掉就是这个断点。
+      onChanged?.()
     } catch (failure) {
       notify('没保存', failure instanceof Error ? failure.message : String(failure), 'error')
     } finally {
       setBusy('')
     }
-  }, [notify, snapshot])
+  }, [notify, snapshot, onChanged])
 
   const runDiagnose = useCallback(async () => {
     setBusy('diagnose')

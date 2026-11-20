@@ -2981,6 +2981,17 @@ window.__ModuleLoader__.load({
       const readLevelRef = useRef(readLevel)
       readLevelRef.current = readLevel
 
+      // **换形象 = 拆掉重装，canvas 不换。**
+      //
+      // 为什么同一个 <canvas> 上能重建（这一点值得写下来，省得下次再查一遍）：
+      // WebGL2 的上下文是**按 canvas 记**的——同一个 canvas 再要一次
+      // `getContext('webgl2')`，拿回的是**同一个**上下文（规范如此），不会因为
+      // 「已经有上下文了」而失败；运行时每次 `createMeshAvatar` 都从头建自己
+      // 那套资源（着色器程序、纹理、缓冲全是新的），旧的那套在 `destroy()` 里
+      // 删掉；每帧绘制前又会把 VAO 与纹理重新绑一遍——所以换人换得很干净。
+      //
+      // **反过来做才更糟**：给 canvas 加 key 让它整个重建，等于多要一个 WebGL
+      // 上下文（浏览器有上限），而且换的瞬间舞台上会闪一帧空白。
       useEffect(() => {
         if (!enabled) return undefined
         if (typeof window === 'undefined') return undefined
@@ -8172,7 +8183,7 @@ window.__ModuleLoader__.load({
  *   / 一个真跑的测试按钮（失败给具体原因与下一步）。
  */
 function SettingsView(props) {
-  const { session, notify, theme, themeFollow, hostScheme, onChangeTheme, onChangeThemeFollow } = props
+  const { session, notify, theme, themeFollow, hostScheme, onChangeTheme, onChangeThemeFollow, onChanged } = props
   const sessionId = session?.session?.id
   const snapshot = usePoll(
     () => apiGet('settings', sessionId === undefined ? undefined : { session: sessionId }),
@@ -8263,12 +8274,18 @@ function SettingsView(props) {
         problems.length === 0 ? 'ok' : 'error',
       )
       snapshot.refresh()
+      // **设置落盘了，面板手里那份有效配置要跟上。**
+      //
+      // 面板读的是 `config` 端点的有效值（面试官形象、播报服务、录像开关都在
+      // 那儿），而它启动时只取一次。不喊这一声，面板就一直拿着旧的：
+      // 「设置页改了，面试间里没变」——面试官形象换不掉就是这个断点。
+      onChanged?.()
     } catch (failure) {
       notify('没保存', failure instanceof Error ? failure.message : String(failure), 'error')
     } finally {
       setBusy('')
     }
-  }, [notify, snapshot])
+  }, [notify, snapshot, onChanged])
 
   const runDiagnose = useCallback(async () => {
     setBusy('diagnose')
@@ -9422,6 +9439,15 @@ function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
         [],
         data => (data?.sessions ?? []).map(row => `${row.id}:${row.updatedAt}:${row.checklistCount}:${row.probedCount}:${row.hasReport}`).join(','),
       )
+      // **有效配置：启动时取一次，不轮询。**
+      //
+      // 它很少变（面试官形象、播报服务、录像开关），跟着 6 秒轮询只是白烧 CPU；
+      // 会变的是「谁改了它」——所以刷新由**明确的事件**触发，而不是靠定时器：
+      //   ① 设置页保存（SettingsView 的 onChanged）；
+      //   ② 切进「面试中」（见下面的 effect）。
+      //
+      // **漏掉这一声，面试间就一直用旧的那份**——改了面试官形象，舞台上的脸
+      // 纹丝不动，就是这么来的（要退出重进才生效）。
       const configPoll = usePoll(() => apiGet('config'), undefined, [])
 
       // ── 面试间保护 ────────────────────────────────────────────────
@@ -9603,14 +9629,35 @@ function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
       }, [notify, refreshAll])
 
       /**
-       * 换卷宗库之后，标题里的路径要**立刻**跟上。
+       * 重读一次**有效配置**。
        *
-       * 配置是启动时取一次就放着的（它很少变）；换目录是唯一会让它变的事件，
-       * 所以专门在切根之后刷一次，而不是让配置也跟着每 6 秒轮询。
+       * 换卷宗库之后，标题里的路径要立刻跟上；设置页存完之后，面试官形象、
+       * 播报服务、录像开关也要立刻跟上——它们都在 `config` 这个端点里。
+       *
+       * 依赖写 `configPoll.refresh` 而不是 `configPoll`：`refresh` 本身是稳定的
+       * （usePoll 里它的依赖是空数组），而 `configPoll` 这个壳每次渲染都是
+       * 新对象——拿它当依赖，这个回调每次渲染都会变，依赖它的 effect 也会
+       * 跟着每次渲染都重跑。
        */
       const refreshConfig = useCallback(() => {
         void configPoll.refresh()
-      }, [configPoll])
+      }, [configPoll.refresh])
+
+      /**
+       * **切进「面试中」时重读一次有效配置。**
+       *
+       * 面试官形象是这一页唯一会**当场**换掉的设置，而它可能来自任何一路：
+       * 设置页、agent 工具、手改配置文件。进面试间之前拉一次，舞台就不会拿
+       * 一份过期的形象去见候选人（也不必退出重进）。
+       *
+       * 放在 effect 里而不是点击处理里，是为了**不漏路径**：页签按钮、
+       * 准备页的「去面试」、报告页的「续接面试」，最后都落到 `tab` 上——
+       * 盯住 `tab` 就都盖住了。
+       */
+      useEffect(() => {
+        if (tab !== 'live') return
+        void configPoll.refresh()
+      }, [tab, configPoll.refresh])
 
       /** 删除一场面试（连同卷宗目录）。两步确认，避免手滑。 */
       const deleteSession = useCallback(async id => {
@@ -10636,6 +10683,11 @@ function asrPresetOrTtsDefaultLabel(kind, asrPreset, ttsPreset) {
                 notify,
                 // 「管理面试记录」在设置页也留一个入口（左栏底部是主入口）。
                 onManageRecords: () => setManagerOpen(true),
+                // **设置页存完，面板手里那份有效配置要跟上。**
+                // 面板读的是 `config` 端点的有效值（面试官形象、播报服务、录像
+                // 开关都在那儿），而它启动时只取一次——不接这一声，面试间就一直
+                // 拿着旧的那份：改了面试官形象，舞台上的脸纹丝不动。
+                onChanged: refreshConfig,
                 // 主题的开关在面板这一层（它要驱动整页的样式变量），
                 // 设置页只是它的一个面板——所以状态通过 props 透传。
                 theme,

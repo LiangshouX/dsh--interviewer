@@ -185,6 +185,17 @@
       const readLevelRef = useRef(readLevel)
       readLevelRef.current = readLevel
 
+      // **换形象 = 拆掉重装，canvas 不换。**
+      //
+      // 为什么同一个 <canvas> 上能重建（这一点值得写下来，省得下次再查一遍）：
+      // WebGL2 的上下文是**按 canvas 记**的——同一个 canvas 再要一次
+      // `getContext('webgl2')`，拿回的是**同一个**上下文（规范如此），不会因为
+      // 「已经有上下文了」而失败；运行时每次 `createMeshAvatar` 都从头建自己
+      // 那套资源（着色器程序、纹理、缓冲全是新的），旧的那套在 `destroy()` 里
+      // 删掉；每帧绘制前又会把 VAO 与纹理重新绑一遍——所以换人换得很干净。
+      //
+      // **反过来做才更糟**：给 canvas 加 key 让它整个重建，等于多要一个 WebGL
+      // 上下文（浏览器有上限），而且换的瞬间舞台上会闪一帧空白。
       useEffect(() => {
         if (!enabled) return undefined
         if (typeof window === 'undefined') return undefined
