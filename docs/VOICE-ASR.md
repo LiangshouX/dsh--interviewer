@@ -1,27 +1,31 @@
 # VOICE-ASR.md — 语音识别（ASR）模型速查
 
-> 目的：**接入不用再去翻官方文档**。汇总 Qwen / MiniMax / MiMo 及通用 ASR 的模型 ID、
-> 端点、协议、请求/响应形状与坑。插件侧链路/凭据/测试语义见 [VOICE.md](VOICE.md)；
-> TTS 见 [VOICE-TTS.md](VOICE-TTS.md)；未实现能力（实时 ASR 等）见 [../ROADMAP.md](../ROADMAP.md)。
+> **这份文件管厂商侧**：各家 ASR 的模型 ID、端点、协议、请求/响应形状与坑。
+> 插件侧（预设 id、凭据名、回落链、失败语义、测试）在 [VOICE.md](VOICE.md)；
+> TTS 见 [VOICE-TTS.md](VOICE-TTS.md)；未实现能力（实时 ASR 等）见
+> [ROADMAP.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/ROADMAP.md)。
 >
+> 目的：**接入不用再去翻官方文档**。
 > 调研日期：2026-11-18。官方会更新，**以官方为准**；「待核实」= 官方未明确或第三方实测。
 
 ---
 
 ## 0. 一张表先看全
 
-| 来源 | 插件预设/链路 | 协议 | 端点 | 凭据 ref | 模型举例 |
-|---|---|---|---|---|---|
-| 宿主本地 SenseVoice | `host`（默认候选） | 宿主 `speechToText`（整段转写） | 本机模型，无网络 | 无 | SenseVoiceSmall(INT8) |
-| Qwen · Token Plan | `qwen-token-plan` | **DashScope 原生 `multimodal-generation`** | `https://token-plan.maas.qianwenaiapi.com` | `QIANWEN_TOKEN_PLAN_API_KEY` | `qwen-audio-3.0-asr-flash` |
-| Qwen · 官方百炼 | `qwen` | 同上 | `https://dashscope.aliyuncs.com` | `DASHSCOPE_API_KEY` | `qwen-audio-3.0-asr-flash` |
-| Qwen3-ASR（未用） | — | OpenAI 兼容 `chat/completions`+`input_audio` | 百炼 compatible-mode | `DASHSCOPE_API_KEY` | `qwen3-asr-flash` |
-| MiniMax · Token Plan | `minimax-token-plan` | HTTP **multipart** `/v1/speech_to_text` | `https://api.minimax.cn` | `M_PLAN_API_KEY` | `asr-1.0` |
-| MiniMax · 按量 | `minimax-cn` | 同上 | `https://api.minimax.cn` | `MINIMAX_API_KEY` | `asr-1.0` |
-| MiMo · Token Plan | `mimo-token-plan` | HTTP `chat/completions`+`input_audio` | `https://token-plan-cn.xiaomimimo.com/v1` | `XIAOMI_TOKEN_PLAN_CN_API_KEY` | `mimo-v2.5-asr` |
-| MiMo · 官方按量 | `mimo` | 同上 | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `mimo-v2.5-asr` |
-| OpenAI 兼容网关 | `openai` / `openai-custom` | HTTP multipart `/audio/transcriptions` | 任意兼容网关 | `OPENAI_API_KEY`/`SILICONFLOW_API_KEY` | `whisper-1`/`FunAudioLLM/SenseVoiceSmall` |
-| Paraformer/SenseVoice/Fun-ASR | （未接） | DashScope 异步 transcription / WS duplex | 百炼（Paraformer 仅北京） | `DASHSCOPE_API_KEY` | `paraformer-realtime-v2` |
+| 来源 | 插件预设 | 协议 | 端点 | 模型举例 |
+|---|---|---|---|---|
+| 宿主本地 SenseVoice | `host`（默认候选） | 宿主 `speechToText`（整段转写） | 本机模型，无网络 | SenseVoiceSmall(INT8) |
+| Qwen · Token Plan | `qwen-token-plan` | **DashScope 原生 `multimodal-generation`** | `https://token-plan.maas.qianwenaiapi.com` | `qwen-audio-3.0-asr-flash` |
+| Qwen · 官方百炼 | `qwen` | 同上 | `https://dashscope.aliyuncs.com` | `qwen-audio-3.0-asr-flash` |
+| Qwen3-ASR（未用） | — | OpenAI 兼容 `chat/completions`+`input_audio` | 百炼 compatible-mode | `qwen3-asr-flash` |
+| MiniMax · Token Plan | `minimax-token-plan` | HTTP **multipart** `/v1/speech_to_text` | `https://api.minimax.cn` | `asr-1.0` |
+| MiniMax · 按量 | `minimax-cn` | 同上 | `https://api.minimax.cn` | `asr-1.0` |
+| MiMo · Token Plan | `mimo-token-plan` | HTTP `chat/completions`+`input_audio` | `https://token-plan-cn.xiaomimimo.com/v1` | `mimo-v2.5-asr` |
+| MiMo · 官方按量 | `mimo` | 同上 | `https://api.xiaomimimo.com/v1` | `mimo-v2.5-asr` |
+| OpenAI 兼容网关 | `openai` / `openai-custom` | HTTP multipart `/audio/transcriptions` | 任意兼容网关 | `whisper-1`/`FunAudioLLM/SenseVoiceSmall` |
+| Paraformer/SenseVoice/Fun-ASR | （未接） | DashScope 异步 transcription / WS duplex | 百炼（Paraformer 仅北京） | `paraformer-realtime-v2` |
+
+每个预设对应的**凭据名**在 [VOICE.md §3.1](VOICE.md)。
 
 **最重要的坑：只有标准网关才走 `/audio/transcriptions`。** 百炼官方**没有**
 `/compatible-mode/v1/audio/transcriptions` 端点；Token Plan 中转实测该路径
@@ -192,17 +196,10 @@ Token Plan 端点 `POST https://token-plan-cn.xiaomimimo.com/v1/chat/completions
 
 ## 7. 凭据与错误速查
 
-| ref | 平台 |
-|---|---|
-| `DASHSCOPE_API_KEY` | 官方百炼（北京/新加坡 key 不通用） |
-| `QIANWEN_TOKEN_PLAN_API_KEY` | 千问 Token Plan 中转（ASR 走原生端点可用；compatible-mode 的 /audio/* 不可用） |
-| `XIAOMI_TOKEN_PLAN_CN_API_KEY` | 小米 MiMo Token Plan（token-plan-cn.xiaomimimo.com） |
-| `M_PLAN_API_KEY` / `MINIMAX_M_PLAN_API_KEY` | MiniMax Token Plan（M Plan，api.minimax.cn） |
-| `MINIMAX_API_KEY` | MiniMax 按量（TTS/ASR 共用） |
-| `MIMO_API_KEY` | MiMo 官方按量（TTS/ASR 共用） |
-| `OPENAI_API_KEY`/`SILICONFLOW_API_KEY` | 标准 OpenAI 兼容 transcriptions 网关 |
+各预设的**凭据名**在 [VOICE.md §3.1](VOICE.md)（插件侧唯一真源）；
+发现与继承规则在 [VOICE.md §4](VOICE.md)。
 
 错误解析三家不同：**Qwen**=HTTP 状态+响应 code/message（DashScope）或 OpenAI 风格；
 **MiniMax ASR**=OpenAI 风格 HTTP 状态（别用 base_resp）；
 **MiMo**=HTTP 状态+内嵌 error（`error.message` / `base_resp` 都兜住）。
-插件侧统一「失败带 reason+hint、回落浏览器/键盘不阻塞面试」（VOICE.md）。
+插件侧统一「失败带 reason+hint、回落浏览器/键盘不阻塞面试」（[VOICE.md §7](VOICE.md)）。

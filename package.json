@@ -1,25 +1,31 @@
 {
   "name": "dsh-realtime-interview",
-  "version": "0.8.0",
-  "description": "DSH 实时模拟面试插件：简历 + JD → 有准备的面试 → 逐轮追问 → 实时摄像与语音 → 事后分析报告",
+  "version": "0.9.0",
+  "description": "DSH 实时模拟面试插件：简历 + JD → 有准备的面试 → 逐轮追问 → 实时摄像与语音 → 事后分析报告。Real-time mock-interview plugin for DeepSeek Harness: live ASR/TTS, camera, and a post-interview report — everything stays on your machine.",
   "type": "module",
   "main": "index.js",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "dsh": ">=0.2.2-rc.3 <0.3.0-0"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LiangshouX/dsh-realtime-interview.git"
+    "url": "git+https://github.com/LiangshouX/dsh-realtime-interview.git",
+    "directory": "."
   },
   "homepage": "https://github.com/LiangshouX/dsh-realtime-interview#readme",
   "bugs": {
     "url": "https://github.com/LiangshouX/dsh-realtime-interview/issues"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
-  "author": "LiangshouX",
+  "author": {
+    "name": "LiangshouX",
+    "url": "https://github.com/LiangshouX"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -34,22 +40,23 @@
     "icon.svg",
     "locale/*.json",
     "docs",
-    "AGENTS.md",
     "README.md",
+    "CHANGELOG.md",
     "src/host",
-    "src/skills",
     "build/skills",
     "assets",
-    "tests",
-    "scripts"
+    "!assets/*/*/source/**",
+    "tests"
   ],
   "scripts": {
+    "prepublishOnly": "node scripts/build.mjs",
     "build": "node scripts/build.mjs",
     "check": "node scripts/build.mjs --check",
     "pack": "node scripts/pack.mjs",
     "install-desktop": "node scripts/install-desktop.mjs",
     "test": "node --test tests/*.test.js",
     "client-smoke": "node scripts/client-smoke.mjs",
+    "check-camera-release": "node dev/check-camera-release.mjs",
     "fix-keys": "node scripts/fix-keys.mjs"
   },
   "devDependencies": {
@@ -65,10 +72,14 @@
     "deepseek-harness",
     "interview",
     "mock-interview",
+    "job-interview",
     "realtime",
     "voice",
+    "asr",
+    "tts",
     "camera",
-    "career"
+    "career",
+    "chinese"
   ],
   "dsh": {
     "bundle": {

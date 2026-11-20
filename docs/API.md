@@ -6,6 +6,19 @@
 > 传输层只做搬运，业务逻辑全在 `src/host/service.js` 的方法里
 > （见 `AGENTS.md` §5「一个操作，两个调用者」）。
 
+**目录**
+
+- [0. 通用约定](#0-通用约定) — 包封、路由前缀、信任围栏
+- [1. 读取（GET）](#1-读取get) — 会话、清单、转录、简历库、档案
+- [2. 写入（POST）](#2-写入post)
+  - [2.1 会话](#21-会话) · [2.1.1 简历库](#211-简历库) · [2.1.2 让助手去抓 JD](#212-让助手去抓-jd) ·
+    [2.1.3 派活给助手](#213-派活给助手agent--与失败出路) · [2.1.4 等助手返回](#214-等助手返回loading-的后端契约)
+  - [2.2 JD 抓取](#22-jd-抓取) · [2.3 简历提取](#23-简历提取) · [2.4 语音](#24-语音) ·
+    [2.5 岗位档案](#25-岗位档案) · [2.6 卷宗库](#26-卷宗库工作区根)
+  - [2.7 摄像头](#27-摄像头host-侧-ffmpeg-采集) · [2.8 虚拟面试官形象](#28-虚拟面试官形象不是-json也是只读)
+- [3. Agent 工具](#3-agent-工具)
+- [4. 随包技能](#4-随包技能)
+
 ---
 
 ## 0. 通用约定
@@ -250,9 +263,8 @@ POST 时的上报形状：
 | `sessions/<id>/checklist` | `{items: [...]}` | **替换**整份清单 |
 | `sessions/<id>/checklist-mutate` | `{op, id?, topic?, why?, level?, source?, tags?, probed?, note?, reason?}` | 面试中调整 |
 | `sessions/<id>/turn` | `{role, text, meta?}` | 追加一轮转录。**联动**：`role:candidate` 且 `meta.source:"panel"` 且会话 running 时，异步派活「候选人已回答，请继续」（回答原文内联进 prompt；§5.1）。助手自己经 `interview_record_turn` 记的行**不触发**（避免自己给自己派活成环） |
-| `sessions/<id>/recording` | `{kind, filename?, mimeType?, dataBase64}` | 保存录像/录音 |
+| `sessions/<id>/recording` | `{kind, filename?, mimeType?, dataBase64}` | 保存**一整段**录像/录音（「录一段」/片段）。整段 base64 上传，受 8 MB body 上限约束。**面试全程不要用它**——用下面三条分块接口 |
 | `sessions/<id>/report` | `{markdown}` | 写分析报告并置 `done` |
-| `sessions/<id>/recording` | `{kind, filename?, mimeType?, dataBase64}` | 保存**一整段**录像/录音（「录一段」/片段）。整段 base64 上传，受 8 MB body 上限约束 |
 | `sessions/<id>/recording/start` | `{kind?: 'audio'\|'video', tag?}` | **开始一段连续录制**：在 `recordings/` 建空文件，返回 `{name}`。面试全程用它，不要用整段上传 |
 | `sessions/<id>/recording/chunk` | `{name, dataBase64}` | 追加一块（客户端每 5 秒一次）。**文件名必须是这一场已创建的那个**（白名单 + `resolveWithin` 双保险）；空块直接忽略 |
 | `sessions/<id>/recording/finish` | `{name}` | 收尾：返回 `{ok, name, bytes, kind, empty}`。崩了没收到 finish 也不丢已上传的块 |
@@ -677,38 +689,64 @@ GET /interviewer/avatar/asset/avatar/<id>/built/*.png|layers.json         → �
 
 ## 3. Agent 工具
 
+**每个工具都是 `src/host/service.js` 的一个方法**，不重新实现业务逻辑。
+`sessionId` 省略时用最近使用的会话；没有会话时先调 `interview_prepare`。
+
+### 3.1 建场次与归档材料
+
 | 工具 | 参数 | 作用 |
 |---|---|---|
 | `interview_prepare` | `sessionId? sessionTitle? company? position? role? resumeText? jdText? jdUrl?` | 建会话、落盘简历与 JD。**带 `sessionId` 时不新建**，只更新这一场的标题/公司/岗位与文档——建会话时写错的元信息事后也能改。给链接时先尝试抓取，失败**如实说**并给兜底 |
-| `interview_save_checklist` | `sessionId? items[]` | 落盘考点清单（替换式） |
-| `interview_mutate_checklist` | `sessionId? op id? topic? why? level? source? tags? probed? note? reason?` | 面试中调整清单 |
+| `interview_save_jd` | `sessionId? text url?` | 把 JD 正文写进一场面试。**只写正文**：标题/公司/岗位用 `interview_prepare` 显式写入 |
+| `interview_list_resumes` | — | 列出简历库里的简历（只有元信息，不带正文） |
+| `interview_save_resume` | `text? sessionId? title?` | 存一份简历进库（或把某场面试里的简历存进去） |
+| `interview_apply_resume` | `resumeId sessionId?` | 把库里那份用到某场面试上（卷内留快照，库里后来改动不影响历史场次） |
+| `interview_delete_resume` | `resumeId` | 从简历库删掉一份（已建好的面试不受影响） |
+| `interview_list_profiles` | — | 列出岗位档案（考点基线） |
+| `interview_save_profile` | `id? title company? jdUrl? jdText? checklist?` | 归档一个岗位：`title` 必填，`id` 省略则新建，`checklist` 省略则保留原有清单 |
+| `interview_apply_profile` | `sessionId? profileId` | 继承档案的 JD 与考点基线（继承来的考点**被标记**为 `inherited`） |
+| `interview_sync_profile` | `sessionId? profileId?` | 把会话成果回写档案（`profileId` 省略则回写这场面试自己关联的档案） |
+
+### 3.2 底稿
+
+| 工具 | 参数 | 作用 |
+|---|---|---|
+| `interview_save_checklist` | `sessionId? items[]` | 落盘考点清单（替换式）。每项：`topic` 必填；`why` 说明为什么问；`level` 取 core/deep/bonus；`source` 取 jd/resume/research |
+| `interview_mutate_checklist` | `sessionId? op id? topic? why? level? source? tags? probed? note? reason?` | 面试中调整清单：`add` / `update` / `remove` / `probe`，每次调整都留理由 |
+
+### 3.3 面试进行中
+
+| 工具 | 参数 | 作用 |
+|---|---|---|
+| `interview_get_context` | `sessionId?` | 读全部上下文（简历/JD/清单/转录/统计） |
 | `interview_record_turn` | `sessionId? role text meta?` | 记录一轮对话。**助手记的 candidate 行不触发「请继续」派活**（只有面板提交 `meta.source:"panel"` 的行才联动，避免助手自己给自己派活成环） |
 | `interview_pause` | `sessionId?` | 暂停进行中的面试：计时停走、转录留痕；面板释放设备（指示灯熄灭） |
 | `interview_resume` | `sessionId?` | 继续暂停中的面试：累计暂停时长并自动派活续接（用户在对话里说「继续吧」也能走通） |
 | `interview_continue_session` | `sessionId?` | **续接已结束的面试**（`done → running`）：不重开一轮，中断时长记进 `pausedMs`，转录/底稿沿用，并派活让助手从上一问接着问 |
-| `interview_reset_session` | `sessionId? dropRecordings?` | **重置记录**：清转录/报告/计时/「问过」标记/等助手任务，并解绑助手会话；保留简历、JD、考点清单与元信息。录音录像默认保留，`dropRecordings:true` 才删 |
 | `interview_request_agent` | `sessionId? task url? hostSessionId?` | 派活：`fetch-jd` / `checklist` / `report` / `start` / `continue` / `resume`（后三个正常由面板自动联动，这里是诊断与手动兜底） |
 | `interview_agent_session` | `sessionId?` | 读（必要时建）助手会话；带 sessionId 返回**那一场专属**的会话（派活寻址用的就是它） |
-| `interview_get_context` | `sessionId?` | 读全部上下文（简历/JD/清单/转录/统计） |
+
+### 3.4 收尾与整理
+
+| 工具 | 参数 | 作用 |
+|---|---|---|
 | `interview_finish` | `sessionId? report` | 写报告并结束 |
 | `interview_list_sessions` | — | 列出会话 |
-| `interview_list_profiles` | — | 列出岗位档案 |
-| `interview_save_profile` | `id? title company? jdUrl? jdText? checklist?` | 归档一个岗位 |
-| `interview_apply_profile` | `sessionId? profileId` | 继承档案的 JD 与考点基线 |
-| `interview_sync_profile` | `sessionId? profileId?` | 把会话成果回写档案 |
-| `interview_asr_status` | — | 读识别链路状态与原因（兼容旧名） |
-| `interview_voice_status` | — | 读整条语音链路：识别与播报分别走哪条、为什么、宿主模型准备到哪一步 |
-| `interview_voice_prepare` | `providerId?` | 让宿主开始准备语音识别模型（首次要下载） |
-| `interview_save_jd` | `sessionId? text url?` | 把 JD 正文写进一场面试。**只写正文**：标题/公司/岗位用 `interview_prepare` 显式写入 |
 | `interview_archive_session` | `sessionId? archived` | 归档 / 取消归档一场面试（只是收起来，不删） |
-| `interview_list_resumes` | — | 列出简历库里的简历 |
-| `interview_save_resume` | `text? sessionId? title?` | 存一份简历进库（或把某场面试里的简历存进去） |
-| `interview_apply_resume` | `resumeId sessionId?` | 把库里那份用到某场面试上（卷内留快照） |
-| `interview_delete_resume` | `resumeId` | 从简历库删掉一份（已建好的面试不受影响） |
+| `interview_reset_session` | `sessionId? mode?: 'purge' \| 'archive'` | **重置记录**：清转录/报告/计时/暂停账本/「问过」标记/清单调整记录/等助手任务，并解绑两个角色的助手会话；保留简历、JD、考点清单与元信息。`purge`（默认）= 转录 / 报告 / 录音录像直接删；`archive` = 先搬到 `<工作区>/archive/<会话>/<时间>/` 留副本再重置。返回 `cleared` / `kept` /（archive 时）`archivedTo` |
+| `interview_delete_session` | `sessionId? force?` | 删除一场面试（连同卷宗目录，不可恢复）。进行中的会被拒，除非 `force: true` |
+| `interview_purge_empty_sessions` | — | 清理空场次：只删没有任何内容的会话 |
+
+### 3.5 语音、设备与卷宗库
+
+| 工具 | 参数 | 作用 |
+|---|---|---|
+| `interview_voice_status` | — | 读整条语音链路：识别与播报分别走哪条、为什么、宿主模型准备到哪一步 |
+| `interview_asr_status` | — | 只读识别那半边（兼容旧名） |
+| `interview_voice_prepare` | `providerId?` | 让宿主开始准备语音识别模型（首次要下载） |
+| `interview_camera_diagnose` | `device?` | 摄像头自检：ffmpeg 在哪（路径与来源）、系统里有哪些摄像头、能不能真抓到一帧 |
 | `interview_workspace_root` | — | 读卷宗库位置：路径、来源（配置 / 面板里选的 / 默认）与理由 |
 | `interview_set_workspace_root` | `path` `migrateFrom?` | 换卷宗库根；带 `migrateFrom` 时把那边的会话与档案**复制**过去 |
-
-**每个工具都是 `src/host/service.js` 的一个方法**，不重新实现业务逻辑。
 
 ---
 

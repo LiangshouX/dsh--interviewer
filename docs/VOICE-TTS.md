@@ -1,10 +1,12 @@
 # VOICE-TTS.md — 语音合成（TTS）模型速查
 
-> 目的：**接入不用再去翻官方文档**。这里汇总 Qwen / MiniMax / MiMo 三家 TTS 的
-> 模型 ID、默认系统音色（含简介）、端点、协议与最小请求示例，以及踩过的坑。
-> 插件侧的链路/凭据/测试语义见 [VOICE.md](VOICE.md)；ASR 见 [VOICE-ASR.md](VOICE-ASR.md)；
-> 未实现能力（克隆/设计/实时）见 [../ROADMAP.md](../ROADMAP.md)。
+> **这份文件管厂商侧**：各家 TTS 的模型 ID、默认系统音色（含简介）、端点、协议与
+> 最小请求示例，以及踩过的坑。插件侧（预设 id、凭据名、回落链、失败语义、测试）
+> 在 [VOICE.md](VOICE.md)；ASR 见 [VOICE-ASR.md](VOICE-ASR.md)；未实现能力
+> （克隆/设计/实时）见
+> [ROADMAP.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/ROADMAP.md)。
 >
+> 目的：**接入不用再去翻官方文档**。
 > 调研日期：2026-11-18。官方模型/音色会更新，**以官方为准**；本文给出来源链接便于复核。
 > 标记「待核实」= 官方文档未明确或来自第三方实测，接入前请自行验证。
 
@@ -12,15 +14,17 @@
 
 ## 0. 一张表先看全
 
-| 系列 | 插件预设 id | 协议 | 默认端点 | 凭据 ref | 模型举例 |
-|---|---|---|---|---|---|
-| Qwen-Audio-TTS | `dashscope-token-plan` / `dashscope` | **tts_v2 WebSocket** | `wss://token-plan.maas.qianwenaiapi.com/api-ws/v1/inference` / `wss://dashscope.aliyuncs.com/api-ws/v1/inference` | `QIANWEN_TOKEN_PLAN_API_KEY` / `DASHSCOPE_API_KEY` | `qwen-audio-3.0-tts-plus` |
-| CosyVoice | `dashscope`（同协议） | tts_v2 WebSocket / HTTP | 同上 / 百炼 | `DASHSCOPE_API_KEY` | `cosyvoice-v3-flash` |
-| Qwen3-TTS | （未接，见 ROADMAP） | DashScope 原生 multimodal-generation HTTP | `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation` | `DASHSCOPE_API_KEY` | `qwen3-tts-flash` |
-| MiniMax | `minimax-token-plan` / `minimax-cn` | HTTP `t2a_v2`（音频=**hex**） | `https://api.minimax.cn/v1/t2a_v2` | `M_PLAN_API_KEY` / `MINIMAX_API_KEY` | `speech-02-hd` |
-| MiMo | `mimo-token-plan` / `mimo` | HTTP `chat/completions`+`audio` | `https://token-plan-cn.xiaomimimo.com/v1` / `https://api.xiaomimimo.com/v1` | `XIAOMI_TOKEN_PLAN_CN_API_KEY` / `MIMO_API_KEY` | `mimo-v2.5-tts` |
-| OpenAI 兼容 | `openai` | HTTP `/audio/speech` | 任意兼容网关 | `OPENAI_API_KEY` | `gpt-4o-mini-tts` |
-| 免密钥兜底 | `baidu` / `edge` / `browser` | 非公开朗读接口 / WS / `speechSynthesis` | — | 无 | — |
+| 系列 | 插件预设 id | 协议 | 默认端点 | 模型举例 |
+|---|---|---|---|---|
+| Qwen-Audio-TTS | `dashscope-token-plan` / `dashscope` | **tts_v2 WebSocket** | `wss://token-plan.maas.qianwenaiapi.com/api-ws/v1/inference` / `wss://dashscope.aliyuncs.com/api-ws/v1/inference` | `qwen-audio-3.0-tts-plus` |
+| CosyVoice | `dashscope`（同协议） | tts_v2 WebSocket / HTTP | 同上 / 百炼 | `cosyvoice-v3-flash` |
+| Qwen3-TTS | （未接，见 ROADMAP） | DashScope 原生 multimodal-generation HTTP | `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation` | `qwen3-tts-flash` |
+| MiniMax | `minimax-token-plan` / `minimax-cn` | HTTP `t2a_v2`（音频=**hex**） | `https://api.minimax.cn/v1/t2a_v2` | `speech-02-hd` |
+| MiMo | `mimo-token-plan` / `mimo` | HTTP `chat/completions`+`audio` | `https://token-plan-cn.xiaomimimo.com/v1` / `https://api.xiaomimimo.com/v1` | `mimo-v2.5-tts` |
+| OpenAI 兼容 | `openai` | HTTP `/audio/speech` | 任意兼容网关 | `gpt-4o-mini-tts` |
+| 免密钥兜底 | `baidu` / `edge` / `browser` | 非公开朗读接口 / WS / `speechSynthesis` | — | — |
+
+每个预设对应的**凭据名**在 [VOICE.md §3.2](VOICE.md)。
 
 **通用坑（三家都适用）：**
 - **key 与主机/平台要配对**：Token Plan 中转 key 只在该中转主机有效，打官方端点 401；反之亦然。
@@ -335,15 +339,7 @@ Token Plan 专属 base `https://token-plan-cn.xiaomimimo.com/v1`（-sgp/-ams 同
 
 ## 5. 凭据 ref 对照
 
-| ref | 平台 |
-|---|---|
-| `DASHSCOPE_API_KEY` | 官方百炼 DashScope |
-| `QIANWEN_TOKEN_PLAN_API_KEY` / `QWEN_TOKEN_PLAN_API_KEY` | 千问 Token Plan 中转 |
-| `M_PLAN_API_KEY` / `MINIMAX_M_PLAN_API_KEY` | MiniMax Token Plan（M Plan） |
-| `MINIMAX_API_KEY` | MiniMax 按量 |
-| `MINIMAX_GROUP_ID` | MiniMax 旧账户 GroupId（社区惯例） |
-| `MIMO_API_KEY` | MiMo 官方按量 |
-| `XIAOMI_TOKEN_PLAN_CN_API_KEY` | 小米 MiMo Token Plan（中转） |
-| `OPENAI_API_KEY` / `SILICONFLOW_API_KEY` | OpenAI / SiliconFlow 兼容 |
+各预设的**凭据名**在 [VOICE.md §3.2](VOICE.md)（插件侧唯一真源）；
+发现与继承规则在 [VOICE.md §4](VOICE.md)。
 
-> 密钥只进宿主 `ctx.credentials`，不进插件配置文件（见 VOICE.md）。
+> 密钥只进宿主 `ctx.credentials`，不进插件配置文件（见 [VOICE.md §5](VOICE.md)）。

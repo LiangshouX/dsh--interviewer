@@ -95,12 +95,18 @@ export function systemBrowsers() {
  * `--use-fake-device-for-media-stream` 让 Chromium 生成一个假摄像头
  * （那个绿球 + 时间戳的测试画面），这样「摄像头已接通」的状态
  * 在截图里是可见的，不必真接一台设备。
+ *
+ * **想换一张更好的画面？** 设 `DSH_IV_FAKE_VIDEO=<file.y4m>`：
+ * Chromium 会把那个文件当摄像头画面循环播（y4m 或 mjpeg）。
+ * 默认那个绿球适合调试，但对外的截图不该长这样。
  */
 export function launchOptions() {
   const args = [
     '--use-fake-ui-for-media-stream',
     '--use-fake-device-for-media-stream',
   ]
+  const fakeVideo = (process.env.DSH_IV_FAKE_VIDEO ?? '').trim()
+  if (fakeVideo !== '') args.push(`--use-file-for-fake-video-capture=${fakeVideo}`)
   const candidates = [
     '/root/.cache/ms-playwright/chromium-1243/chrome-linux/chrome',
     '/usr/bin/chromium',

@@ -1,255 +1,159 @@
-# dsh-realtime-interview（模拟面试间）
+# 模拟面试间 · dsh-realtime-interview
 
-把「一场真实的技术面试」搬进 DSH：**准备材料 → 出面试官底稿 → 实时面试 → 事后评估**。
-数据全在本机；不写死在某个模型或某个厂商上。
+**把一份简历和一份岗位 JD，变成一场有准备的模拟面试。**
 
-> 跑起来的东西是 `release/` 里的 tarball，不是仓库目录。安装纪律见 [AGENTS.md](AGENTS.md)。
+面向正在准备面试的求职者，也面向需要现场控制台的面试官。DeepSeek Harness 插件：MIT 协议，中文界面，简历、JD、转录、录像全部留在本机。
 
----
+![面试间：舞台上是虚拟面试官，右下是提问字幕，右侧是速记与现场控制台](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/interview-room.jpg)
 
-## 一分钟上手
-
-```bash
-node scripts/build.mjs     # 构建 + 全部闸门（语法 / SSR / 性能 / 布局）
-node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
-# 然后用 plugin_manager 的 remove_bundle → install_bundle 指向那个 tgz
+```
+简历 + JD
+    │
+    ▼
+① 准备底稿 ───── 助手读 JD、拆岗位要求、映射你的经历，落一份分级考点清单
+    │
+    ▼
+② 逐轮面试 ───── 按清单提问，按你的回答追问；你说的每一句都进转录
+    │
+    ▼
+③ 实时摄像与语音  摄像头画面、麦克风转写、问题朗读、整场连续录制
+    │
+    ▼
+④ 事后报告 ───── 逐考点评估、亮点与风险点、清单调整回顾、改进建议
 ```
 
-刷新 DSH 页面，侧栏点「模拟面试间」。
-
-- **一场面试 = 一个卷宗目录**：默认 `D:\DSH-REALTIME-INTERVIEW\workspaces\<id>\`
-  （非系统盘优先；可在面板顶部「浏览…」换根，换根是**复制**不是移动）。
-- **面试工作区会登记进 DSH 左侧项目列表**：助手派活默认落在同一个目录，
-  不会把请求发到别的项目去。
-- 数据根、申请来源、当前语音链路由面板「设置」页如实显示。
+插件不写面试题，也不写报告——题目与判断由模型产出，插件负责结构、状态与留痕。面试在 DSH 侧栏的「模拟面试间」面板里进行，提问与对话在 DSH 对话区。每一场面试是一个**卷宗目录**，全部数据集中在一个工作区根下（Windows 上优先挑非系统盘，没有别的盘才用用户目录；可在设置页换位置）。
 
 ---
 
-## 四个阶段
+## 安装
 
-### 1. 准备（归档材料）
+npm 包名 `dsh-realtime-interview`（首次公开发布：**0.9.0**）。由 DSH 自己装进当前 profile：
 
-- 简历 / JD：粘贴、上传，或贴 JD 链接让插件先直连抓取。
-  简历收 txt/md/json/docx/pdf；**JD 只收 txt/md 纯文本**（二进制格式对 JD 没有意义）。
-- **点纸面就放大**：卡片是总览，放大后是阅读视图（md 渲染）；
-  切到「编辑」是保真源码。每块材料只有一个入口，不再有【放大】【修改】两个按钮。
-- 编辑受保护：有未保存改动时，点遮罩 / Esc / 关闭都不会关窗，
-  顶部浮出黄色警告并给「放弃修改」的出路。
-- 保存：JD 直接保存；简历会问「覆盖原简历 / 存为新简历」——
-  首次入库（初次上传、初次粘贴、或新建一份）会先要一个认得出来的名字。
-- 简历库：存一次、多场复用；下拉里**整行就是「选用」**，选进某一场时在卷内留快照。
-- 上传不等于归档：文件先读进放大窗口，看过、改过、点保存才写进这一场。
-- 左侧场次**按公司分组**（组头可折叠）；标题被省略号截断时悬停可看全。
-- **公司 / 岗位 / 标题只认显式写入**：插件不从 JD 里猜（猜出来的「基础信息」
-  「专家」比空着更糟）。没填就是带日期的占位值（`新建公司 2026-11-17`），
-  准备页三格随时能改，助手也能用 `interview_prepare` 改已建好的场次。
-- 场次可以**归档**（收起来）、**删除**（两步确认，删目录）、
-  **清理空场次**（只删没有任何内容的）；误触新建可在通知条上「撤销新建」。
+```bash
+dsh plugin --profile web add dsh-realtime-interview
+```
 
-### 2. 底稿（面试官底稿）
+或者直接跟助手说「装一下 dsh-realtime-interview」，它会调 `plugin_manager` 的 `install_bundle`。
+装完刷新页面，左侧栏出现「模拟面试间」。已发布版本：`npm view dsh-realtime-interview versions`。
 
-- 材料归档后点「让助手出底稿」，派活到**面试工作区的助手会话**；
-  助手用 `interview_get_context` 读材料、用 `interview_save_checklist` 写回。
-  **同一个岗位的「拉 JD」与「出底稿」用同一个助手会话**（不是两个对话）；
-  面板上有一枚「助手会话 · 尾号」芯片，可溯源到具体是哪个宿主对话（见下）。
-- 清单是**活文档**：默认收起、面试中不可见；过长时在限高容器里滚动。
-- 清单生成后可一键「去面试」，不满意可以「重新生成」（二次确认，覆盖现有清单）。
+从源码装（开发者）：
 
-### 3. 面试中
+```bash
+node scripts/build.mjs     # 构建 + 全部闸门
+node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
+```
 
-- **点「开始面试」= 设备 + 录制 + 朗读一次到位**：麦克风（桌面端再加上宿主摄像头）、
-  **整场连续录制**、**问题自动朗读**都在同一个用户手势里起来；暂停时一起收尾，
-  继续 / 续接时一起重开。设备失败也不挡面试，但会如实说「麦克风已接通 /
-  摄像头没接上 / 全都不可用，用键盘」（见 [AGENTS.md §6.15](AGENTS.md)）。
-  - **录制不用点「开始录制」**：面试一开始就在录，每 5 秒把一块数据追加到
-    本场卷宗里的同一个文件；结束 / 暂停自动收尾。桌面端宿主摄像头的画面是
-    **静音**的，声音走另一路音频文件（都在同一场的 `recordings/` 里）。
-    「画面」下面有一行 `● 正在录制 · 自动存进本场卷宗`，不用猜。
-  - **朗读也跟着面试状态走**：进入面试就自动朗读新问题；点「关闭朗读」记在本场，
-    暂停 / 续接不会偷偷打开。
-- **面试主循环是事件驱动的，不是手动的**（设计见 [docs/TURN-TAKING.md](docs/TURN-TAKING.md)）：
-  点「开始面试」助手**自动开场**；候选人答完提交后助手被唤醒出下一题；
-  暂停 / 继续保住上下文与计时口径。
-  - **回答节奏自动 / 手动**（默认手动，随时在「面试中」页切换）：自动 = 说完静音
-    约 2 秒自动提交，带 2 秒反悔窗口（重新开口即取消、碰草稿即切手动）；
-    手动 = 自己点「提交回答」。**两种模式都会唤醒面试官**——开关只管自动判定。
-  - **暂停**：设备立刻释放（指示灯灭）、计时停走、转录留痕；**继续**：助手带着
-    原上下文续接。刷新 / 崩溃后重开面板会看到「这场面试还在进行」的恢复板，
-    与手动继续走同一条路。
-  - **续接**（结束之后还能接着面）：临时有事要先结束去分析，回来点「续接面试」
-    就从上一问接着问——转录、底稿、计时都保留，**中断的时间不算面试时长**，
-    助手也不会重新开场。舞台/报告页都有这个入口。
-  - 派活失败不会静默：转录留痕 + 面板「重新发给助手」按钮（幂等重发）。
-- **摄像头两条采集通道**：ffmpeg（DirectShow）优先，失败自动回落 Chromium
-  （Media Foundation）。「申请摄像头与麦克风」一条按钮走完整条链路：
-  浏览器麦克风 → 宿主摄像头，并逐步显示「✓ 麦克风已接入 · 摄像头正在尝试宿主采集…」。
-- 语音：宿主 `speechToText`（SenseVoice 本地模型）→ 预设供应商（**Qwen / MiMo / MiniMax
-  的 Token Plan 与 API 直连**）→ 任意 OpenAI 兼容 → 浏览器识别 → 键盘；
-  播报：宿主 TTS（暂无）→ 同一批预设供应商 → 任意 OpenAI 兼容 → 免密钥自然音 → 浏览器音色。
-  面板永远显示**现在用的是哪条链路、为什么**。
-  预设供应商的端点/协议/模型/凭据名是**成对的**（面板只读），Token Plan 与直连不会混；
-  要自定义端点选「任意 OpenAI 协议兼容」。
-- **等助手返回时有真 loading**：抓 JD / 出底稿 / 写报告派出去后，卡片上会出现
-  「助手正在…」的状态；成功即消失，失败或超时立刻停转，给出原因与「重试 / 忽略」，
-  **不会无限转圈**（状态由 Host 判定，客户端不自己计时）。
-- 语流观察（停顿、语速、填充词、重复、自我修正）由 Host 统一计算；
-  只用于调整追问方式与报告「表达」一节，**不打分**。
-- **虚拟面试官（可插拔形象）**：舞台右上角一个 2D 面试官——她提问时**嘴跟着自己的
-  TTS 音频动**（WebAudio 包络驱动，不是猜的），听你说话时视线跟着你的指针，
-  思考时侧头、平时呼吸与眨眼。**运行时**（mesh-avatar，MIT）随包分发：零下载、零联网；
-  **形象本体按目录装**：`assets/avatar/<id>/` 凑齐四样文件（`avatar.json` / `rig.json` /
-  `built/layers.json` / `built/base.png`）就是一份形象，装一份，设置页下拉里多一项。
-  加载失败只显示一块「形象不可用 · 面试照常进行」的小牌，面试本身不受影响。
-  设置页「面试官形象」可一键关掉。
-  > 本包带两份形象：**沈蘅月**（`assets/avatar/interviewer/`）与
-  > **DeepSeek-Q**（`assets/avatar/DeepSeek-Q/`）。两份都是用户提供的 AI 生成插画
-  > 经本地流水线做出的绑定，出处与复现步骤见各目录的 `NOTICE.txt`；
-  > 设置页「面试官形象」可以随时切换。
-  外放会串音，**建议戴耳机**（麦克风已开回声消除，播放期间该段也不送转写）。
-- 录像/录音可关（设置页隐私开关）；面试一开始就自动录，文件直接写进本场卷宗目录。
-
-### 4. 报告
-
-- 面试结束后，在「面试中」或「报告」页点「生成事后报告」让助手写；
-  报告由模型写、插件落盘，产出后自动显示。
-- **时长 < 3 分钟**视为试玩：不催生成报告，按钮会说明「太短，先不生成」。
+再让 `plugin_manager` 的 `install_bundle` 指向那个 tgz。**不要指向源码目录**——理由见 [AGENTS.md §1](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/AGENTS.md)。
 
 ---
 
-## 设置页（在面试间里，不在 DSH 设置）
+## 它能做什么
 
-| 组 | 可改什么 |
-|---|---|
-| 外观 | 亮色 / 暗色（**默认亮色**）、**跟随 DSH 主题**（勾上后页头切换按钮失效，明暗完全由宿主决定） |
-| 语音识别 | 服务下拉（自动 / 宿主 / **预设供应商：Qwen、MiMo、MiniMax 各 Token Plan + 直连** / 任意 OpenAI 兼容 / 浏览器 / 关闭）、语言、凭据，**测试识别**；预设供应商的端点与模型只读 |
-| 语音播报 | 服务下拉（自动 / 宿主 / 同一批预设供应商 / 任意 OpenAI 兼容 / 百度 / Edge / 浏览器 / 关闭）、**模型（按预设给的下拉）**、**音色（按模型下拉）**、格式、语速、凭据，**测试播报** |
-| 摄像头 | 采集后端（auto / 仅 ffmpeg / Chromium 优先）、ffmpeg 路径、Chrome/Edge 路径 |
-| 隐私 | 允许录像、允许录音 |
-| 回答节奏 | 模式（手动 / 自动）、话轮结束静音阈值（800–6000 ms）；「面试中」页有两态快捷切换 |
-| 面试官形象 | 舞台上挂不挂预置面试官（默认挂）；关掉后其余一律不变。多份形象时多一个「形象」下拉 |
-| 面试间保护 | 离开确认总开关、恢复「以后不再提醒」 |
-| 环境（只读） | 数据根与理由、面试/档案目录、设置文件、宿主工作区、DSH 工作区登记状态、宿主模型目录与体积、空场次清理 |
+- **材料归档。** 简历收 txt / md / docx / pdf，也能粘贴；JD 收 txt / md，或给一个链接让插件直接抓。抓不到就如实说，并给出粘贴兜底。
+- **面试官底稿。** 一份分级考点清单（core / deep / bonus），每条写明「为什么问它」。面试中可以随时增删改，每次调整都记理由。
+- **逐轮面试。** 点「开始面试」，助手自动开场；你答完，它被唤醒出下一题。回答节奏可以手动（自己点发送），也可以自动（说完静音约 2 秒自动提交，带 2 秒反悔窗口）。两种模式都会唤醒面试官。
+- **画面与声音。** 摄像头画面、麦克风转写、问题自动朗读、整场连续录制。录制每 5 秒落一块到本场卷宗，崩了也保留已录的部分。
+- **虚拟面试官。** 舞台右上角一张会说话的脸：口型由 TTS 音频的包络驱动，听你说话时视线跟着指针。
+- **暂停与续接。** 暂停时释放设备、计时停走；续接从上一问接着问，转录与底稿沿用，中断的时间不算面试时长。
+- **事后报告。** 结束后由助手基于转录原话写：逐考点评估、亮点与风险点、清单调整回顾、改进建议。面试不足 3 分钟时按钮会说明「太短」，但仍然可以生成。
 
-**密钥只进宿主，不进配置文件。** 面板里粘贴的 key 走 DSH 的
-`ctx.credentials.set()` 写进宿主的凭据存储（只有你的系统用户可读、写完立刻生效、
-不用重启）；界面**永不回显**密钥，只显示「已配置 / 未配置 + 来源」。
-反过来，你机器上**已经配过的**凭据（profile 里的 `apiKeyEnv`、常见环境变量名）
-会直接列在「凭据」下拉里供选择——不用重填，也能被继承。
-
-**配完能验。** 「测试识别」录 2 秒真音频跑一遍整条链路；「测试播报」合成一句话
-当场播放。失败会带回具体原因（HTTP 码、超时、缺凭据、协议不匹配、
-厂商业务错误码原文）和下一步能做什么。
-
-写入仍是**白名单 + 规格校验**：枚举/范围/类型不对会被拒绝并说明原因；
-配置文件里显式写过的键优先于面板设置，同样会说明。
+![事后报告：逐考点评估的阅读版式](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/report.jpg)
+- **可复用。** 简历库存一次、多场复用；岗位档案让同一个岗位的第二次面试继承上次的考点基线。
+- **收拾干净。** 归档（收起来）、删除、批量清理、重置这一轮（彻底删或留副本）、续接——四种动作语义分明，互不顶替。
+- **隐私开关。** 录像与录音可在设置页关掉；关掉后不会自动开录。
 
 ---
 
-## 场次整理：归档 / 重置 / 记录清理 / 续接
+## 隐私
 
-误触的开始、试跑的场次、聊到一半被打断的面试——这些都得能收拾，而且收拾完
-**材料还在**。四种动作语义分明，互不顶替：
+- 简历、JD、转录、录像、报告全部写在你自己机器上的卷宗目录里。插件不上传。
+- 对外只发两种请求：你自己给的 JD 链接，以及你在设置页配置的语音服务端点。
+- 语音供应商（Qwen / MiMo / MiniMax / 任意 OpenAI 兼容 / 百度 / Edge）都是按需开启的：不配凭据就走浏览器自带能力。**注意**：Chromium 自带的语音识别会把音频送到浏览器厂商的服务，不是纯本地；介意就用键盘输入，或在设置页指定一家你信得过的供应商。面板永远显示**现在走的是哪条链路、为什么**。
+- 密钥写进 DSH 的凭据存储，不进插件配置文件，界面永不回显。机器上已经配好的凭据会直接列出来供选择。
+- 面试工作区会登记进 DSH 的项目列表，助手派活默认落在同一个目录，不会把请求发到别的项目去。
 
-| 想要 | 用哪个 | 结果 |
+---
+
+## 环境要求
+
+- **Node ≥ 20**（`package.json` 的 `engines`）。
+- **DSH ≥ 0.2.2-rc.3**（`package.json` 的 `engines.dsh`）：需要支持 bundle 与客户端模块注入的版本。装不上时宿主会给出明确提示，也可用插件管理器的版本豁免放行。升级插件后 Host 半边要重启 DSH 才生效，只改浏览器半边刷新页面就够。
+- **摄像头（可选）**：DSH 桌面端的 Electron 权限处理只放行纯音频，浏览器拿不到摄像头。所以桌面端改走 Host 侧 ffmpeg 采集；机器上没有 ffmpeg 时，插件如实说「这台机器没有摄像头采集程序」，面试本身不受影响——麦克风、键盘、报告照常。
+  - 装 ffmpeg：`winget install Gyan.FFmpeg`（或 `choco install ffmpeg` / `brew install ffmpeg`），或把 `ffmpeg.exe` 的绝对路径填进设置页。
+  - DirectShow 采集失败的机器会自动回落到 Chromium 的 Media Foundation 通道；面板会显示现在走的是哪一条。
+- **语音（可选）**：不配置也能面试——走浏览器自带能力，或直接用键盘输入。配置供应商后才是真模型。
+- **WebGL2**：虚拟面试官需要它。没有时舞台上显示「形象不可用 · 面试照常进行」。
+
+---
+
+## 文档
+
+| 文档 | 读者 | 内容 |
 |---|---|---|
-| 这场暂时看不到 | 行尾「⋯」→ **归档** | 收进「归档 N」，内容全在，随时取回 |
-| 这场面试搞脏了，重来 | 行尾「⋯」→ **重置这一轮…** | 两种模式二选一：**彻底清掉**（转录/报告/录音直接删）或**留副本再重置**（先把它们搬到 `<工作区>/archive/` 再清）。两种都保留简历 / JD / 底稿 |
-| 一批场次不要了 | 左栏底部 **管理面试记录** | 勾选哪几场删哪几场，**逐场报告结果**（进行中的会被拒并说明）；另有「清理空场次」，以及留副本的归档列表 |
-| 这场没面完，接着面 | 行尾「⋯」→ **续接面试**（或舞台上的「续接面试」） | `done → running`，从上一问接着问；转录 / 底稿 / 计时沿用，中断时间不算时长 |
+| [docs/PRD.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/PRD.md) | 人 | 产品定义：问题、用户、主流程、不做什么 |
+| [docs/DETAIL.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/DETAIL.md) | 人 | 插件详情页：怎么用、要准备什么、已知限制、数据在哪；末尾附实现要点 |
+| [docs/API.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/API.md) | 开发者 | Host ⇄ Client 的 HTTP 契约、Agent 工具契约 |
+| [docs/DESIGN.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/DESIGN.md) | 界面开发者 | 视觉 token、字号档位、组件签名、各屏结构、验收闸门 |
+| [docs/TURN-TAKING.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/TURN-TAKING.md) | 开发者 | 话轮状态机、派活、暂停与继续 |
+| [docs/VOICE.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/VOICE.md) | 开发者 | 语音链路、预设表、凭据规则、失败语义 |
+| [docs/VOICE-ASR.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/VOICE-ASR.md) | 接入者 | ASR 模型 ID、端点、协议、坑 |
+| [docs/VOICE-TTS.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/VOICE-TTS.md) | 接入者 | TTS 模型 ID、音色表、端点、协议、坑 |
+| [AGENTS.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/AGENTS.md) | 开发者 / Agent | 开发纪律 |
+| [ROADMAP.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/ROADMAP.md) | 人 | 未实现与待优化项 |
+| [CHANGELOG.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/CHANGELOG.md) | 人 | 版本记录 |
 
-**「管理面试记录」常驻在左栏底部的一整行按钮**（列表自己滚，它不跟着滚），
-场次「⋯」菜单和设置页也各有一个入口——上一版把它做成表头里的小字「清理」，
-用户走完一遍的结论是「根本没做」，所以不再让它藏起来。
-
-**助手会话是「一场两个」。** 抓 JD / 出底稿用**准备对话**，开场 / 追问 / 续接 /
-写报告用**面试对话**——两段上下文不再混在一起。准备页右上角两枚芯片
-（`准备 · 尾号` / `面试 · 尾号`）可查具体对话、建于何时、最近派活、重建过几次。
-会话被删会自动重建（派活前先探一次，撞上 `not-found` 再兜底），**绝不会**把请求
-悄悄发到另一场面试的对话里（详见 [AGENTS.md §6.14](AGENTS.md)、
-[docs/API.md §2.1.3](docs/API.md)）。
+分工作法：**VOICE.md 管插件侧**（预设、凭据、回落、失败语义），**VOICE-ASR.md / VOICE-TTS.md 管厂商侧**（全部可用模型、音色、协议细节、官方文档链接）。接入不用再去翻官方文档。
 
 ---
 
-## 面试间保护
+## 给 Agent
 
-设备开着时：
+插件向 DSH 注册 31 个工具与 2 个技能。
 
-- 面板内切页签 / 切面试 / 新建面试 → 先确认；面试进行中 → 二次确认；
-- **从侧栏切到会话 / 自媒体工作台 / Skill-MCP 等** → 拦截点击、先确认，
-  确认后释放设备并把这次点击重放回去；
-- 关页签 / 刷新 → 浏览器原生确认；
-- 面板被宿主卸载 → 兜底释放所有设备轨与 Host 摄像头。
+| 阶段 | 工具 |
+|---|---|
+| 建场次、归档材料 | `interview_prepare` `interview_save_resume` `interview_save_jd` `interview_apply_resume` `interview_list_resumes` `interview_delete_resume` `interview_save_profile` `interview_apply_profile` `interview_sync_profile` `interview_list_profiles` |
+| 底稿 | `interview_save_checklist` `interview_mutate_checklist` |
+| 面试中 | `interview_record_turn` `interview_get_context` `interview_pause` `interview_resume` `interview_continue_session` `interview_request_agent` `interview_agent_session` |
+| 收尾 | `interview_finish` |
+| 整理场次 | `interview_list_sessions` `interview_archive_session` `interview_reset_session` `interview_delete_session` `interview_purge_empty_sessions` |
+| 语音与设备 | `interview_voice_status` `interview_asr_status` `interview_voice_prepare` `interview_camera_diagnose` |
+| 卷宗库 | `interview_workspace_root` `interview_set_workspace_root` |
 
----
+两个技能：
 
-## 数据与隐私
+- **`interview-prep`** — 面试前：读简历与目标岗位 JD，拆解 JD 要求，映射到候选人的真实经历，产出一份分级的考点清单并落盘。
+- **`interview-conduct`** — 面试中：按流程提问（自我介绍 → 项目介绍 → 清单深挖 → 收尾），边问边调整考点清单，最后写事后分析报告。
 
-- 简历、JD、转录、录像、报告**全部留在本机**，插件不上传。
-- 唯一的对外请求：用户自己提供的 JD 链接，或用户配置的语音服务端点。
-- 录像是可选项；关掉后不会自动开录（手动「开始录制」入口仍在，用来临场补一段）。
+工具与技能逐项签名见 [docs/API.md §3–§4](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/API.md)。每个工具都是 `src/host/service.js` 的一个方法，与界面按钮走同一条路。
 
 ---
 
 ## 开发
 
 ```bash
-node scripts/build.mjs             # 构建 + 校验 + SSR + 性能 + 布局
-node --test tests/*.test.js        # 单测（约 200）
-node scripts/render-probe.mjs --check
-node scripts/layout-check.mjs --check
-node dev/shoot.mjs                 # 截图到 dev/shots/
-node scripts/check-plan-anchors.mjs  # 复核代码锚点（方案里引用的 file:line 还准不准）
+node scripts/build.mjs               # 构建 + 语法 / SSR / 性能 / 布局闸门
+node --test tests/*.test.js          # 单测
+node dev/shoot.mjs                   # 截图到 dev/shots/
+node dev/check-camera-release.mjs    # 摄像头释放回归闸门
+node scripts/check-plan-anchors.mjs  # 复核方案里引用的代码位置
 ```
 
-- `src/client/` 是浏览器半边源码，`client.js` 是 `scripts/build-client.mjs` 拼出来的生成物，**不许手改**。
-- 视觉：**暗房里的观片台**——中性墨底/纸白、单一蓝灰 accent、三层表面（靠光而不是描边做立体）、
-  六档字号、极低浓度环境光与 40ms 错峰入场；界面**不解释自己**（说明进悬停/弹层或删掉）。
-  契约见 [docs/DESIGN.md](docs/DESIGN.md)。
-- 文档：[AGENTS.md](AGENTS.md)（开发纪律）、[docs/DESIGN.md](docs/DESIGN.md)（界面契约）、
-  [docs/VOICE.md](docs/VOICE.md)（语音链路与凭据）、[docs/PRD.md](docs/PRD.md)（产品）、
-  [docs/API.md](docs/API.md)（接口）、[docs/DETAIL.md](docs/DETAIL.md)（实现细节）。
-- **语音模型速查**：[docs/VOICE-TTS.md](docs/VOICE-TTS.md)（TTS 模型 ID / 音色含简介 / 快速对接）、
-  [docs/VOICE-ASR.md](docs/VOICE-ASR.md)（ASR 模型 ID / 快速对接）——接入不用再去翻官方文档。
-- **未来计划**：[ROADMAP.md](ROADMAP.md)（音色克隆 / 音色设计 / 实时语音 / 配置注入等未实现与待优化项）。
-- **虚拟面试官素材**：运行时是 mesh-avatar（MIT，`assets/vendor/`）；形象本体按目录装，
-  每一份形象自带 `NOTICE.txt`（原画出处、授权与复现步骤），见 `assets/avatar/<id>/NOTICE.txt`。
-  作者工具链用 RuiC-2D（MIT），**运行时不依赖它**。
-  另做一份形象：`node dev/make-avatar.mjs <图.png> <id> --left x,y --right x,y --mouth x,y`
-  （需要本地有 RuiC-2D 与 Python；产物进 `assets/avatar/<id>/`，设置页下拉自动多一项）。
+源码在 `src/`，`client.js` 是生成物，跑起来的是 `release/` 里的 tarball。纪律见 [AGENTS.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/AGENTS.md)。
 
-## 已知边界
+虚拟面试官形象按目录装：`assets/avatar/<id>/` 凑齐 `avatar.json` / `rig.json` / `built/layers.json` / `built/base.png` 就是一份形象，设置页下拉里多一项。每份形象自带 `NOTICE.txt`（原画出处、授权与复现步骤）。运行时是 mesh-avatar（MIT），随包分发，零下载、零联网。
 
-- 摄像头画面只能由 Host 采：DSH 桌面端渲染进程的权限处理只放行纯音频。
-- **虚拟面试官依赖 WebGL2**：少数远程桌面 / 显卡被屏蔽的环境里跑步起来，
-  这时舞台上那块小窗显示「形象不可用 · 面试照常进行」。走浏览器音色播报时
-  **没有口型**（`speechSynthesis` 的输出进不了 WebAudio，做不了真同步）——
-  只做说话姿态，不假装在对口型。
-- 侧栏离开拦截依赖 DSH 侧栏以 click 触发导航（实测如此）；非 click 的程序化跳转拦不住，
-  但卸载时一定会释放设备。
-- 语音识别不支持流式：宿主的 `speechToText` 只有整段转写，准实时靠客户端分段。
-- **播报只做「一次性合成」，不支持实时语音对话模型。** 播报半边是「文本 → 一段音频」
-  的请求-响应（OpenAI `/audio/speech`、MiMo `chat-audio`、MiniMax `t2a_v2`、
-  DashScope `tts_v2` WebSocket、百度/Edge 免密钥、浏览器音色）。像
-  `qwen-audio-3.0-realtime-plus` 这类**语音转语音 realtime 对话模型**（持久双工连接、
-  `session.update` / `input_audio_buffer.append` / `response.audio.delta`、服务端 VAD
-  轮次检测、音频进音频出）是另一个产品类目，本插件**没有**对应的协议适配，配上去也不会响。
-  面试官「念一个问题」需要的是 TTS（如 `qwen-audio-3.0-tts-flash`），不是 realtime 对话模型。
-- **Qwen / MiMo 的音频都不在 `compatible-mode` 的 HTTP 中转上。** Qwen TTS 走
-  `tts_v2` 的 `wss://…/api-ws/v1/inference`；Qwen ASR 走 **DashScope 原生
-  `multimodal-generation`**（Token Plan 主机同路径，`qwen-audio-3.0-asr-flash`）；
-  MiMo 的 ASR/TTS 都走 `chat/completions`。`compatible-mode/v1` 的
-  `/audio/transcriptions` 是 400 `url error`，别把端点填成它。
-  音色**按模型**选（每个模型只支持一组特定音色，跨模型混用报
-  InvalidParameter / `[cosyvoice:]Engine error [411]`），设置页已做成按模型的下拉。
-  **key 与主机要配对**：Token Plan key（`QIANWEN_TOKEN_PLAN_API_KEY` /
-  `XIAOMI_TOKEN_PLAN_CN_API_KEY` / `M_PLAN_API_KEY`）只在各自的中转主机有效；
-  官方按量 key 打中转、或中转 key 打官方端点，都是 401。
-  预设表把「Token Plan / API 直连」做成两条独立条目，端点与模型锁死，
-  不会再出现「填了 A 家的端点、用了 B 家的 key」。
+---
 
-## 待办与未来计划
+## 许可
 
-已知功能缺口（**音色克隆 / 音色设计 / 实时语音对话**）与待优化项（**音色经工作区配置文件注入**、
-长音色表搜索/分组、音色试听、流式 TTS/ASR、模型可用性预探测等）统一记录在
-**[ROADMAP.md](ROADMAP.md)**，每条含现状、目标、难点与优先级建议。
-做掉一条就把它从 ROADMAP 移进 README/CHANGELOG，避免两处重复维护。
+MIT，© LiangshouX。包内第三方资源各自保留原始许可，见 `assets/` 下的 `NOTICE.txt`。
+
+## 贡献
+
+仓库在 [github.com/LiangshouX/dsh-realtime-interview](https://github.com/LiangshouX/dsh-realtime-interview)。提 PR 前请读 [AGENTS.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/AGENTS.md) 的开发纪律，并跑通 `node scripts/build.mjs` 与 `node --test tests/*.test.js`。
+
+## 问题
+
+[github.com/LiangshouX/dsh-realtime-interview/issues](https://github.com/LiangshouX/dsh-realtime-interview/issues)。

@@ -1,7 +1,12 @@
 # VOICE.md — 语音配置闭环（配 → 存 → 测 → 用）
 
-> `docs/DESIGN.md §9` 引用的实现说明。这里写的是**协议、预设、凭据发现规则、
-> 测试语义与失败语义**；界面契约本身在 DESIGN 里。
+> **这份文件管插件侧**：预设表（唯一真源）、凭据规则、回落链、测试与失败语义。
+> 界面契约在 [DESIGN.md §9](DESIGN.md)；**厂商侧**（全部可用模型、音色、协议细节、
+> 官方文档链接）在 [VOICE-ASR.md](VOICE-ASR.md) 与 [VOICE-TTS.md](VOICE-TTS.md)——
+> 接入不用再去翻官方文档。
+
+**目录**：§1 四条腿 · §2 宿主事实 · §3 预设与协议 · §4 凭据发现规则 ·
+§5 安全边界 · §6 测试语义 · §7 失败语义 · §8 不做什么
 
 ---
 
@@ -41,17 +46,13 @@
 | `set()` 写 `<DSH_HOME>/.credentials.yaml` 的 `refs:` 段，0600、热重载、写完立刻生效 | 写进宿主后**无需重启**；环境变量那条路才需要重启 |
 | 空字符串会被 `set()` 拒绝 | 要删除必须 `unset()`；UI 里「清除」是独立动作 |
 | ref 必须匹配 `/^[A-Za-z_][A-Za-z0-9_]*$/` | 插件在 seam 之前先校验，非法名不进 YAML |
-| `ctx.llm.listProviders()` 只返回 `{id,name}` | 没有 baseUrl / apiKey / apiKeyEnv；"继承宿主聊天 provider 当语音端点"不成立 |
+| `ctx.llm.listProviders()` 只返回 `{id,name}` | 没有 baseUrl / apiKey / apiKeyEnv；「继承宿主聊天 provider 当语音端点」**不成立** |
 | 宿主**没有** TTS 服务；ASR 服务（`ctx.speechToText`）在本 DSH 组成里没启用 | 播报走插件自己的 HTTP 链路或免密钥自然音；识别回落浏览器 |
-| DSH profile 的 `cordis.patch.yml` 里 `*.apiKeyEnv` 是凭据引用名 | 这是"可继承"的唯一干净形状：同名的 `credentials.resolve()` 能取到值 |
-
-> 本机已配置的 ref 名（**值不记录、不打印**）：
-> `XIAOMI_TOKEN_PLAN_CN_API_KEY`、`M_PLAN_API_KEY`、
-> `QIANWEN_TOKEN_PLAN_API_KEY`、`DEEPSEEK_API_KEY`。
+| DSH profile 的 `cordis.patch.yml` 里 `*.apiKeyEnv` 是凭据引用名 | 这是「可继承」的唯一干净形状：同名的 `credentials.resolve()` 能取到值 |
 
 ---
 
-## 3. 协议与预设
+## 3. 预设与协议（插件侧的唯一真源）
 
 预设表在 `src/host/voice/presets.js`，**设置页下拉、配置校验（`paths.js` 的枚举）
 都只从这里派生**，前端不硬编码 provider。每项带
@@ -73,6 +74,9 @@ Qwen 中转没有 flash 模型，Qwen/MiMo 的 ASR 都不在 `/audio/transcripti
 所以 `locked: true` 的预设：端点和模型只读，凭据名由预设决定；要自定义端点请选
 「任意 OpenAI 协议兼容」。`asrBaseUrl` / `asrModel` / `asrEndpoint` / `ttsBaseUrl`
 这些键只对非 locked 的预设生效。
+
+厂商侧的全部可用模型、每个模型的限制、音色表与官方文档链接，见
+[VOICE-ASR.md](VOICE-ASR.md) 与 [VOICE-TTS.md](VOICE-TTS.md)。
 
 ### 3.1 语音识别（ASR）
 
@@ -120,6 +124,8 @@ Qwen 的模型只能从该预设声明的 `models` 里选（Token Plan 只有
 `qwen-audio-3.0-tts-plus`），音色按模型查 `voices.js`——跨模型混用会报
 `InvalidParameter` / `[cosyvoice:]Engine error [411]`。
 
+### 3.3 协议实现的落点
+
 各协议的实现细节在 `src/host/voice/tts/`：
 
 - `dashscope.js`：tts_v2 WebSocket（run-task / continue-task / finish-task + 二进制帧）；
@@ -133,17 +139,6 @@ Qwen 的模型只能从该预设声明的 `models` 里选（Token Plan 只有
   业务错误在 `base_resp.status_code/status_msg`，**HTTP 200 也可能是失败**。
   这两点都必须把业务码与原文带回界面（例如 2056 = Token Plan 用量上限）。
 - `baidu.js` / `edge.js`：免密钥兜底。百度实测可用；Edge 在部分网络出口被 WAF 拦成 403。
-
-**2026-11-18 复测（本机，真链路）：**
-
-| 链路 | 结果 |
-|---|---|
-| Qwen Token Plan · ASR | ✅ `POST {token-plan}/api/v1/services/aigc/multimodal-generation/generation`，`qwen-audio-3.0-asr-flash` + `audio` data URI → 200，`output.text` 正确 |
-| Qwen Token Plan · ASR 的 OpenAI 兼容路径 | ❌ `chat/completions` + `qwen3-asr-flash` = 404 `model_not_found`；`/audio/transcriptions` = 400 `url error`。**别往这条路上接** |
-| Qwen Token Plan · TTS | ✅ `api-ws/v1/inference`（tts_v2），`qwen-audio-3.0-tts-plus` |
-| MiniMax · ASR / TTS | 协议正确；本机 M Plan 套餐返回 429 / 业务码 2056（用量上限），界面原样显示 |
-| MiMo | 本机没有官方 key；Token Plan 的 `tp-` key 打官方端点会 401，所以两条预设都要摆出来，由用户手里的 key 决定选哪条 |
-| 宿主语音服务 | 本机 profile 引用的 `dsh-enable-voice-input` tarball 已不在磁盘上，`ctx.speechToText` 不存在 → `host` 不可用 |
 
 ---
 
@@ -182,7 +177,7 @@ Qwen 的模型只能从该预设声明的 `models` 里选（Token Plan 只有
    要删除已保存的凭据只有 `clearVoiceCredential`（`unset`）。
 5. **出口统一擦除。** `src/host/voice/redact.js` 把已知密钥值替换成 `***`，
    在合成失败、识别失败、写入失败三处调用——网关在错误体里回显 key 是
-   现实存在的情况，不能靠"provider 应该不会"来假设。
+   现实存在的情况，不能靠「provider 应该不会」来假设。
 6. **UI 输入框** `type=password`、`autocomplete=off`，保存成功后立刻清空；
    值不进入表单 state 之外的任何地方。
 7. **agent 工具不暴露写入。** 凭据只由人在设置页写入；agent 工具面不接受
@@ -236,24 +231,7 @@ Qwen 的模型只能从该预设声明的 `models` 里选（Token Plan 只有
 
 ---
 
-## 8. 现在这台机器上的实情（2026-11-18 探活）
-
-- **播报**：`auto` 选中 Qwen Token Plan（`dashscope-token-plan`），实测可用；
-  没有 Qwen 凭据时回落到百度朗读（免密钥），Edge 可能被 WAF 拦（403）。
-- **识别**：`auto` 选中 Qwen Token Plan（`qwen-token-plan`），
-  DashScope 原生 `multimodal-generation` 端点实测返回正确文字。
-  这是之前「不管走 Token Plan 还是别的路径都失败」的根因修复：
-  Qwen/MiMo 的 ASR 本来就不在 `/audio/transcriptions` 上。
-- **MiniMax**：M Plan 套餐本机返回 429 / 业务码 2056（用量上限）；
-  端点、协议、错误回显都是对的。
-- **MiMo**：本机没有官方 key；Token Plan 的 key 如果只覆盖编程工具，
-  打 `token-plan-cn.xiaomimimo.com` 也会 401——界面会指路「MiMo · API 直连」。
-- **宿主语音服务**：本机 profile 里引用的 `dsh-enable-voice-input` tarball
-  已不在磁盘上，`ctx.speechToText` 不存在，`host` 预设会如实说不可用。
-
----
-
-## 9. 不做什么
+## 8. 不做什么
 
 - 不把宿主的聊天 provider 当语音端点（宿主没给 baseUrl）；
 - 不让「预设供应商」的端点/模型可编辑——Token Plan 与官方主机、key、模型是成对的，
