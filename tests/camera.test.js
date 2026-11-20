@@ -1,4 +1,4 @@
-﻿import { test } from 'node:test'
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { deviceSelector, locateFfmpeg, parseDeviceList } from '../src/host/camera.js'
 
@@ -127,3 +127,107 @@ test('浏览器采集通道的页面包含 getUserMedia 与回传帧的地址', 
   assert.match(page, /\/frame/)
   assert.match(page, /1280/)
 })
+
+// ── 采集状态：陈旧状态不能冒充「还开着」─────────────────────────────────
+//
+// 这一版修的桌面端 bug：「切到设置页再切回来，开启摄像头不生效，
+// 画面固定在退出前那一帧」。
+//
+// 根因有两层：
+//   ① ffmpeg 进程可能已经自己退了（设备被抢走、驱动出错），
+//      但 `backend` 与 `lastFrame` 还留着 → `start()` 以为「还开着」直接返回 ok，
+//      预览于是把**退出前那一帧**当成现在的画面端出去；
+//   ② `stop()` 杀进程是异步的，设备还没真正空出来，下一次 `start()`
+//      就撞上「设备被占用」。
+
+test('采集进程自己退了：start() 不能被「以为自己还开着」骗过去', async () => {
+  const { CameraService } = await import('../src/host/camera.js')
+  const service = new CameraService()
+  // 陈旧状态：后端写着 ffmpeg、最后一帧还在，但**进程已经不在了**。
+  service.backend = 'ffmpeg'
+  service.lastFrame = Buffer.from([0xff, 0xd8, 0xff, 0xd9])
+  service.child = undefined
+
+  let tried = 0
+  service.startFfmpeg = async () => {
+    tried += 1
+    service.backend = 'ffmpeg'
+    service.child = { exitCode: null }
+    return { ok: true, device: { name: '测试摄像头' } }
+  }
+  service.startBrowser = async () => ({ ok: false, error: '不该走到这里' })
+
+  const result = await service.start()
+  assert.equal(tried, 1, '采集已经死了，start() 却直接返回「已开启」，没有真的重开')
+  assert.equal(result.ok, true)
+})
+
+test('采集还活着：start() 直接复用，不重复开设备', async () => {
+  const { CameraService } = await import('../src/host/camera.js')
+  const service = new CameraService()
+  service.backend = 'ffmpeg'
+  service.child = { exitCode: null }
+  let tried = 0
+  service.startFfmpeg = async () => { tried += 1; return { ok: true } }
+  const result = await service.start()
+  assert.equal(tried, 0, '还在采的时候不该重开一遍')
+  assert.equal(result.ok, true)
+})
+
+test('采集已经死了：预览不再收到退出前那一帧', async () => {
+  const { CameraService } = await import('../src/host/camera.js')
+  const service = new CameraService()
+  service.backend = 'ffmpeg'
+  service.lastFrame = Buffer.from([0xff, 0xd8, 0xff, 0xd9])
+  service.child = undefined // 进程已经退了
+
+  const chunks = []
+  service.attach({
+    writeHead() {},
+    write(chunk) { chunks.push(chunk) },
+    on() {},
+  })
+  assert.equal(chunks.length, 0, '采集已经死了，还把退出前那一帧端了出去（画面定格在退出前）')
+})
+
+test('采集还活着：预览立刻拿到当前这一帧', async () => {
+  const { CameraService } = await import('../src/host/camera.js')
+  const service = new CameraService()
+  service.backend = 'ffmpeg'
+  service.lastFrame = Buffer.from([0xff, 0xd8, 0xff, 0xd9])
+  service.child = { exitCode: null }
+
+  const chunks = []
+  service.attach({
+    writeHead() {},
+    write(chunk) { chunks.push(chunk) },
+    on() {},
+  })
+  assert.ok(chunks.length > 0, '采集是活的，预览却拿不到当前这一帧')
+})
+
+test('stopAndWait：等采集进程真的退出，设备才算空出来', async () => {
+  const { CameraService } = await import('../src/host/camera.js')
+  const { EventEmitter } = await import('node:events')
+  const service = new CameraService()
+  const child = new EventEmitter()
+  child.exitCode = null
+  child.signalCode = null
+  child.kill = () => {
+    setTimeout(() => {
+      child.exitCode = 0
+      child.emit('close', 0)
+    }, 30)
+  }
+  service.child = child
+  service.backend = 'ffmpeg'
+  service.hasFrame = true
+  service.lastFrame = Buffer.from([0xff, 0xd8])
+
+  const started = Date.now()
+  await service.stopAndWait(1000)
+  assert.equal(service.backend, undefined, '停了之后后端标记还在')
+  assert.equal(service.child, undefined)
+  assert.ok(Date.now() - started >= 25, '没有等进程退出就返回了——设备这时还被占着')
+})
+

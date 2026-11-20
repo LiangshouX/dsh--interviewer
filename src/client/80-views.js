@@ -3285,11 +3285,14 @@
           },
         }),
         // Host 侧的摄像头画面：`<img>` 直接吃 multipart/x-mixed-replace 流。
+        //
+        // **地址上带一个号**：每次开摄像头都换一个，否则浏览器可能沿用上一次的
+        // 连接——那条连接早就断了，画面就停在退出前那一帧。
         hasHostVideo && !hostVideoFailed
           ? h('img', {
             key: 'host-v',
             'data-iv-host-video': '1',
-            src: '/interviewer/camera/stream',
+            src: `/interviewer/camera/stream?n=${hostCamera.epoch ?? 0}`,
             alt: '摄像头画面',
             // 流接不上就退回未接通板，别把一张破图摆在舞台中间。
             onError: () => setHostVideoFailed(true),

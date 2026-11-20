@@ -575,6 +575,15 @@ export class CameraService {
    * MF 采集是唯一能出画面的路。两条都失败时把**两条各自的原因**都报出来。
    */
   async start(options = {}) {
+    // **别被「以为自己还开着」骗了。**
+    //
+    // ffmpeg 进程可能已经自己退了——设备被拔、被别的程序抢走、驱动出错——
+    // 但 `backend` 还留着、`lastFrame` 还留着。这时候直接返回「已开启」，
+    // 预览就会把**退出前那一帧**当成现在的画面端上去：用户看到的是一张
+    // 定格的脸，按钮却说「摄像头已接通」。
+    //
+    // 所以先问一句「现在真的在采吗」，不是才把这份陈旧状态清掉重来。
+    if (this.backend !== undefined && !this.isLive()) this.reset()
     if (this.backend !== undefined) return { ok: true, device: this.device, backend: this.backend }
     // 顺序由 **面板设置** 决定：
     //   auto（默认）      → ffmpeg 优先，失败回落浏览器采集
@@ -797,7 +806,10 @@ export class CameraService {
     const drop = () => { this.clients.delete(res) }
     res.on('close', drop)
     res.on('error', drop)
-    if (this.lastFrame !== undefined) {
+    // **只发真的还在采的那一帧。**
+    // 采集已经死了却还把 `lastFrame` 端出去，新来的预览就会看到一张
+    // 定格的脸——用户以为摄像头还开着，其实它早就不通了。
+    if (this.lastFrame !== undefined && this.isLive()) {
       try {
         res.write(`--${FRAME_BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${this.lastFrame.length}\r\n\r\n`)
         res.write(this.lastFrame)
@@ -903,6 +915,70 @@ export class CameraService {
     this.backend = undefined
     if (browser !== undefined) void browser.stop()
     this.stopping = false
+  }
+
+  /**
+   * Stop the capture and **wait until the device is really free**.
+   *
+   * **为什么必须等。** 摄像头是**独占**的：ffmpeg 进程还没退，设备就还被占着。
+   * 这时候再 `start()` 一次，新的 ffmpeg 打不开设备（I/O error / 已被占用）——
+   * 用户看到的是「摄像头打不开了」，而真正的原因是上一条链还没收完。
+   *
+   * 「切到设置页再切回来，摄像头就起不来了」正是这么来的：
+   * 上一条链的 ffmpeg 还在收尾，新的那条已经扑上去了。
+   *
+   * @param {number} [timeoutMs] 等多久算超时（超时就撒手，设备归 ffmpeg 管）
+   * @returns {Promise<void>}
+   */
+  async stopAndWait(timeoutMs = 2000) {
+    const child = this.child
+    this.stop()
+    if (child === undefined) return
+    // 进程已经退了就不用等。
+    if (child.exitCode !== null || child.signalCode !== null) return
+    await new Promise(resolvePromise => {
+      let done = false
+      const finish = () => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        resolvePromise()
+      }
+      const timer = setTimeout(finish, timeoutMs)
+      child.once('close', finish)
+      child.once('error', finish)
+    })
+  }
+
+  /**
+   * Clear the state of a capture that is **no longer running**.
+   *
+   * **和 `stop()` 的区别**：这里不杀任何进程——进程自己已经退了。
+   * 留着 `backend` 与 `lastFrame` 只会让下一次 `start()` 以为「还开着」，
+   * 于是把退出前那一帧当成现在的画面端给预览。
+   */
+  reset() {
+    this.child = undefined
+    this.device = undefined
+    this.hasFrame = false
+    this.lastFrame = undefined
+    this.pending = Buffer.alloc(0)
+    this.backend = undefined
+    this.browserSession = undefined
+  }
+
+  /**
+   * 现在真的在采吗？
+   *
+   * **「有后端」不等于「在采」。** ffmpeg 进程可能已经自己退出了，
+   * 而 `backend` 还留着。
+   *
+   * @returns {boolean}
+   */
+  isLive() {
+    if (this.child !== undefined) return true
+    if (this.browserSession !== undefined && this.browserSession.started === true) return true
+    return false
   }
 
   /**

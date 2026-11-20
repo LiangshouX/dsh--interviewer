@@ -2458,10 +2458,14 @@ export class InterviewService {
   /**
    * Stop the Host-side camera capture.
    *
-   * @returns {object}
+   * **等设备真的空出来再返回。** 摄像头是独占的：ffmpeg 还没退，设备就还被占着。
+   * 不等的话，紧接着的「再开一次」会撞上「设备被占用」——
+   * 「切出去再切回来，摄像头起不来了」就是这么来的。
+   *
+   * @returns {Promise<object>}
    */
-  stopCamera() {
-    this.camera.stop()
+  async stopCamera() {
+    await this.camera.stopAndWait()
     return { ok: true }
   }
 

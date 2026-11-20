@@ -145,13 +145,38 @@
     // state，父组件拿不到；所以在这里登记一份**只读标记**，供「离开面试间」
     // 的确认弹窗与兜底清理使用。它不持有任何业务状态——真正的 state 还在
     // 各自的 hook 里，这里只是"当前有没有设备被占用"。
-    const mediaRegistry = { stream: undefined, hostActive: false, hostStop: undefined }
+    //
+    // **登记的是「所有」流，不只是当前那一条。**
+    //
+    // 为什么：申请设备的过程里可能拿到过**好几条**流。权限从「未决」变成
+    // 「已放行」时，`navigator.permissions` 会推一个事件，插件据此自动重连
+    // （见 `watch()`）——而那次重连可能和正在进行的申请撞在一起，两条链各自
+    // 拿了一条流。最后只有**最后一条**被留在 `streamRef` 里，其余几条没人
+    // 负责关：摄像头指示灯于是一直亮着，而界面上画面早就没了。
+    //
+    // 所以这里记的是一个**集合**，释放时逐条关。
+    const mediaRegistry = { streams: new Set(), hostActive: false, hostStop: undefined }
 
-    /** 现在有没有设备被占用。 */
+    /**
+     * 现在有没有设备被占用。
+     *
+     * **按「轨是不是还活着」判断，不按集合非空。**
+     * 已经关掉的流还留在集合里（关掉不等于从集合里消失），
+     * 按非空判断会让「离开面试间」的确认弹窗一直弹——设备明明已经放手了。
+     */
     function mediaInUse() {
+      let live = false
+      for (const stream of mediaRegistry.streams) {
+        try {
+          if (stream.getTracks().some(track => track.readyState === 'live')) {
+            live = true
+            break
+          }
+        } catch { /* 流已经没了 */ }
+      }
       return {
-        any: mediaRegistry.stream !== undefined || mediaRegistry.hostActive,
-        stream: mediaRegistry.stream !== undefined,
+        any: live || mediaRegistry.hostActive,
+        stream: live,
         hostCamera: mediaRegistry.hostActive,
       }
     }
@@ -162,11 +187,13 @@
      * **这是兜底，不是主路径。** 正常离开会先弹确认框；只有用户确认
      * （或面板被宿主卸载）时才走到这里。设备没释放是最糟的结局——
      * 摄像头指示灯一直亮着，用户会以为插件在偷看。
+     *
+     * **要关的是集合里的每一条流**，不是「当前那一条」。
      */
     async function releaseAllMedia() {
-      const stream = mediaRegistry.stream
-      mediaRegistry.stream = undefined
-      if (stream !== undefined) {
+      const streams = [...mediaRegistry.streams]
+      mediaRegistry.streams.clear()
+      for (const stream of streams) {
         try {
           for (const track of stream.getTracks()) track.stop()
         } catch { /* 已经停了 */ }
@@ -189,12 +216,38 @@
       const rafRef = useRef(0)
       const streamRef = useRef(undefined)
       const watchersRef = useRef([])
+      /**
+       * **正在进行的申请。**
+       *
+       * 同一时刻只允许一条申请链在跑：权限放行触发的自动重连会调 `start()`，
+       * 而它常常和用户那一下点击的 `start()` 重叠。两条链各自
+       * `getUserMedia` 一次，就会拿到两条流——只有最后一条被留住，
+       * 另一条成了没人管的孤儿，摄像头指示灯就一直亮着。
+       *
+       * 让后来的那一次**复用**正在跑的那一条，两条链就合并成一条。
+       */
+      const pendingRef = useRef(undefined)
 
-      // 把当前流登记到全局 registry（面试间保护用）。
-      useEffect(() => {
-        mediaRegistry.stream = stream
-        return () => { if (mediaRegistry.stream === stream) mediaRegistry.stream = undefined }
-      }, [stream])
+      /** 把一条流登记到全局 registry（面试间保护用）。 */
+      const own = useCallback(acquired => {
+        if (acquired === undefined) return
+        mediaRegistry.streams.add(acquired)
+      }, [])
+
+      /**
+       * 关掉**所有**登记过的流，并清空登记。
+       *
+       * 「所有」是这一版修的关键：只关 `streamRef` 那一条，
+       * 申请过程中漏下的那几条会一直占着设备。
+       */
+      const releaseOwned = useCallback(() => {
+        for (const acquired of mediaRegistry.streams) {
+          try {
+            for (const track of acquired.getTracks()) track.stop()
+          } catch { /* 已经停了 */ }
+        }
+        mediaRegistry.streams.clear()
+      }, [])
 
       /** Read the current permission state for camera and microphone. */
       const probe = useCallback(async () => {
@@ -240,16 +293,20 @@
         watchersRef.current = disposers
       }, [])
 
+      /**
+       * 关掉摄像头与麦克风。
+       *
+       * **关的是登记过的每一条流**，不只是当前挂在 `streamRef` 上的那一条：
+       * 申请过程中可能拿到过好几条（权限放行触发的自动重连会多拿一条），
+       * 只关最后一条，漏掉的那几条会一直占着设备——指示灯不灭就是这么来的。
+       */
       const stop = useCallback(() => {
         cancelFrame(rafRef.current)
-        const current = streamRef.current
-        if (current !== undefined) {
-          for (const track of current.getTracks()) track.stop()
-        }
+        releaseOwned()
         streamRef.current = undefined
         setStream(undefined)
         setLevel(0)
-      }, [])
+      }, [releaseOwned])
 
       /**
        * 申请一块媒体。
@@ -294,7 +351,12 @@
             }
       ), [])
 
-      const start = useCallback(async () => {
+      /**
+       * 真正去申请设备的那一段。
+       *
+       * **不要直接调它**——对外只有 `start()`，由它保证同一时刻只跑一条链。
+       */
+      const acquire = useCallback(async () => {
         if (navigator.mediaDevices?.getUserMedia === undefined) {
           setError({
             kind: 'unsupported',
@@ -319,6 +381,9 @@
           if (existing !== undefined) {
             const onlyVideo = await request({ video: videoConstraints })
             if (onlyVideo.ok) {
+              // **这条流也要登记。** addTrack 失败时（有些 WebView 不让加），
+              // 它自己那条视频轨就没人管了——设备会被它一直占着。
+              own(onlyVideo.media)
               // **用 addTrack 往现有流里加，不要重新构造一条流。**
               // 构造器在有些 WebView 里认不得外来的轨，而 addTrack
               // 是给「已经开着的那条流」加轨，天然不丢麦克风。
@@ -362,8 +427,17 @@
           }
 
           const tracks = []
-          if (audio !== undefined) tracks.push(...audio.getAudioTracks())
-          if (video !== undefined) tracks.push(...video.getVideoTracks())
+          if (audio !== undefined) {
+            // **中间那几条也要登记。** 合并流里用的是同一批轨对象，
+            // 但一旦合并失败（构造器认不得外来的轨）而回落到其中一条，
+            // 另一条就只剩「登记」这一条活路——不登记，它会一直占着设备。
+            own(audio)
+            tracks.push(...audio.getAudioTracks())
+          }
+          if (video !== undefined) {
+            own(video)
+            tracks.push(...video.getVideoTracks())
+          }
           if (tracks.length === 0) {
             // 一块都没拿到：按失败原因分类，给出**能做的下一步**。
             const name = failure?.name
@@ -424,6 +498,7 @@
             return undefined
           }
           streamRef.current = media
+          own(media)
           setStream(media)
 
           // **部分成功也要说话。** 麦克风通了、摄像头没有，面试照样能跑，
@@ -474,7 +549,32 @@
           setBusy(false)
           watch()
         }
-      }, [cameraBlockedError, probe, request, watch])
+      }, [cameraBlockedError, own, probe, request, watch])
+
+      /**
+       * 申请摄像头与麦克风（对外唯一入口）。
+       *
+       * **同一时刻只跑一条申请链。**
+       *
+       * 权限从「未决」变成「已放行」时，`navigator.permissions` 会推一个事件，
+       * 插件据此自动重连（`watch()` 里那一句 `startRef.current?.()`）。
+       * 那次重连常常和用户那一下点击撞在一起——两条链各自 `getUserMedia`
+       * 一次，于是拿到两条流；最后只有一条被留住，另一条成了没人管的孤儿：
+       * **画面早就关了，摄像头的指示灯却一直亮着。**
+       *
+       * 让后来的那一次**复用**正在跑的那一条，两条链就合并成一条，
+       * 只申请一次、只留下一条流。
+       */
+      const start = useCallback(async () => {
+        if (pendingRef.current !== undefined) return pendingRef.current
+        const pending = acquire()
+        pendingRef.current = pending
+        try {
+          return await pending
+        } finally {
+          if (pendingRef.current === pending) pendingRef.current = undefined
+        }
+      }, [acquire])
 
       const startRef = useRef(undefined)
       startRef.current = start
@@ -484,13 +584,15 @@
         watch()
         return () => {
           cancelFrame(rafRef.current)
-          const current = streamRef.current
-          if (current !== undefined) for (const track of current.getTracks()) track.stop()
+          // **卸载要把登记过的每一条流都放掉**，不只是当前那一条：
+          // 申请过程中漏下的那几条会一直占着设备，指示灯不灭就是这么来的。
+          releaseOwned()
+          streamRef.current = undefined
           const audio = audioRef.current
           if (audio !== undefined) audio.context.close().catch(() => {})
           for (const dispose of watchersRef.current) dispose()
         }
-      }, [probe, watch])
+      }, [probe, releaseOwned, watch])
 
       return { stream, error, level, busy, permission, start, stop, probe }
     }
@@ -514,7 +616,7 @@
      * `getUserMedia` 拿不到画面时才启用。
      */
     function useHostCamera() {
-      const [state, setState] = useState({ active: false, busy: false, error: undefined, recording: false })
+      const [state, setState] = useState({ active: false, busy: false, error: undefined, recording: false, epoch: 0 })
 
       /**
        * Ask the Host to open the camera.
@@ -525,7 +627,18 @@
         setState(previous => ({ ...previous, busy: true, error: undefined }))
         try {
           await apiPost('camera/start', {})
-          setState({ active: true, busy: false, error: undefined, recording: false })
+          setState(previous => ({
+            ...previous,
+            active: true,
+            busy: false,
+            error: undefined,
+            recording: false,
+            // **每开一次就换一个号。**
+            // 预览那张 `<img>` 的地址是不变的（同一个路由），浏览器可能
+            // 沿用上一次的连接——那条连接早就断了，画面就停在退出前那一帧。
+            // 换个查询串 = 强制重新请求。
+            epoch: previous.epoch + 1,
+          }))
           return true
         } catch (error) {
           const text = error instanceof Error ? error.message : String(error)
@@ -622,6 +735,9 @@
 
       useEffect(() => () => {
         // 组件卸载时把摄像头还回去——不然它会一直被独占着。
+        // **登记也要清掉**：不然「离开面试间」的确认弹窗会一直以为设备还开着。
+        mediaRegistry.hostActive = false
+        mediaRegistry.hostStop = undefined
         apiPost('camera/stop', {}).catch(() => {})
       }, [])
 
