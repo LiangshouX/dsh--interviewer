@@ -12,7 +12,9 @@
 眼睛都睁着（大眼动漫眼），眼轮廓给的是包住整只眼睛的椭圆。
 """
 import math
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import cv2
@@ -20,9 +22,15 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 ART = Path(__file__).resolve().parent
-SRC = ART / "source.png"
-OUT = ART / "square.png"
-PREVIEW = ART / "cut-preview.png"
+# 包内运行时：`source/prep.py` 与 `source/source-original.png` 并排；
+# 作者工作区里则可能是 `source.png`。
+SRC = ART / "source-original.png" if (ART / "source-original.png").exists() else ART / "source.png"
+# 中间产物落在**工作目录**，不落在脚本旁边——脚本随包发布，在它旁边写文件
+# 会把仓库弄脏（`square.png` / `cut-preview.png` 变成未跟踪文件）。
+WORK = Path(os.environ.get("AVATAR_WORK_DIR", Path(tempfile.gettempdir()) / "dsh-avatar-work"))
+WORK.mkdir(parents=True, exist_ok=True)
+OUT = WORK / "square.png"
+PREVIEW = WORK / "cut-preview.png"
 
 # 裁剪（原图坐标）：头肩构图，含两只猫耳，把木牌裁在框外
 CROP = (150, 0, 900, 735)          # 750×735

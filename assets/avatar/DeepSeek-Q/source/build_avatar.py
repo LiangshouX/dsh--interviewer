@@ -16,8 +16,12 @@ import base64
 import json
 import math
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 import cv2
@@ -25,13 +29,49 @@ import numpy as np
 from PIL import Image
 
 ART = Path(__file__).resolve().parent
-SRC = ART / "square.png"
+# 中间产物落在**工作目录**（prep.py 写、这里读），不落在脚本旁边——
+# 脚本随包发布，在它旁边写文件会把仓库弄脏。
+WORK = Path(os.environ.get("AVATAR_WORK_DIR", Path(tempfile.gettempdir()) / "dsh-avatar-work"))
+WORK.mkdir(parents=True, exist_ok=True)
+SRC = WORK / "square.png"
 
 RUIC = Path(os.environ.get("RUIC_DIR", r"D:\Code\tmp-ruic\x\RuiC-2D-main"))
 PYTHON = os.environ.get("RUIC_PYTHON", sys.executable)
-PROJECT = os.environ.get("AVATAR_PROJECT", "deepseek-q")
 AVATAR_ID = os.environ.get("AVATAR_ID", "DeepSeek-Q")
 AVATAR_NAME = os.environ.get("AVATAR_NAME", "DeepSeek-Q")
+
+
+def _base36(number: int) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    out = ""
+    while number:
+        number, rest = divmod(number, 36)
+        out = digits[rest] + out
+    return out or "0"
+
+
+def new_project_id(avatar_id: str) -> str:
+    """工程目录名：形象 id + 时间戳。
+
+    **为什么要带时间戳。** RuiC-2D 的 `create` 是 `p.mkdir()`（不带 exist_ok），
+    同名工程目录还在就直接 FileExistsError 崩掉——于是「先删旧的」成了每次生成
+    的固定动作。带时间戳就不撞名，跑完再把同前缀的旧工程清掉（`prune_siblings`）：
+    既不用手动删，也不会越积越多。
+    """
+    slug = re.sub(r"[^A-Za-z0-9_-]", "-", avatar_id) or "avatar"
+    return f"avatar-{slug}-{_base36(int(time.time()))}"
+
+
+def prune_siblings(project_dir: Path) -> None:
+    """把同前缀的旧工程清掉，只留当前这一个。
+
+    **只清同前缀的。** 上游的样例工程 `da-fei-yu-1` 不在 `avatar-` 前缀里，
+    流水线 `create` 硬依赖它（缺了会直接崩），绝不能碰。
+    """
+    prefix = project_dir.name.rsplit("-", 1)[0] + "-"
+    for path in project_dir.parent.glob(f"{prefix}*"):
+        if path.is_dir() and path.name != project_dir.name:
+            shutil.rmtree(path, ignore_errors=True)
 
 # 裁剪与补白（与 prep.py 保持一致；坐标从这里换算到方形图空间）
 CROP = (150, 0, 900, 735)
@@ -86,11 +126,16 @@ def main():
         "anchors": anchors,
         "eyeContours": contours,
     }
-    done = run_pipeline(["create", PROJECT], json.dumps(payload))
+    # 工程目录：默认带时间戳（不撞名），显式指定时同名目录直接顶掉——
+    # **两种情况都不需要人先删旧的**。
+    project = os.environ.get("AVATAR_PROJECT") or new_project_id(AVATAR_ID)
+    proj = RUIC / "projects" / project
+    if proj.exists():
+        shutil.rmtree(proj, ignore_errors=True)
+    done = run_pipeline(["create", project], json.dumps(payload))
     if done.returncode != 0:
         raise SystemExit(done.stdout[-1000:] + done.stderr[-2000:])
 
-    proj = RUIC / "projects" / PROJECT
     workspace = json.loads((proj / "workspace.json").read_text(encoding="utf-8"))
     workspace["regions"] = []                      # 不切头部切片（插件不用，切了有缝）
     (proj / "workspace.json").write_text(json.dumps(workspace, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -113,7 +158,7 @@ def main():
     rig["view"]["padSide"] = 0.04
     (proj / "rig.json").write_text(json.dumps(rig, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    done = run_pipeline(["build", PROJECT])
+    done = run_pipeline(["build", project])
     if done.returncode != 0:
         raise SystemExit(done.stdout[-1000:] + done.stderr[-2000:])
 
@@ -172,9 +217,13 @@ def main():
     })
     (proj / "avatar.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # 旧的同前缀工程清掉，只留这一份（上游样例 `da-fei-yu-1` 不受影响）。
+    prune_siblings(proj)
+
     print("anchors =", anchors, "size =", square.size)
     print("project =", proj)
     print("built =", sorted(p.name for p in (proj / "built").iterdir()))
+    print("下一步：把 avatar.json / rig.json / built/ 拷进 assets/avatar/<id>/")
 
 
 if __name__ == "__main__":

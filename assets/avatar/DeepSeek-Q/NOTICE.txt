@@ -60,3 +60,13 @@ DeepSeek-Q（id `DeepSeek-Q`）
   （需要本地有 RuiC-2D 与 Python；产物进 assets/avatar/<id>/，
     设置页下拉自动多一项。本目录的两个脚本是这张图专用的版本，
     换图要重新量锚点。）
+
+  **跑本目录的脚本不用先删任何东西。** 工程目录名带时间戳
+  （projects/avatar-<id>-<时间戳>），跑完自动清掉同前缀的旧工程；
+  上游样例 `da-fei-yu-1` 不受影响（流水线硬依赖它，缺了会直接崩）。
+  中间产物落在工作目录（%TEMP%\dsh-avatar-work，或 AVATAR_WORK_DIR），
+  不落在脚本旁边——脚本随包发布，在它旁边写文件会把仓库弄脏。
+
+  两步走：
+    python source/prep.py         # 抠图 + 裁剪 + 闭嘴 → 工作目录的 square.png
+    python source/build_avatar.py # 绑定 + 补眼窝 + 写清单 → RuiC 工程目录
