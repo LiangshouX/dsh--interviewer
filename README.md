@@ -1,10 +1,24 @@
-# 模拟面试间 · dsh-realtime-interview
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/assets/brand/icon-512.png" width="120" alt="模拟面试间 logo：取景框里一道正在发声的琥珀色声波">
+</p>
 
-**把一份简历和一份岗位 JD，变成一场有准备的模拟面试。**
+<h1 align="center">模拟面试间</h1>
 
-面向正在准备面试的求职者，也面向需要现场控制台的面试官。DeepSeek Harness 插件：MIT 协议，中文界面，简历、JD、转录、录像全部留在本机。
+<p align="center"><strong>把一份简历和一份岗位 JD，变成一场有准备的模拟面试。</strong></p>
 
-![面试间：舞台上是虚拟面试官，右下是提问字幕，右侧是速记与现场控制台](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/interview-room.jpg)
+<p align="center">DeepSeek Harness 插件 · 中文界面 · 简历 / JD / 转录 / 录像全部留在本机</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/dsh-realtime-interview"><img src="https://img.shields.io/npm/v/dsh-realtime-interview.svg" alt="npm 版本"></a>
+  <a href="https://www.npmjs.com/package/dsh-realtime-interview"><img src="https://img.shields.io/npm/dm/dsh-realtime-interview.svg" alt="npm 月下载量"></a>
+  <a href="https://github.com/LiangshouX/dsh-realtime-interview/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/dsh-realtime-interview.svg" alt="MIT 许可证"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20-5FA04E.svg" alt="Node.js ≥ 20"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DeepSeek%20Harness-%3E%3D0.1.7-4D6BFE.svg" alt="DeepSeek Harness ≥ 0.1.7"></a>
+  <a href="https://github.com/LiangshouX/dsh-realtime-interview"><img src="https://img.shields.io/github/stars/LiangshouX/dsh-realtime-interview?style=flat" alt="GitHub stars"></a>
+  <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="Awesome DSH Plugin"></a>
+</p>
+
+![面试间：舞台上是虚拟面试官，下缘是提问字幕，右侧是速记与现场控制台](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/interview-room.jpg)
 
 ```
 简历 + JD
@@ -78,7 +92,7 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 ## 环境要求
 
 - **Node ≥ 20**（`package.json` 的 `engines`）。
-- **DSH ≥ 0.2.2-rc.3**（`package.json` 的 `engines.dsh`）：需要支持 bundle 与客户端模块注入的版本。装不上时宿主会给出明确提示，也可用插件管理器的版本豁免放行。升级插件后 Host 半边要重启 DSH 才生效，只改浏览器半边刷新页面就够。
+- **DeepSeek Harness ≥ 0.1.7**（`package.json` 的 `engines.dsh`）：需要支持 bundle 与客户端模块注入的版本。本插件在 **0.2.2-rc.3** 上开发与实测；声明的下界取 0.1.7，是因为插件对宿主的新能力一律**降级而不是报错**（没有 `ctx.credentials` 就把 key 退回环境变量，没有 `ctx.speechToText` 就走浏览器识别），用不着把门关死。若你的 DSH 更老而插件仍要装，宿主会给出 `allow-version` 的具体命令，或用插件管理器的版本豁免放行。升级插件后 Host 半边要重启 DSH 才生效，只改浏览器半边刷新页面就够。
 - **摄像头（可选）**：DSH 桌面端的 Electron 权限处理只放行纯音频，浏览器拿不到摄像头。所以桌面端改走 Host 侧 ffmpeg 采集；机器上没有 ffmpeg 时，插件如实说「这台机器没有摄像头采集程序」，面试本身不受影响——麦克风、键盘、报告照常。
   - 装 ffmpeg：`winget install Gyan.FFmpeg`（或 `choco install ffmpeg` / `brew install ffmpeg`），或把 `ffmpeg.exe` 的绝对路径填进设置页。
   - DirectShow 采集失败的机器会自动回落到 Chromium 的 Media Foundation 通道；面板会显示现在走的是哪一条。
@@ -99,6 +113,8 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 | [docs/VOICE.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/VOICE.md) | 开发者 | 语音链路、预设表、凭据规则、失败语义 |
 | [docs/VOICE-ASR.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/VOICE-ASR.md) | 接入者 | ASR 模型 ID、端点、协议、坑 |
 | [docs/VOICE-TTS.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/VOICE-TTS.md) | 接入者 | TTS 模型 ID、音色表、端点、协议、坑 |
+| [docs/BRAND.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/BRAND.md) | 维护者 | 品牌素材：图标、徽标、宣传海报的提示词 |
+| [docs/MARKET.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/MARKET.md) | 维护者 | 发到 DSH 插件市场：给 awesome-dsh-plugin 提一个 PR |
 | [AGENTS.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/AGENTS.md) | 开发者 / Agent | 开发纪律 |
 | [ROADMAP.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/ROADMAP.md) | 人 | 未实现与待优化项 |
 | [CHANGELOG.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/CHANGELOG.md) | 人 | 版本记录 |

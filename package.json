@@ -7,7 +7,7 @@
   "license": "MIT",
   "engines": {
     "node": ">=20",
-    "dsh": ">=0.2.2-rc.3 <0.3.0-0"
+    "dsh": ">=0.1.7"
   },
   "repository": {
     "type": "git",

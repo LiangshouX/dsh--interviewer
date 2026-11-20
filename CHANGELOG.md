@@ -26,8 +26,9 @@ dsh plugin --profile web add dsh-realtime-interview
 ### 环境要求
 
 - Node ≥ 20
-- DeepSeek Harness ≥ 0.2.2-rc.3（`engines.dsh`；装不上时宿主会给出明确提示，
-  也可用插件管理器的版本豁免放行）
+- DeepSeek Harness ≥ 0.1.7（`engines.dsh`）。本插件在 DSH 0.2.2-rc.3 上开发与实测；
+  下界取 0.1.7 是因为插件对宿主的新能力一律降级而不是报错。装不上时宿主会给出
+  `allow-version` 的具体命令，或用插件管理器的版本豁免放行。
 - 摄像头是可选的：DSH 桌面端的 Electron 只放行纯音频请求，桌面端改走 Host 侧
   ffmpeg / Media Foundation 采集；机器上没有 ffmpeg 时插件如实说明，面试照常。
 
