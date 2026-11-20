@@ -27,9 +27,18 @@ import { fileURLToPath } from 'node:url'
 import { loadChromium, launchOptions, serve, ensureReact } from '../scripts/browser.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+/**
+ * 被测的包根。
+ *
+ * 默认测**仓库里这份**；设 `DSH_IV_ROOT` 可以改测别的——
+ * 比如 profile 里**已安装的那份**（发版前最后一道确认：测的就是用户拿到的东西）。
+ */
+const TARGET = (process.env.DSH_IV_ROOT ?? '').trim() === ''
+  ? ROOT
+  : resolve(process.env.DSH_IV_ROOT)
 
 await ensureReact(ROOT)
-const { server, port } = await serve(ROOT)
+const { server, port } = await serve(TARGET)
 const chromium = loadChromium(ROOT)
 const browser = await chromium.launch(launchOptions())
 
