@@ -11,7 +11,7 @@
 | 对外版图标（正方 squircle） | `assets/brand/mark.svg` | ✅ 定稿 |
 | 位图（市场卡片 180px / 渠道头像 512px） | `assets/brand/icon-180.png`、`icon-512.png` | ✅ 由 `node dev/make-brand-assets.mjs` 从 SVG 烘出 |
 | README 截图 ×3 | `docs/media/*.jpg` | ✅ 真截图 |
-| **宣传海报** | —— | ❌ **待画**，提示词见下 |
+| 宣传海报 | `docs/media/poster.jpg` | ✅ 定稿（1600×900，JPEG q92，121 KiB） |
 
 改了 `assets/brand/mark.svg` 就重跑一次烘图：
 
@@ -24,10 +24,13 @@ node dev/make-brand-assets.mjs
 
 ---
 
-## 宣传海报 · 提示词
+## 宣传海报 · 提示词（定稿稿的来路）
 
-交给能画图的 AI 即可。**要一张，不要一堆**——一张横幅海报，海报里不要出现
-任何真实人脸（虚拟面试官的实心插画也不要用，宁可用剪影/几何）。
+海报已经画好了（`docs/media/poster.jpg`）：暗房里的模拟面试——镜头前是**逆光剪影**
+的候选人，右上角是带琥珀声波的**几何化 AI 面试官**，右下角是叠着的**评估报告卡片**
+（柱状图 + 雷达图）。
+
+下面这段提示词是**重画用的存档**——要改风格就照着它再来一张，别从零描述：
 
 ```text
 一张 16:9 的深色科技风宣传横幅海报（2400×1350 px），主题是「AI 模拟面试」。
@@ -61,7 +64,7 @@ node dev/make-brand-assets.mjs
 
 出图之后：
 
-- 存成 `docs/media/poster.jpg`（宽度压到 1600，JPEG q90，约 150 KiB）；
+- 存成 `docs/media/poster.jpg`（宽度压到 1600，JPEG q92，约 120 KiB）；
 - 放在 README 徽标区**下面**、第一张截图**上面**：
 
   ```markdown

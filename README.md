@@ -18,6 +18,8 @@
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="Awesome DSH Plugin"></a>
 </p>
 
+![宣传海报：暗房里的模拟面试——镜头前的候选人、虚拟面试官、评估报告](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/poster.jpg)
+
 ![面试间：舞台上是虚拟面试官，下缘是提问字幕，右侧是速记与现场控制台](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/interview-room.jpg)
 
 ```
@@ -141,6 +143,9 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 
 - **`interview-prep`** — 面试前：读简历与目标岗位 JD，拆解 JD 要求，映射到候选人的真实经历，产出一份分级的考点清单并落盘。
 - **`interview-conduct`** — 面试中：按流程提问（自我介绍 → 项目介绍 → 清单深挖 → 收尾），边问边调整考点清单，最后写事后分析报告。
+
+这两个技能**只在面试工作区里露头**：别的会话（写代码、别的项目）不会看到它们，
+技能目录不会因此多出与当前任务无关的两条。
 
 工具与技能逐项签名见 [docs/API.md §3–§4](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/API.md)。每个工具都是 `src/host/service.js` 的一个方法，与界面按钮走同一条路。
 

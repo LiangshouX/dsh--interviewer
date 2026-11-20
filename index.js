@@ -45,7 +45,10 @@ export function apply(ctx, config) {
 
   // 随包技能：让 `interview-prep` 这类名字真的能被 agent 调到。
   // 必须在 apply 期间**同步**注册（宿主的要求）。
-  const skills = registerInterviewSkills(ctx)
+  //
+  // **只在面试工作区里露头**（`skills.js` 里按查询的 cwd 收窄）——
+  // 这两个技能对别的会话是噪声。
+  const skills = registerInterviewSkills(ctx, service)
   if (skills !== undefined) {
     ctx.effect(() => skills, 'dsh-realtime-interview: bundled skills')
   }
