@@ -117,6 +117,7 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 | [docs/VOICE-TTS.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/VOICE-TTS.md) | 接入者 | TTS 模型 ID、音色表、端点、协议、坑 |
 | [docs/BRAND.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/BRAND.md) | 维护者 | 品牌素材：图标、徽标、宣传海报的提示词 |
 | [docs/MARKET.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/MARKET.md) | 维护者 | 发到 DSH 插件市场：给 awesome-dsh-plugin 提一个 PR |
+| [docs/RELEASE.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/RELEASE.md) | 维护者 | 发版流程：手动发布的每一步、验证与回滚 |
 | [AGENTS.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/AGENTS.md) | 开发者 / Agent | 开发纪律 |
 | [ROADMAP.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/ROADMAP.md) | 人 | 未实现与待优化项 |
 | [CHANGELOG.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/CHANGELOG.md) | 人 | 版本记录 |
