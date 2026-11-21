@@ -18,31 +18,29 @@
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="Awesome DSH Plugin"></a>
 </p>
 
-![宣传海报：暗房里的模拟面试——镜头前的候选人、虚拟面试官、评估报告](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/poster.jpg)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/poster.jpg" alt="宣传海报：暗房里的模拟面试——镜头前的候选人、虚拟面试官、评估报告">
+</p>
 
-![面试间：舞台上是虚拟面试官，下缘是提问字幕，右侧是速记与现场控制台](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/interview-room.jpg)
+插件不写面试题，也不写报告——题目与判断由模型产出，插件负责结构、状态与留痕。
 
-```
-简历 + JD
-    │
-    ▼
-① 准备底稿 ───── 助手读 JD、拆岗位要求、映射你的经历，落一份分级考点清单
-    │
-    ▼
-② 逐轮面试 ───── 按清单提问，按你的回答追问；你说的每一句都进转录
-    │
-    ▼
-③ 实时摄像与语音  摄像头画面、麦克风转写、问题朗读、整场连续录制
-    │
-    ▼
-④ 事后报告 ───── 逐考点评估、亮点与风险点、清单调整回顾、改进建议
-```
+面试在 DSH 侧栏的「模拟面试间」面板里进行，提问与对话在 DSH 对话区。每一场面试是一个**卷宗目录**，全部数据集中在一个工作区根下（Windows 上优先挑非系统盘，没有别的盘才用用户目录；可在设置页换位置）。
 
-插件不写面试题，也不写报告——题目与判断由模型产出，插件负责结构、状态与留痕。面试在 DSH 侧栏的「模拟面试间」面板里进行，提问与对话在 DSH 对话区。每一场面试是一个**卷宗目录**，全部数据集中在一个工作区根下（Windows 上优先挑非系统盘，没有别的盘才用用户目录；可在设置页换位置）。
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/flow.jpg" width="860" alt="四步流程：简历 + JD → ① 准备底稿（助手读 JD、拆岗位要求、映射你的经历，落一份分级考点清单）→ ② 逐轮面试（按清单提问，按你的回答追问，你说的每一句都进转录）→ ③ 实时摄像与语音（摄像头画面、麦克风转写、问题朗读、整场连续录制）→ ④ 事后报告（逐考点评估、亮点与风险点、清单调整回顾、改进建议）">
+  <br>
+  <sub>简历 + JD → ① 准备底稿 → ② 逐轮面试 → ③ 实时摄像与语音 → ④ 事后报告</sub>
+</p>
 
 ---
 
 ## 安装
+
+### 从插件市场安装（推荐）
+
+本插件已收录至 DSH 插件市场。DSH Desktop 里点击「插件」→ 搜索 `dsh-realtime-interview` → 安装并启用即可。
+
+### 从 npm 安装
 
 npm 包名 `dsh-realtime-interview`（首次公开发布：**0.9.0**）。由 DSH 自己装进当前 profile：
 
@@ -50,10 +48,9 @@ npm 包名 `dsh-realtime-interview`（首次公开发布：**0.9.0**）。由 DS
 dsh plugin --profile web add dsh-realtime-interview
 ```
 
-或者直接跟助手说「装一下 dsh-realtime-interview」，它会调 `plugin_manager` 的 `install_bundle`。
-装完刷新页面，左侧栏出现「模拟面试间」。已发布版本：`npm view dsh-realtime-interview versions`。
+或者直接跟助手说「装一下 dsh-realtime-interview」，它会调 `plugin_manager` 的 `install_bundle`。装完刷新页面，左侧栏出现「模拟面试间」。已发布版本：`npm view dsh-realtime-interview versions`。
 
-从源码装（开发者）：
+### 从源码安装（开发者）
 
 ```bash
 node scripts/build.mjs     # 构建 + 全部闸门
@@ -68,15 +65,22 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 
 - **材料归档。** 简历收 txt / md / docx / pdf，也能粘贴；JD 收 txt / md，或给一个链接让插件直接抓。抓不到就如实说，并给出粘贴兜底。
 - **面试官底稿。** 一份分级考点清单（core / deep / bonus），每条写明「为什么问它」。面试中可以随时增删改，每次调整都记理由。
+
+![准备阶段：上传简历、助手一键拉取岗位 JD、根据简历与 JD 产出面试官底稿](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/prepare.jpg)
+
 - **逐轮面试。** 点「开始面试」，助手自动开场；你答完，它被唤醒出下一题。回答节奏可以手动（自己点发送），也可以自动（说完静音约 2 秒自动提交，带 2 秒反悔窗口）。两种模式都会唤醒面试官。
 - **画面与声音。** 摄像头画面、麦克风转写、问题自动朗读、整场连续录制。录制每 5 秒落一块到本场卷宗，崩了也保留已录的部分。
 - **虚拟面试官。** 舞台右上角一张会说话的脸：口型由 TTS 音频的包络驱动，听你说话时视线跟着指针。
 - **暂停与续接。** 暂停时释放设备、计时停走；续接从上一问接着问，转录与底稿沿用，中断的时间不算面试时长。
+
+![面试间：舞台上是虚拟面试官，下缘是提问字幕，右侧是速记与现场控制台](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/interview-room.jpg)
+
 - **事后报告。** 结束后由助手基于转录原话写：逐考点评估、亮点与风险点、清单调整回顾、改进建议。面试不足 3 分钟时按钮会说明「太短」，但仍然可以生成。
 
 ![事后报告：逐考点评估的阅读版式](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/report.jpg)
+
 - **可复用。** 简历库存一次、多场复用；岗位档案让同一个岗位的第二次面试继承上次的考点基线。
-- **收拾干净。** 归档（收起来）、删除、批量清理、重置这一轮（彻底删或留副本）、续接——四种动作语义分明，互不顶替。
+- **收拾干净。** 归档（收起来）、删除、批量清理、重置这一轮（彻底删或留副本）、续接——五种动作语义分明，互不顶替。
 - **隐私开关。** 录像与录音可在设置页关掉；关掉后不会自动开录。
 
 ---
@@ -119,7 +123,7 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 | [docs/MARKET.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/MARKET.md) | 维护者 | 发到 DSH 插件市场：给 awesome-dsh-plugin 提一个 PR |
 | [docs/RELEASE.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/RELEASE.md) | 维护者 | 发版流程：手动发布的每一步、验证与回滚 |
 | [AGENTS.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/AGENTS.md) | 开发者 / Agent | 开发纪律 |
-| [ROADMAP.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/ROADMAP.md) | 人 | 未实现与待优化项 |
+| [ROADMAP.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/ROADMAP.md) | 人 | 未来计划与待优化项 |
 | [CHANGELOG.md](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/CHANGELOG.md) | 人 | 版本记录 |
 
 分工作法：**VOICE.md 管插件侧**（预设、凭据、回落、失败语义），**VOICE-ASR.md / VOICE-TTS.md 管厂商侧**（全部可用模型、音色、协议细节、官方文档链接）。接入不用再去翻官方文档。
@@ -145,8 +149,7 @@ node scripts/pack.mjs      # → release/dsh-realtime-interview-<version>.tgz
 - **`interview-prep`** — 面试前：读简历与目标岗位 JD，拆解 JD 要求，映射到候选人的真实经历，产出一份分级的考点清单并落盘。
 - **`interview-conduct`** — 面试中：按流程提问（自我介绍 → 项目介绍 → 清单深挖 → 收尾），边问边调整考点清单，最后写事后分析报告。
 
-这两个技能**只在面试工作区里露头**：别的会话（写代码、别的项目）不会看到它们，
-技能目录不会因此多出与当前任务无关的两条。
+这两个技能**只在面试工作区里露头**：别的会话（写代码、别的项目）不会看到它们，技能目录不会因此多出与当前任务无关的两条。
 
 工具与技能逐项签名见 [docs/API.md §3–§4](https://github.com/LiangshouX/dsh-realtime-interview/blob/main/docs/API.md)。每个工具都是 `src/host/service.js` 的一个方法，与界面按钮走同一条路。
 
