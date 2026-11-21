@@ -1,6 +1,5 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/poster.jpg" alt="宣传海报：暗房里的模拟面试——镜头前的候选人、虚拟面试官、评估报告">
-</p>
+![暗房里的模拟面试——镜头前的候选人、虚拟面试官、评估报告](https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/poster.jpg)
+
 
 
 <h1 align="center">
