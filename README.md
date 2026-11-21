@@ -1,8 +1,13 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/assets/brand/icon-512.png" width="120" alt="模拟面试间 logo：取景框里一道正在发声的琥珀色声波">
+  <img src="https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/poster.jpg" alt="宣传海报：暗房里的模拟面试——镜头前的候选人、虚拟面试官、评估报告">
 </p>
 
-<h1 align="center">模拟面试间</h1>
+
+<h1 align="center">
+  <img src="https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/assets/brand/icon-180.png" 
+       width="48" height="48" alt="logo" style="vertical-align: middle;"> 
+  模拟面试间
+</h1>
 
 <p align="center"><strong>把一份简历和一份岗位 JD，变成一场有准备的模拟面试。</strong></p>
 
@@ -18,9 +23,7 @@
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="Awesome DSH Plugin"></a>
 </p>
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/LiangshouX/dsh-realtime-interview/main/docs/media/poster.jpg" alt="宣传海报：暗房里的模拟面试——镜头前的候选人、虚拟面试官、评估报告">
-</p>
+
 
 插件不写面试题，也不写报告——题目与判断由模型产出，插件负责结构、状态与留痕。
 
